@@ -9,7 +9,9 @@ const {
   ALL_CARDS, isInstantLevelUpCard, TREASURE_POWER_OVERRIDES,
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
   DOOR_OTHER_AS_CURSE, resolveConsequenceSpec, POWER_GROUP_NAMES,
-  GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
+  GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS, CONSEQUENCE_OVERRIDES,
+  handleDrawDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
+  handleApplyConsequenceAction,
 } = require('../server.js');
 
 function makePlayer(overrides) {
@@ -111,8 +113,167 @@ function run() {
   assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer()), { type: 'noEffect' }, 'ohne Schuhwerk: kein Effekt');
 
   // -------------------------------------------------------------------
+  // Ende-zu-Ende: eine fehlkategorisierte Fluchkarte ziehen. Genau der
+  // Fehlerfall, den die reinen resolveConsequenceSpec-Checks oben NICHT
+  // sehen: greift der Namensabgleich in handleDrawDoor nicht, landet die
+  // Karte stillschweigend auf der Hand statt als Fluch aufzulaufen.
+  // -------------------------------------------------------------------
+  function drawRoomWith(cardId) {
+    const room = {
+      code: 'TEST', players: [makePlayer({ id: 'p1', name: 'A' }), makePlayer({ id: 'p2', name: 'B' }), makePlayer({ id: 'p3', name: 'C' })],
+      turnIndex: 0, turnPhase: 'tuer', combatHappenedThisTurn: false,
+      doorDeck: [cardId], doorDiscard: [], treasureDeck: [], treasureDiscard: [],
+      revealedDoorCard: null, combat: null, pendingConsequence: null, pendingCardAction: null,
+      winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+      settings: { sets: {} },
+    };
+    handleDrawDoor(room, 'p1');
+    if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+    return room;
+  }
+
+  [...DOOR_OTHER_AS_CURSE].forEach((name) => {
+    const c = findCard(name, 'door_other');
+    const room = drawRoomWith(c.id);
+    assert.ok(room.pendingConsequence, `"${name}" muss beim Ziehen als Fluch auflaufen`);
+    assert.strictEqual(room.pendingConsequence.kind, 'curse', `"${name}" muss als Fluch (nicht als Kampfverlust) auflaufen`);
+    assert.ok(!room.players[0].hand.includes(c.id), `"${name}" darf nicht stillschweigend auf der Hand landen`);
+    assert.ok(room.doorDiscard.includes(c.id), `"${name}" muss auf dem Türablagestapel landen`);
+    assert.strictEqual(room.revealedDoorCard, null, `"${name}" darf nicht als offene Türkarte hängen bleiben`);
+  });
+
+  // Eine normale Türkarte muss weiterhin auf der Hand landen (Gegenprobe,
+  // damit der Check oben nicht trivial durch "alles ist ein Fluch" besteht).
+  const plainDoor = ALL_CARDS.find((c) => c.category === 'door_other' && !DOOR_OTHER_AS_CURSE.has(c.name));
+  const plainRoom = drawRoomWith(plainDoor.id);
+  assert.strictEqual(plainRoom.pendingConsequence, null, `"${plainDoor.name}" ist kein Fluch und darf keine Konsequenz auslösen`);
+  assert.ok(plainRoom.players[0].hand.includes(plainDoor.id), `"${plainDoor.name}" muss auf der Hand landen`);
+
+  // -------------------------------------------------------------------
+  // Kein Override-Eintrag darf ins Leere zeigen: ein Tippfehler im
+  // Kartennamen wäre sonst ein still wirkungsloser Eintrag.
+  // -------------------------------------------------------------------
+  const cardNames = new Set(ALL_CARDS.map((c) => c.name));
+  const nameSources = {
+    CONSEQUENCE_OVERRIDES: Object.keys(CONSEQUENCE_OVERRIDES),
+    TREASURE_POWER_OVERRIDES: Object.keys(TREASURE_POWER_OVERRIDES),
+    COMBAT_POTION_OVERRIDES: Object.keys(COMBAT_POTION_OVERRIDES),
+    ITEM_CONDITIONAL_BONUS: Object.keys(ITEM_CONDITIONAL_BONUS),
+    DOOR_OTHER_AS_CURSE: [...DOOR_OTHER_AS_CURSE],
+    POWER_GROUP_NAMES: [...POWER_GROUP_NAMES],
+    GUARANTEED_FLEE_CARDS: [...GUARANTEED_FLEE_CARDS],
+  };
+  Object.entries(nameSources).forEach(([label, keys]) => {
+    keys.forEach((k) => assert.ok(cardNames.has(k), `${label}: "${k}" passt zu keiner Karte in cards.json`));
+  });
+
+  // -------------------------------------------------------------------
+  // Kampf-Gleichstand: ohne ALUFOLIE gewinnt das Monster, mit ALUFOLIE
+  // die Spielerseite (und die Karte wird verbraucht).
+  // -------------------------------------------------------------------
+  const alufolie = findCard('ALUFOLIE', 'treasure_other');
+  const monster = ALL_CARDS.find((c) => c.category === 'monster' && c.level === 4);
+  // Gefüllter Schatzstapel: sonst mischt drawTreasure den Ablagestapel neu und
+  // die gerade verbrauchte ALUFOLIE käme als Kampfschatz direkt zurück.
+  const filler = ALL_CARDS.filter((c) => c.type === 'treasure' && c.name !== 'ALUFOLIE').slice(0, 10).map((c) => c.id);
+  function combatRoomTie(hand) {
+    const actor = makePlayer({ id: 'p1', name: 'A', level: monster.level, hand: hand.slice() });
+    return {
+      code: 'TEST', players: [actor, makePlayer({ id: 'p2', name: 'B' })],
+      turnIndex: 0, turnPhase: 'tuer', combatHappenedThisTurn: true,
+      doorDeck: [], doorDiscard: [], treasureDeck: filler.slice(), treasureDiscard: [],
+      revealedDoorCard: null, pendingConsequence: null, pendingCardAction: null,
+      winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+      settings: { sets: {} },
+      combat: { actorId: 'p1', helperId: null, monsterIds: [monster.id], actorModifier: 0, monsterModifier: 0, mustFlee: false },
+    };
+  }
+
+  const tieNoCard = combatRoomTie([]);
+  handleEvaluateCombat(tieNoCard, 'p1');
+  if (tieNoCard.cleanupTimer) clearTimeout(tieNoCard.cleanupTimer);
+  assert.ok(tieNoCard.combat && tieNoCard.combat.mustFlee, 'Gleichstand ohne ALUFOLIE: Monster gewinnt, Flucht nötig');
+
+  const tieWithCard = combatRoomTie([alufolie.id]);
+  handleEvaluateCombat(tieWithCard, 'p1');
+  if (tieWithCard.cleanupTimer) clearTimeout(tieWithCard.cleanupTimer);
+  assert.strictEqual(tieWithCard.combat, null, 'Gleichstand mit ALUFOLIE: Kampf ist gewonnen und beendet');
+  assert.strictEqual(tieWithCard.players[0].level, monster.level + 1, 'Sieg per ALUFOLIE bringt die Stufe fürs Monster');
+  assert.ok(!tieWithCard.players[0].hand.includes(alufolie.id), 'ALUFOLIE wird beim Einsatz verbraucht');
+  assert.ok(tieWithCard.treasureDiscard.includes(alufolie.id), 'verbrauchte ALUFOLIE landet auf dem Schatzablagestapel');
+
+  // Gegenprobe: ALUFOLIE darf einen echten Rückstand nicht in einen Sieg drehen.
+  const behind = combatRoomTie([alufolie.id]);
+  behind.players[0].level = monster.level - 1;
+  handleEvaluateCombat(behind, 'p1');
+  if (behind.cleanupTimer) clearTimeout(behind.cleanupTimer);
+  assert.ok(behind.combat && behind.combat.mustFlee, 'ALUFOLIE wirkt nur bei echtem Gleichstand');
+  assert.ok(behind.players[0].hand.includes(alufolie.id), 'bei Rückstand bleibt ALUFOLIE auf der Hand');
+
+  // -------------------------------------------------------------------
+  // Tod: jede abgelegte Karte muss auf dem Stapel ihres eigenen Typs landen.
+  // Angelegte Gegenstände sind Schatzkarten - landen sie auf dem Tür-Stapel,
+  // werden sie beim Neumischen zu Türkarten und beide Stapel sind dauerhaft
+  // verunreinigt.
+  // -------------------------------------------------------------------
+  const deathItem = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'armor');
+  const deathDoorCard = ALL_CARDS.find((c) => c.type === 'door');
+  const deathTreasureCard = ALL_CARDS.find((c) => c.type === 'treasure' && c.category !== 'item');
+  const deathRoom = {
+    code: 'TEST', players: [makePlayer({ id: 'p1', name: 'A', level: 7, hand: [deathDoorCard.id, deathTreasureCard.id], equipped: { head: null, armor: deathItem.id, feet: null, hands: [null, null] } })],
+    turnIndex: 0, turnPhase: 'tuer', combatHappenedThisTurn: false,
+    doorDeck: [], doorDiscard: [], treasureDeck: [], treasureDiscard: [],
+    revealedDoorCard: null, combat: null, pendingCardAction: null,
+    pendingConsequence: { playerId: 'p1', kind: 'curse', cardId: null, text: '', autoApplied: null, choice: null },
+    winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+    settings: { sets: {} },
+  };
+  handleApplyConsequenceAction(deathRoom, 'p1', { type: 'death' });
+  if (deathRoom.cleanupTimer) clearTimeout(deathRoom.cleanupTimer);
+  assert.ok(deathRoom.treasureDiscard.includes(deathItem.id), 'angelegte Rüstung ist eine Schatzkarte und gehört auf den Schatz-Ablagestapel');
+  assert.ok(!deathRoom.doorDiscard.includes(deathItem.id), 'angelegte Rüstung darf nicht auf dem Tür-Ablagestapel landen');
+  assert.ok(deathRoom.doorDiscard.includes(deathDoorCard.id), 'Türkarte aus der Hand gehört auf den Tür-Ablagestapel');
+  assert.ok(deathRoom.treasureDiscard.includes(deathTreasureCard.id), 'Schatzkarte aus der Hand gehört auf den Schatz-Ablagestapel');
+  deathRoom.doorDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'door', 'auf dem Tür-Ablagestapel darf nur type=door liegen'));
+  deathRoom.treasureDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'treasure', 'auf dem Schatz-Ablagestapel darf nur type=treasure liegen'));
+  assert.strictEqual(deathRoom.players[0].level, 1, 'Tod setzt auf Stufe 1 zurück');
+  assert.strictEqual(deathRoom.players[0].hand.length, 0, 'Tod leert die Hand');
+
+  // -------------------------------------------------------------------
   // Machtgruppen
   // -------------------------------------------------------------------
+  // Höllenritterrüstung: +5, aber nur mit freiem Rüstungs- und Kopf-Slot.
+  const hellknightId = findCard('HÖLLENRITTER', 'door_other').id;
+  const someArmor = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'armor' && c.bonus);
+  assert.strictEqual(baseStrength(makePlayer({ level: 5 })), 5, 'ohne Machtgruppe kein Zusatzbonus');
+  assert.strictEqual(baseStrength(makePlayer({ level: 5, powerGroups: [hellknightId] })), 10, 'Höllenritter: +5 bei freien Slots');
+  assert.strictEqual(
+    baseStrength(makePlayer({ level: 5, powerGroups: [hellknightId], equipped: { head: null, armor: someArmor.id, feet: null, hands: [null, null] } })),
+    5 + someArmor.bonus,
+    'mit eigener Rüstung zählt nur diese, nicht zusätzlich die Höllenritterrüstung'
+  );
+
+  // Heimlichkeit: +1 auf Weglaufen. Der Würfelwurf ist zufällig, der
+  // protokollierte Modifikator nicht - der wird geprüft.
+  const assassinId = findCard('ASSASSINE DER ROTEN MANTIS', 'door_other').id;
+  function fleeMod(powerGroups) {
+    const actor = makePlayer({ id: 'p1', name: 'A', level: 1, powerGroups });
+    const room = {
+      code: 'TEST', players: [actor], turnIndex: 0, turnPhase: 'tuer', combatHappenedThisTurn: true,
+      doorDeck: [], doorDiscard: [], treasureDeck: [], treasureDiscard: [],
+      revealedDoorCard: null, pendingConsequence: null, pendingCardAction: null,
+      winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+      settings: { sets: {} },
+      combat: { actorId: 'p1', helperId: null, monsterIds: [monster.id], actorModifier: 0, monsterModifier: 0, mustFlee: true },
+    };
+    handleAttemptFlee(room, 'p1', 0);
+    if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+    const entry = room.logs.find((l) => l.text.includes('zum Weglaufen'));
+    return entry.text.match(/\(([+-]\d+) =/)[1];
+  }
+  assert.strictEqual(fleeMod([]), '+0', 'ohne Machtgruppe kein Weglaufen-Bonus');
+  assert.strictEqual(fleeMod([assassinId]), '+1', 'Assassine der Roten Mantis: +1 auf Weglaufen');
+
   assert.strictEqual(POWER_GROUP_NAMES.size, 8);
   ['KUNDSCHAFTER', 'NEKROMANT', 'HEXE', 'HÖLLENRITTER', 'ADLERRITTER', 'PAKTMAGIER', 'ALCHEMIST', 'ASSASSINE DER ROTEN MANTIS'].forEach((n) => {
     assert.ok(POWER_GROUP_NAMES.has(n), `${n} muss als Machtgruppe erkannt werden`);
