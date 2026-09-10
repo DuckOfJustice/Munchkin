@@ -408,10 +408,11 @@ function handleDrawDoor(room, playerId) {
     room.revealedDoorCard = null;
     startCombat(room, player.id, [id], { fromHand: false });
   } else if (c.category === 'curse') {
-    room.pendingConsequence = { playerId: player.id, kind: 'curse', cardId: id, text: c.text || c.name };
+    room.pendingConsequence = { playerId: player.id, kind: 'curse', cardId: id, text: c.text || c.name, autoApplied: null, choice: null };
     room.doorDiscard.push(id);
     room.revealedDoorCard = null;
     log(room, `Fluch! ${player.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
+    autoApplyLossConsequence(room, player, [{ name: c.name, text: c.text }]);
   } else {
     player.hand.push(id);
     room.revealedDoorCard = null;
@@ -458,12 +459,7 @@ function handleApplyConsequenceAction(room, playerId, action) {
     const c = card(cardId);
     log(room, `${player.name} legt "${c ? c.name : cardId}" ab.`, [cardId]);
   } else if (action.type === 'death') {
-    room.doorDiscard.push(...player.hand.filter((id) => card(id).type === 'door'));
-    room.treasureDiscard.push(...player.hand.filter((id) => card(id).type === 'treasure'));
-    room.doorDiscard.push(...equippedItemIds(player));
-    player.hand = [];
-    player.equipped = { head: null, armor: null, feet: null, hands: [null, null] };
-    setLevel(player, 1);
+    applyDeathConsequence(room, player);
     log(room, `💀 ${player.name} ist gestorben und beginnt bei Stufe 1 mit leeren Händen neu.`);
   }
   touchRoom(room);
@@ -474,6 +470,412 @@ function discardCard(room, cardId) {
   if (!c) return;
   if (c.type === 'door') room.doorDiscard.push(cardId);
   else room.treasureDiscard.push(cardId);
+}
+
+function applyDeathConsequence(room, player) {
+  room.doorDiscard.push(...player.hand.filter((id) => card(id).type === 'door'));
+  room.treasureDiscard.push(...player.hand.filter((id) => card(id).type === 'treasure'));
+  room.doorDiscard.push(...equippedItemIds(player));
+  player.hand = [];
+  player.equipped = { head: null, armor: null, feet: null, hands: [null, null] };
+  setLevel(player, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Automatische Berechnung von "Schlimme Dinge"/Fluch-Konsequenzen
+// ---------------------------------------------------------------------------
+// Wie bei den Monster-Verstärkerkarten oben gilt grundsätzlich das "Trust"-
+// Prinzip (siehe Kommentar am Dateianfang): der Server zeigt den Original-
+// text, Spieler:innen wenden ihn selbst an. Für "Schlimme Dinge" (verlorener
+// Kampf) und Flüche gehen wir hier aber bewusst einen Schritt weiter, da
+// diese Texte sich - anders als die hunderten sehr individuellen Sonder-
+// kräfte - überwiegend auf eine begrenzte Menge klar erkennbarer Muster
+// reduzieren lassen (Stufenverlust, Tod, fester Ausrüstungsverlust, würfel-
+// basierte Effekte, Rassen-/Klassen-Bedingungen, echte Entweder-Oder-Wahl).
+//
+// Zwei Ebenen der Erkennung:
+//  1) CONSEQUENCE_OVERRIDES: eine kuratierte, pro Kartenname geprüfte Tabelle
+//     für alle Karten mit individueller, aber trotzdem eindeutig berechen-
+//     barer Logik (Rassen-/Klassen-Bedingungen, Ausrüstungszustand, Werte-
+//     Vergleiche, Wahlmöglichkeiten). Jede Regel ist unten mit dem exakten
+//     Original-Kartentext kommentiert.
+//  2) parseAutoConsequence: ein generischer Regex-Fallback für die übrigen,
+//     immer wiederkehrenden einfachen Formulierungen ("Verliere N Stufen.").
+//
+// Bewusst AUSSERHALB des Umfangs (bleibt manuell, siehe Aufgabenstellung):
+// alles, was ANDERE Spieler am Tisch betrifft (z. B. "jeder andere Spieler
+// muss ..."), sowie die Handvoll Karten, die von Daten abhängen, die dieser
+// Server nicht erfasst (Geschlecht, "Großer Gegenstand"-Flag, exakter
+// Goldwert-Kombinationen) oder eine echte freie Auswahl unter mehreren
+// eigenen Karten verlangen ("2 Gegenstände deiner Wahl" - dafür gibt es
+// weiterhin das Ablege-Dropdown unten, das keine Rechnerei erfordert).
+// Verifiziert gegen den kompletten Kartensatz, siehe tests/auto-consequence.test.js.
+
+// Adjektiv-Formen, wie sie in Gegenstands-Texten für Rassen-/Klassen-Boni
+// vorkommen (z.B. "+2 Bonus für Elfen"), gemappt auf den jeweiligen Karten-
+// namen der Rassen-/Klassenkarte selbst ("ELF").
+const RACE_ADJECTIVE_DE = { ELF: 'Elfen', ZWERG: 'Zwerge', HALBLING: 'Halblinge' };
+const CLASS_ADJECTIVE_DE = { ZAUBERER: 'Zauberer', PRIESTER: 'Priester', DIEB: 'Diebe', KRIEGER: 'Krieger' };
+
+function hasRace(player, substr) {
+  return player.races.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
+}
+
+function slotLabelDe(slot) {
+  return { head: 'Kopfbedeckung', armor: 'Rüstung', feet: 'Schuhwerk' }[slot] || slot;
+}
+
+// Führt eine einzelne, bereits eindeutig aufgelöste Aktion aus und mutiert
+// dabei room/player. Gibt eine kurze, menschenlesbare Beschreibung für Log/UI
+// zurück.
+function applyPrimitiveAction(room, player, action) {
+  switch (action.type) {
+    case 'death':
+      applyDeathConsequence(room, player);
+      return 'Tod';
+    case 'levelDelta':
+      setLevel(player, player.level - action.amount);
+      return `-${action.amount} Stufe(n) (jetzt Stufe ${player.level})`;
+    case 'setLevel1':
+      setLevel(player, 1);
+      return 'auf Stufe 1 gesetzt';
+    case 'setLevelToTableMin': {
+      const minLevel = Math.min(...room.players.map((p) => p.level));
+      setLevel(player, minLevel);
+      return `auf Stufe ${player.level} gesetzt (niedrigste Stufe am Tisch)`;
+    }
+    case 'diceLevelLoss': {
+      const roll = rollDie();
+      setLevel(player, player.level - roll);
+      return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
+    }
+    case 'diceThresholdDeath': {
+      const roll = rollDie();
+      if (action.deathValues.includes(roll)) {
+        applyDeathConsequence(room, player);
+        return `Würfelwurf ${roll} -> Tod`;
+      }
+      setLevel(player, player.level - roll);
+      return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
+    }
+    case 'discardSlot': {
+      const id = player.equipped[action.slot];
+      if (!id) return `${slotLabelDe(action.slot)}: nichts getragen`;
+      player.equipped[action.slot] = null;
+      discardCard(room, id);
+      return `${slotLabelDe(action.slot)} "${card(id).name}" abgelegt`;
+    }
+    case 'discardAllEquipped': {
+      const ids = equippedItemIds(player);
+      if (!ids.length) return 'keine Ausrüstung getragen';
+      ids.forEach((id) => discardCard(room, id));
+      player.equipped = { head: null, armor: null, feet: null, hands: [null, null] };
+      return `Ausrüstung abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
+    }
+    case 'discardWholeHand': {
+      const ids = [...player.hand];
+      if (!ids.length) return 'Hand war leer';
+      player.hand = [];
+      ids.forEach((id) => discardCard(room, id));
+      return `ganze Hand abgelegt (${ids.length} Karte(n))`;
+    }
+    case 'discardWholeHandWithBonusDraw': {
+      const ids = [...player.hand];
+      player.hand = [];
+      ids.forEach((id) => discardCard(room, id));
+      let extra = '';
+      if (ids.length > 1) {
+        const t = drawTreasure(room);
+        if (t) { player.hand.push(t); extra = `, +1 Schatz gezogen ("${card(t).name}")`; }
+      }
+      return `ganze Hand abgelegt (${ids.length} Karte(n))${extra}`;
+    }
+    case 'discardRaceCards': {
+      const ids = [...player.races];
+      if (!ids.length) return 'keine Rassenkarte(n)';
+      player.races = [];
+      ids.forEach((id) => discardCard(room, id));
+      return `Rassenkarte(n) abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
+    }
+    case 'discardClassCards': {
+      const ids = [...player.classes];
+      if (!ids.length) return 'keine Klassenkarte(n)';
+      player.classes = [];
+      ids.forEach((id) => discardCard(room, id));
+      return `Klassenkarte(n) abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
+    }
+    case 'discardOneRaceCardIfAny': {
+      if (!player.races.length) return 'war bereits ohne (nicht-menschliche) Rasse';
+      const id = player.races.shift();
+      discardCard(room, id);
+      return `Rassenkarte "${card(id).name}" abgelegt`;
+    }
+    case 'discardClassCardMatchingElseDeath': {
+      const idx = player.classes.findIndex((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(action.substr.toUpperCase()); });
+      if (idx >= 0) {
+        const id = player.classes.splice(idx, 1)[0];
+        discardCard(room, id);
+        return `Klassenkarte "${card(id).name}" abgelegt (statt Tod)`;
+      }
+      applyDeathConsequence(room, player);
+      return 'Tod (keine passende Klasse)';
+    }
+    case 'discardMaxBonusItem': {
+      const ids = equippedItemIds(player);
+      let best = null;
+      ids.forEach((id) => { const c = card(id); if (c && c.bonus && (!best || c.bonus > card(best).bonus)) best = id; });
+      if (!best) return 'kein Gegenstand mit Bonus getragen';
+      unequipSlotCard(player, best);
+      discardCard(room, best);
+      return `Gegenstand mit größtem Bonus abgelegt ("${card(best).name}")`;
+    }
+    case 'discardMaxGoldItem': {
+      const ids = equippedItemIds(player);
+      let best = null;
+      ids.forEach((id) => { const c = card(id); const g = (c && c.gold) || 0; if (!best || g > ((card(best) && card(best).gold) || 0)) best = id; });
+      if (!best) return 'keinen Gegenstand getragen';
+      unequipSlotCard(player, best);
+      discardCard(room, best);
+      return `Gegenstand mit höchstem Goldwert abgelegt ("${card(best).name}")`;
+    }
+    case 'discardTraitBonusItems': {
+      const traitIds = action.which === 'race' ? player.races : player.classes;
+      const adjMap = action.which === 'race' ? RACE_ADJECTIVE_DE : CLASS_ADJECTIVE_DE;
+      const adjectives = traitIds.map((id) => { const c = card(id); return c && adjMap[(c.name || '').toUpperCase()]; }).filter(Boolean);
+      if (!adjectives.length) return `keine aktuelle ${action.which === 'race' ? 'Rasse' : 'Klasse'} mit bekanntem Bonus-Muster`;
+      const ids = equippedItemIds(player).filter((id) => {
+        const c = card(id);
+        return c && adjectives.some((adj) => new RegExp(`für\\s+${adj}`, 'i').test(c.text || ''));
+      });
+      if (!ids.length) return 'keine passenden Bonus-Gegenstände getragen';
+      ids.forEach((id) => { unequipSlotCard(player, id); discardCard(room, id); });
+      return `Gegenstände abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
+    }
+    case 'discardItemsAboveBonus': {
+      const ids = equippedItemIds(player).filter((id) => { const c = card(id); return c && typeof c.bonus === 'number' && c.bonus > action.threshold; });
+      if (!ids.length) return `keine Gegenstände über +${action.threshold} Bonus`;
+      ids.forEach((id) => { unequipSlotCard(player, id); discardCard(room, id); });
+      return `Gegenstände über +${action.threshold} Bonus abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
+    }
+    case 'discardItemsByTextMatch': {
+      const re = action.pattern;
+      const ids = equippedItemIds(player).filter((id) => { const c = card(id); return c && (re.test(c.name || '') || re.test(c.text || '')); });
+      if (!ids.length) return 'keine passenden Gegenstände getragen';
+      ids.forEach((id) => { unequipSlotCard(player, id); discardCard(room, id); });
+      return `Gegenstände abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
+    }
+    case 'discardHandCardsMatching': {
+      const ids = player.hand.filter((id) => action.predicate(card(id)));
+      if (!ids.length) return 'keine passenden Karten auf der Hand';
+      ids.forEach((id) => removeFromHand(player, id));
+      ids.forEach((id) => discardCard(room, id));
+      return `Karte(n) abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
+    }
+    case 'combo':
+      return action.actions.map((a) => applyPrimitiveAction(room, player, a)).join('; ');
+    case 'noEffect':
+      return 'kein spielmechanischer Effekt';
+    default:
+      return '';
+  }
+}
+
+// Kuratierte Sonderfälle (siehe Erklärung oben). Schlüssel = exakter Karten-
+// name aus data/cards.json. Jede Funktion bekommt (player, room) und gibt
+// zurück: eine Aktion (siehe applyPrimitiveAction) zum automatischen
+// Anwenden, `null` um EXPLIZIT den generischen Fallback zu unterdrücken
+// (bleibt manuell), oder `undefined` um an den generischen Regex-Fallback
+// durchzureichen.
+const CONSEQUENCE_OVERRIDES = {
+  // --- Eindeutiger Tod in ungewöhnlicher Formulierung ---
+  'BULLROG': () => ({ type: 'death' }), // "Du wirst zu Tode gepeitscht."
+  'JUDGE FREDD': () => ({ type: 'death' }), // "Er prügelt dich zu Tode ..."
+  'KALI': () => ({ type: 'death' }), // "Stirb, stirb, stirb ..."
+  'TENTAKELDÄMON': () => ({ type: 'death' }), // "Wenn du gefangen wirst, stirbst du." (Kontext: Flucht ist bereits gescheitert)
+  'SIEBENJÄHRIGER LICH': () => ({ type: 'death' }), // "Wenn er dich erwischt, stirbst du ..."
+  // Enthält zwar "stirbst", bezieht sich aber auf einen ZUKÜNFTIGEN Tod
+  // (persistenter Fluch) - explizit NICHT automatisch:
+  'VERFLUCHTER GEGENSTAND': () => null,
+
+  // --- Reine Flavor-Texte ohne Spielmechanik ---
+  'GOLDFISCH': () => ({ type: 'noEffect' }), // "Du musst den Hohn der anderen Spieler ertragen."
+  'TOPFPFLANZE': () => ({ type: 'noEffect' }), // "Keine. Automatische Flucht."
+
+  // --- Fester Ausrüstungsverlust (kein Auswahl nötig) ---
+  'BIGFOOT': () => ({ type: 'discardSlot', slot: 'head' }),
+  'RIESENKAKERLAKE': () => ({ type: 'discardSlot', slot: 'head' }),
+  'FÜRST YAHOO': () => ({ type: 'discardSlot', slot: 'head' }),
+  'RAPIER-TROTTEL': () => ({ type: 'discardSlot', slot: 'armor' }),
+  'DRECKIGE GÄNSE': () => ({ type: 'discardSlot', slot: 'feet' }),
+  'GIFTEFEU KUDZU-FLIEGENFALLE': () => ({ type: 'combo', actions: [{ type: 'discardSlot', slot: 'armor' }, { type: 'discardSlot', slot: 'head' }] }),
+  'FILZLAUSE': () => ({ type: 'combo', actions: [{ type: 'discardSlot', slot: 'armor' }, { type: 'discardSlot', slot: 'feet' }] }),
+  'KÖNIG TUT': () => ({ type: 'combo', actions: [{ type: 'discardAllEquipped' }, { type: 'discardWholeHand' }] }),
+  // Persistenter "-10 gegen Pflanzen"-Malus wird - wie andere Dauereffekte
+  // im Spiel - nicht mechanisch durchgesetzt, nur der sofortige Teil:
+  'REDNECK-BAUM': () => ({ type: 'combo', actions: [{ type: 'discardSlot', slot: 'armor' }, { type: 'levelDelta', amount: 2 }] }),
+  'TANTE PALADIN': () => ({ type: 'combo', actions: [{ type: 'discardSlot', slot: 'armor' }, { type: 'levelDelta', amount: 3 }] }),
+
+  // --- Ganze Hand ablegen ---
+  'PIKOTZU': () => ({ type: 'discardWholeHand' }),
+  'TEDDYBÄR': () => ({ type: 'discardWholeHandWithBonusDraw' }), // "... mehr als eine Karte abgelegt -> Schatz ziehen"
+
+  // --- Rassen-/Klassenkarten ---
+  'KREISCHENDER DEPP': () => ({ type: 'combo', actions: [{ type: 'discardRaceCards' }, { type: 'discardClassCards' }] }),
+  'WERSCHILDKRÖTE': () => ({ type: 'discardOneRaceCardIfAny' }), // Halb-Blut verliert eine Rasse, reiner Mensch: nichts
+  'AMAZONE': (player) => (player.classes.length ? { type: 'discardClassCards' } : { type: 'levelDelta', amount: 3 }),
+  'UNGLAUBLICHER UNAUSSPRECHLICHER SCHRECKEN': () => ({ type: 'discardClassCardMatchingElseDeath', substr: 'ZAUBERER' }),
+
+  // --- Rassen-bedingte Stufenzahl ---
+  'ZUNGENDÄMON': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 3 : 2 }),
+  // Verdopplung bei angehängtem "Gigantisch" wird nicht erkannt (dafür gibt
+  // es kein Datenfeld an dieser Stelle) - Basis-Effekt wird trotzdem berechnet:
+  'FUNGUS': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 2 : 1 }),
+
+  // --- Bedingt auf aktuellen Ausrüstungszustand (zum Zeitpunkt der Konsequenz bekannt) ---
+  'FEDERFEIND': (player) => (player.equipped.head ? { type: 'discardSlot', slot: 'head' } : { type: 'levelDelta', amount: 2 }),
+  'SABBERNDER SCHLEIM': (player) => (player.equipped.feet ? { type: 'discardSlot', slot: 'feet' } : { type: 'levelDelta', amount: 1 }),
+  'ÜBERBÄR': (player) => (player.equipped.armor ? { type: 'noEffect' } : { type: 'levelDelta', amount: 1 }),
+  'GESICHTSSAUGER': () => ({ type: 'combo', actions: [{ type: 'discardSlot', slot: 'head' }, { type: 'levelDelta', amount: 1 }] }),
+
+  // --- Würfelbasiert ---
+  '3.872 ORKS': () => ({ type: 'diceThresholdDeath', deathValues: [1, 2] }), // "bei 1/2 Tod, sonst so viele Stufen wie gewürfelt"
+  'DIE TROLLE VOM TOTEN MEER': () => ({ type: 'diceLevelLoss' }),
+  'FEUERLÖSCHER': () => ({ type: 'diceLevelLoss' }),
+  // "+1 Stufe zurück je sofort abgelegtem Trank" wird nicht erkannt (kein
+  // Datenfeld für "Trank") - nur der garantierte Basis-Verlust:
+  'GRASGNOLL': () => ({ type: 'levelDelta', amount: 3 }),
+
+  // --- Werte-/textbasierter Gegenstandsverlust ---
+  'WIRKLICH BESCHISSENER FLUCH!': () => ({ type: 'discardMaxBonusItem' }),
+  'DRYADE': () => ({ type: 'discardItemsAboveBonus', threshold: 2 }),
+  'EISRIESE': () => ({ type: 'discardItemsByTextMatch', pattern: /feuer|flamme/i }),
+  'Harter Typ': () => ({ type: 'discardHandCardsMatching', predicate: (c) => !!c && (c.category === 'monster' || isMonsterEnhancerCard(c)) }),
+
+  // --- Eigene Tischwerte (keine Fremdeinwirkung auf andere Spieler) ---
+  'GEMEINE GHOULE': () => ({ type: 'setLevelToTableMin' }),
+  'PACKRATTE': () => ({ type: 'discardMaxGoldItem' }),
+  'ROTZ-ELEMENTAR': () => ({ type: 'discardTraitBonusItems', which: 'race' }),
+  'DING MIT EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST': () => ({ type: 'discardTraitBonusItems', which: 'class' }),
+  // "... und 1 kleinen Gegenstand" bleibt bewusst manuell (freie Auswahl über
+  // das Ablege-Dropdown) - nur der garantierte Stufenverlust wird berechnet:
+  'AFFENBANDE': () => ({ type: 'levelDelta', amount: 1 }),
+
+  // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
+  'ENTIKOR': () => ({
+    type: 'choice',
+    options: [
+      { id: 'hand', label: 'Ganze Hand ablegen', action: { type: 'discardWholeHand' } },
+      { id: 'levels', label: '2 Stufen verlieren', action: { type: 'levelDelta', amount: 2 } },
+    ],
+  }),
+  'JABBERWOCK': () => ({
+    type: 'choice',
+    options: [
+      { id: 'level1', label: 'Auf Stufe 1 zurückkehren', action: { type: 'setLevel1' } },
+      { id: 'items', label: 'Alle Gegenstände verlieren', action: { type: 'discardAllEquipped' } },
+    ],
+  }),
+
+  // --- Fluch, der die Konsequenz des obersten Monsters im Ablagestapel auslöst ---
+  'STERBENDER FLUCH': (player, room) => {
+    for (let i = room.doorDiscard.length - 1; i >= 0; i--) {
+      const c = card(room.doorDiscard[i]);
+      if (c && c.category === 'monster') {
+        return resolveConsequenceSpec(c.name, c.badstuff, player, room) || { type: 'noEffect' };
+      }
+    }
+    return { type: 'noEffect' };
+  },
+};
+
+const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
+const CONSEQUENCE_CHOICE_OR_RE = /\bStufen?\b.{0,20}\boder\b|\boder\b.{0,20}\bStufen?\b/i;
+// Wortgrenzen sind hier wichtig: ohne \b würde z.B. "Elfen" auch in "helfen"
+// anschlagen und fälschlich einen eigentlich eindeutigen Text ausschließen.
+const CONSEQUENCE_ITEM_OR_TRAIT_RE = /\bGegenst[aä]nde?\w*\b|\bRüstung\w*\b|\bKopfbedeckung\w*\b|\bSchuhwerk\w*\b|\bKlasse\w*\b|\bRasse\w*\b|\bHand\s+ab\b|\bMänner\b|\bFrauen\b|\bHalbling\w*\b|\bElfen\b|\bZwerg\w*\b/i;
+
+// Generischer Fallback für die übrigen, immer wiederkehrenden einfachen
+// Formulierungen (siehe Erklärung oben). Wird nur benutzt, wenn kein Eintrag
+// in CONSEQUENCE_OVERRIDES existiert.
+const GERMAN_NUMBER_WORDS = { eine: 1, zwei: 2, drei: 3, vier: 4, fünf: 5, sechs: 6 };
+
+function parseAutoConsequence(rawText) {
+  if (!rawText) return null;
+  const t = String(rawText).replace(/\\n/g, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<\/?[bi]>/gi, '');
+  if (/\bdu\s+bist\s+tot\b/i.test(t) || /\bstirbst?\b/i.test(t) || /zu\s+Tode\s+\w+/i.test(t)) return { type: 'death' };
+  if (/w[üu]rfle/i.test(t) && /stufen/i.test(t) && /gew[üu]rfelt/i.test(t)) return { type: 'diceLevelLoss' };
+  const excluded = () => t.includes('(') || CONSEQUENCE_CONDITIONAL_RE.test(t) || CONSEQUENCE_CHOICE_OR_RE.test(t) || CONSEQUENCE_ITEM_OR_TRAIT_RE.test(t);
+  const NUM = '(\\d+|eine|zwei|drei|vier|fünf|sechs)';
+  const toAmount = (s) => (/^\d+$/.test(s) ? parseInt(s, 10) : GERMAN_NUMBER_WORDS[s.toLowerCase()]);
+  // Verb zuerst: "Verliere(st) 2/zwei Stufen." / "... kostet dich 2 Stufen."
+  let m = t.match(new RegExp(`(?:verlier\\w*|kostet)\\s+(?:du\\s+|dich\\s+)?${NUM}\\s+Stufen?\\b`, 'i'));
+  // Zahl zuerst: "Zwei/2 Stufen verlieren."
+  if (!m) m = t.match(new RegExp(`\\b${NUM}\\s+Stufen?\\s+verlier\\w*`, 'i'));
+  if (m) {
+    if (excluded()) return null;
+    return { type: 'levelDelta', amount: toAmount(m[1]) };
+  }
+  if (/auf\s+Stufe\s+1\s+(reduziert|zur[üu]ckgesetzt|gesetzt)/i.test(t)) return { type: 'setLevel1' };
+  return null;
+}
+
+// Löst EINE Quelle (ein Monster oder ein Fluch) auf: erst die kuratierte
+// Override-Tabelle (per exaktem Kartennamen), sonst der generische Fallback.
+function resolveConsequenceSpec(name, text, player, room) {
+  const override = CONSEQUENCE_OVERRIDES[name];
+  if (override) {
+    const result = override(player, room);
+    if (result !== undefined) return result; // null = bewusst manuell, sonst eine Aktion
+  }
+  return parseAutoConsequence(text);
+}
+
+// Wendet - wo eindeutig erkennbar - die Konsequenz(en) für eine verlorene
+// Kampfrunde (ein oder mehrere Monster) oder einen Fluch automatisch an und
+// trägt das Ergebnis direkt in room.pendingConsequence ein (muss von der
+// aufrufenden Stelle bereits gesetzt sein). `sources` ist eine Liste von
+// {name, text}. Bietet eine Karte eine echte Wahl an UND ist sie die
+// einzige Quelle, wird stattdessen `pendingConsequence.choice` gesetzt und
+// auf die Antwort der Spielerin gewartet (siehe handleResolveConsequenceChoice).
+function autoApplyLossConsequence(room, player, sources) {
+  const pc = room.pendingConsequence;
+  if (!pc) return;
+  if (sources.length === 1) {
+    const spec = resolveConsequenceSpec(sources[0].name, sources[0].text, player, room);
+    if (spec && spec.type === 'choice') {
+      pc.choice = { sourceName: sources[0].name, options: spec.options.map((o) => ({ id: o.id, label: o.label })) };
+      room._pendingChoiceActions = {};
+      spec.options.forEach((o) => { room._pendingChoiceActions[o.id] = o.action; });
+      return;
+    }
+  }
+  const parts = [];
+  sources.forEach((s) => {
+    const spec = resolveConsequenceSpec(s.name, s.text, player, room);
+    if (!spec || spec.type === 'choice') return; // Mehrere Quellen mit echter Wahl gleichzeitig: bewusst manuell
+    const desc = applyPrimitiveAction(room, player, spec);
+    if (desc) parts.push(`${s.name}: ${desc}`);
+  });
+  if (parts.length) {
+    pc.autoApplied = parts.join('; ');
+    log(room, `${player.name}: Automatisch berechnet - ${pc.autoApplied}.`);
+  }
+}
+
+function handleResolveConsequenceChoice(room, playerId, optionId) {
+  const pc = room.pendingConsequence;
+  if (!pc || pc.playerId !== playerId || !pc.choice) return;
+  const stored = room._pendingChoiceActions;
+  if (!stored || !stored[optionId]) return;
+  const player = findPlayer(room, playerId);
+  if (!player) return;
+  const option = pc.choice.options.find((o) => o.id === optionId);
+  const desc = applyPrimitiveAction(room, player, stored[optionId]);
+  pc.autoApplied = `${pc.choice.sourceName}: ${option ? option.label : optionId} -> ${desc}`;
+  log(room, `${player.name}: ${pc.autoApplied}`);
+  pc.choice = null;
+  room._pendingChoiceActions = null;
+  touchRoom(room);
 }
 
 // ---------------------------------------------------------------------------
@@ -679,7 +1081,8 @@ function handleAttemptFlee(room, playerId, modifier) {
     const badstuffText = monsters.map((m) => `${m.name}: ${m.badstuff || '(kein Text hinterlegt)'}`).join(' | ');
     c.monsterIds.forEach((id) => room.doorDiscard.push(id));
     room.combat = null;
-    room.pendingConsequence = { playerId: actor.id, kind: 'loss', cardId: null, text: badstuffText };
+    room.pendingConsequence = { playerId: actor.id, kind: 'loss', cardId: null, text: badstuffText, autoApplied: null, choice: null };
+    autoApplyLossConsequence(room, actor, monsters.map((m) => ({ name: m.name, text: m.badstuff })));
   }
   touchRoom(room);
 }
@@ -1073,6 +1476,7 @@ io.on('connection', (socket) => {
   socket.on('drawDoor', () => act(socket, (room, pid) => handleDrawDoor(room, pid)));
   socket.on('ackConsequence', () => act(socket, (room, pid) => handleAckConsequence(room, pid)));
   socket.on('applyConsequenceAction', (action) => act(socket, (room, pid) => handleApplyConsequenceAction(room, pid, action)));
+  socket.on('resolveConsequenceChoice', ({ optionId }) => act(socket, (room, pid) => handleResolveConsequenceChoice(room, pid, optionId)));
   socket.on('playMonsterFromHand', ({ cardId }) => act(socket, (room, pid) => handlePlayMonsterFromHand(room, pid, cardId)));
   socket.on('skipToLoot', () => act(socket, (room, pid) => handleSkipToLoot(room, pid)));
   socket.on('lootRoom', () => act(socket, (room, pid) => handleLootRoom(room, pid)));
@@ -1121,4 +1525,5 @@ if (require.main === module) {
 
 module.exports = {
   shuffle, ALL_CARDS, CARDS_BY_ID, SET_KEYS, MIN_PLAYERS, MAX_PLAYERS, MAX_LEVEL, HAND_LIMIT,
+  parseAutoConsequence, isMonsterEnhancerCard, resolveConsequenceSpec, CONSEQUENCE_OVERRIDES,
 };

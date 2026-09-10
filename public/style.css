@@ -269,6 +269,7 @@ button.wide { width: 100%; }
   box-shadow: 0 10px 30px rgba(0,0,0,0.35);
 }
 .combatbox h3, .consequencebox h3, .revealbox h3 { color: var(--door-bright); }
+.autoconsequence { background: rgba(52, 199, 89, 0.12); border: 1px solid rgba(52, 199, 89, 0.4); border-radius: 8px; padding: 8px 12px; }
 .strengthrow { display: flex; gap: 24px; align-items: center; font-size: 1.15em; margin: 10px 0; }
 .strengthrow .vs { color: var(--text-dim); }
 .strengthbad { color: var(--danger); font-weight: 700; }

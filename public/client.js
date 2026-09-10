@@ -529,10 +529,25 @@
     const div = document.createElement('div');
     div.className = 'consequencebox';
     div.innerHTML = `<h3>${pc.kind === 'curse' ? '💀 Fluch' : '☠️ Schlimme Dinge'} - ${escapeHtml(player.name)}</h3>` +
-      `<p>${pc.text ? formatCardText(pc.text) : '(kein Text)'}</p>`;
+      `<p>${pc.text ? formatCardText(pc.text) : '(kein Text)'}</p>` +
+      (pc.autoApplied ? `<p class="autoconsequence">✅ <b>Automatisch berechnet:</b> ${escapeHtml(pc.autoApplied)}</p>` : '');
 
     if (pc.playerId === myInfo.playerId) {
-      div.appendChild(textNode('Wende die Auswirkung mit den Werkzeugen unten an (Original-Kartentext oben beachten), dann "Fertig".'));
+      if (pc.choice) {
+        const choiceBox = document.createElement('div');
+        choiceBox.className = 'row gap wrap';
+        choiceBox.appendChild(textNode('Diese Karte lässt dich wählen - beide Optionen werden automatisch berechnet:'));
+        pc.choice.options.forEach((opt) => {
+          const btn = document.createElement('button');
+          btn.className = 'primary'; btn.textContent = opt.label;
+          btn.onclick = () => socket.emit('resolveConsequenceChoice', { optionId: opt.id });
+          choiceBox.appendChild(btn);
+        });
+        div.appendChild(choiceBox);
+      }
+      div.appendChild(textNode(pc.autoApplied
+        ? 'Die eindeutige Auswirkung wurde bereits automatisch angewendet (siehe oben). Falls die Karte noch weitere Effekte hat (z. B. einen Gegenstand ablegen), erledige das jetzt noch, dann "Fertig".'
+        : (pc.choice ? 'Wähle oben eine Option, dann "Fertig". (Oder wende die Auswirkung manuell mit den Werkzeugen unten an.)' : 'Wende die Auswirkung mit den Werkzeugen unten an (Original-Kartentext oben beachten), dann "Fertig".')));
       const tools = document.createElement('div');
       tools.className = 'row gap wrap';
       const minus = document.createElement('button'); minus.textContent = '-1 Stufe';
@@ -826,11 +841,16 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
   }
   // Kartentexte aus den eigenen Spieldaten enthalten vereinzelt einfache
-  // Formatierungs-Tags (<b>, <br>) - escapen und dann gezielt wieder
-  // freigeben, statt sie als sichtbaren Text ("&lt;b&gt;") anzuzeigen.
+  // Formatierungs-Tags (<b>, <i>, <br>) - escapen und dann gezielt wieder
+  // freigeben, statt sie als sichtbaren Text ("&lt;b&gt;") anzuzeigen. Ein
+  // Teil der Texte enthält außerdem ein literales "\n" (Backslash + n, kein
+  // echter Zeilenumbruch - ein Artefakt aus der Datenaufbereitung) statt
+  // eines <br> - wird hier ebenfalls in einen Zeilenumbruch umgewandelt.
   function formatCardText(s) {
     return escapeHtml(s)
+      .replace(/\\n/g, '<br>')
       .replace(/&lt;b&gt;/gi, '<b>').replace(/&lt;\/b&gt;/gi, '</b>')
+      .replace(/&lt;i&gt;/gi, '<i>').replace(/&lt;\/i&gt;/gi, '</i>')
       .replace(/&lt;br\s*\/?&gt;/gi, '<br>');
   }
 })();
