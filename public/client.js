@@ -203,6 +203,7 @@
     renderReveal();
     renderCombat();
     renderConsequence();
+    renderCardAction();
     renderPhaseActions();
     renderTradeArea();
     renderMyPanel();
@@ -265,7 +266,8 @@
     badges.style.marginBottom = '12px';
     p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)')));
     p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
-    if (!p.races.length && !p.classes.length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
+    if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
     body.appendChild(badges);
 
     const equip = document.createElement('div');
@@ -430,7 +432,8 @@
     const actor = state.players.find((p) => p.id === c.actorId);
     const helper = c.helperId ? state.players.find((p) => p.id === c.helperId) : null;
     const monsterLevel = c.monsterIds.reduce((s, id) => s + (card(id).level || 0), 0);
-    const playerStrength = (actor ? actor.strength : 0) + (helper ? helper.strength : 0) + c.actorModifier;
+    const playerStrength = (actor ? actor.strength : 0) + (c.actorConditionalBonus || 0) +
+      (helper ? helper.strength + (c.helperConditionalBonus || 0) : 0) + c.actorModifier;
     const monsterStrength = monsterLevel + c.monsterModifier;
 
     const div = document.createElement('div');
@@ -580,6 +583,57 @@
     box.appendChild(div);
   }
 
+  function renderCardAction() {
+    const box = $('cardActionArea');
+    box.innerHTML = '';
+    const pa = state.pendingCardAction;
+    if (!pa) return;
+    const div = document.createElement('div');
+    div.className = 'consequencebox';
+    if (pa.playerId !== myInfo.playerId) {
+      const owner = state.players.find((p) => p.id === pa.playerId);
+      div.innerHTML = `<h3>✨ "${escapeHtml(pa.cardName)}"</h3><p>Warte auf ${owner ? escapeHtml(owner.name) : '?'}...</p>`;
+      box.appendChild(div);
+      return;
+    }
+    if (pa.kind === 'choice') {
+      div.innerHTML = `<h3>✨ "${escapeHtml(pa.cardName)}" - Wahl</h3>`;
+      const row = document.createElement('div');
+      row.className = 'row gap wrap';
+      pa.options.forEach((opt) => {
+        const btn = mkBtn(opt.label, () => socket.emit('resolveCardChoice', { optionId: opt.id }));
+        btn.className = 'primary';
+        row.appendChild(btn);
+      });
+      div.appendChild(row);
+    } else if (pa.kind === 'targetPlayer') {
+      div.innerHTML = `<h3>✨ "${escapeHtml(pa.cardName)}" - ${escapeHtml(pa.prompt || 'Ziel wählen')}</h3>`;
+      const row = document.createElement('div');
+      row.className = 'row gap wrap';
+      pa.candidateIds.forEach((pid) => {
+        const target = state.players.find((p) => p.id === pid);
+        const btn = mkBtn(target ? target.name : pid, () => socket.emit('resolveCardTarget', { targetId: pid }));
+        btn.className = 'primary';
+        row.appendChild(btn);
+      });
+      div.appendChild(row);
+    } else if (pa.kind === 'chooseCard') {
+      div.innerHTML = `<h3>✨ "${escapeHtml(pa.cardName)}" - ${escapeHtml(pa.prompt || 'Karte wählen')}</h3>`;
+      const row = document.createElement('div');
+      row.className = 'cardgrid';
+      pa.candidateIds.forEach((cid) => {
+        const tile = cardTile(cid, {});
+        const btn = mkBtn('Nehmen', () => socket.emit('resolveCardCardChoice', { cardId: cid }));
+        btn.className = 'primary';
+        tile.querySelector('.ctbody').appendChild(btn);
+        row.appendChild(tile);
+      });
+      if (!pa.candidateIds.length) row.appendChild(textNode('(Ablagestapel sind leer.)'));
+      div.appendChild(row);
+    }
+    box.appendChild(div);
+  }
+
   function equippedIdsOf(p) {
     if (!p) return [];
     return [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands].filter(Boolean);
@@ -588,7 +642,7 @@
   function renderPhaseActions() {
     const box = $('phaseActions');
     box.innerHTML = '';
-    if (state.phase === 'gameend' || state.combat || state.pendingConsequence) return;
+    if (state.phase === 'gameend' || state.combat || state.pendingConsequence || state.pendingCardAction) return;
     if (!isMyTurn()) { box.appendChild(textNode('Warte, bis du an der Reihe bist...')); return; }
 
     if (state.turnPhase === 'tuer' && !state.revealedDoorCard) {
@@ -626,7 +680,11 @@
     badges.innerHTML = '';
     p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)')));
     p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
-    if (!p.races.length && !p.classes.length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
+    if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+    if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)'));
+    if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)'));
+    if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)'));
 
     const equip = $('myEquip');
     equip.innerHTML = '';
@@ -678,7 +736,7 @@
     wrap.className = 'row gap wrap';
     wrap.style.marginTop = '4px';
 
-    const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence;
+    const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence && !state.pendingCardAction;
 
     if (c.category === 'item' && myTurn) {
       const btn = mkBtn('Anlegen', () => socket.emit('equipItem', { cardId: id }));
@@ -690,6 +748,20 @@
     }
     if ((c.category === 'race' || c.category === 'class') && myTurn) {
       const btn = mkBtn('Spielen', () => socket.emit('playRaceOrClass', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    // Machtgruppe (Pathfinder-Set) und die drei "Obergrenze +1"-Karten
+    // (Halb-Blut/Super Munchkin/Doppelleben) werden mechanisch wie
+    // Rasse/Klasse gespielt, sind aber als "door_other" kategorisiert.
+    if (myTurn && c.category === 'door_other' && (POWER_GROUP_NAMES.has((c.name || '').toUpperCase()) || TRAIT_CAP_CARD_NAMES.has(c.name))) {
+      const btn = mkBtn('Spielen', () => socket.emit('playRaceOrClass', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    // Generische "Sonderkraft nutzen"-Aktion für Schatzkarten mit
+    // automatisierter Fähigkeit (Sofort-Stufenaufstieg, kuratierte
+    // Einzelfälle - siehe TREASURE_POWER_NAMES/isInstantLevelUpText unten).
+    if (myTurn && !state.pendingCardAction && hasTreasurePower(c)) {
+      const btn = mkBtn('✨ Sonderkraft nutzen', () => socket.emit('useCardPower', { cardId: id }));
       wrap.appendChild(btn);
     }
     if (typeof c.gold === 'number' && c.gold > 0) {
@@ -715,12 +787,74 @@
       const btn = mkBtn(`⚔️ Im Kampf spielen (${sign}${c.bonus} Monster)`, () => socket.emit('playCombatCard', { cardId: id }));
       wrap.appendChild(btn);
     }
+    // "Kampf-Tränke": Schatzkarten mit einem +N-Bonus für eine wählbare
+    // Seite, jederzeit während eines laufenden Kampfes spielbar.
+    if (state.combat && !state.combat.mustFlee && !state.pendingCardAction && isCombatPotion(c)) {
+      const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    // Garantierte Flucht-Karten: nur die aktuell kämpfende Person, nur
+    // während tatsächlich geflohen werden muss.
+    if (state.combat && state.combat.mustFlee && state.combat.actorId === myInfo.playerId && GUARANTEED_FLEE_NAMES.has(c.name)) {
+      const btn = mkBtn(`🛡️ Garantiert entkommen mit "${c.name}"`, () => socket.emit('useGuaranteedFlee', { cardId: id }));
+      btn.className = 'primary';
+      wrap.appendChild(btn);
+    }
     return wrap;
   }
 
   function isMonsterEnhancer(c) {
     return c.category === 'door_other' && typeof c.bonus === 'number' && c.bonus !== 0 &&
       /für\s+(das\s+)?Monster/i.test(c.text || '');
+  }
+
+  // ---------------------------------------------------------------------
+  // Client-seitige Spiegel der server.js-Erkenner (server.js bleibt die
+  // Quelle der Wahrheit für die tatsächliche Auswirkung - hier geht es nur
+  // darum, ob überhaupt ein Knopf angezeigt wird; siehe isMonsterEnhancer
+  // oben, das nach demselben Muster funktioniert).
+  // ---------------------------------------------------------------------
+  const POWER_GROUP_NAMES = new Set([
+    'KUNDSCHAFTER', 'NEKROMANT', 'HEXE', 'HÖLLENRITTER', 'ADLERRITTER',
+    'PAKTMAGIER', 'ALCHEMIST', 'ASSASSINE DER ROTEN MANTIS',
+  ]);
+  const TRAIT_CAP_CARD_NAMES = new Set(['HALB-BLUT', 'SUPER MUNCHKIN', 'DOPPELLEBEN']);
+  const GUARANTEED_FLEE_NAMES = new Set(['FERTIGMAUER', 'BABY-ÖL', 'DER ANDERE RING']);
+  // Kuratierte Einzelfälle aus TREASURE_POWER_OVERRIDES (server.js) - Namen
+  // müssen mit dort synchron gehalten werden.
+  const TREASURE_POWER_NAMES = new Set([
+    'KLAUE EINE STUFE', 'SINNIEREN', 'SINNLOSER AKT DER FREUNDLICHKEIT',
+    'JAMMER DEN SPIELLEITER AN', 'CHARAKTERSEITEN WECHSELN',
+    'TÖTE DEN MIETLING', 'ENTE DER VIELEN SACHEN',
+    'SCHATZHORT!', 'WÜNSCHELSTAB', 'GEDENKTAFEL',
+  ]);
+  const INSTANT_LEVEL_UP_RE = /^\s*Steige\s+(?:eine|\d+)\s+Stufen?\s+auf\b/i;
+
+  function hasTreasurePower(c) {
+    if (!c || c.category !== 'treasure_other') return false;
+    if (TREASURE_POWER_NAMES.has(c.name)) return true;
+    return INSTANT_LEVEL_UP_RE.test(c.text || '');
+  }
+
+  const COMBAT_POTION_NAMES = new Set([
+    'FREUNDSCHAFTSTRANK', 'POLLYVERWANDLUNGSTRANK', 'TRANK DER IRRELEVANZ',
+    'ENTLASSUNGSGLOCKE', 'CYTILLESH-TRANK', 'TRANK DES MUNDGERUCHS',
+    'YUPPIE-WASSER', 'FLÜSSIGKLINGE',
+  ]);
+  const COMBAT_PLAYABLE_RE = /Im Kampf (spielen|einsetzen)|Während\s+(eines\s+)?beliebige[nm]\s+Kampf(es)?\s+spielen/i;
+
+  function combatPotionAmountFound(rawText) {
+    const t = String(rawText || '').replace(/\\n/g, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<\/?[bi]>/gi, '');
+    return /\+\d+\s+für\s+beide\s+Seiten/i.test(t) ||
+      /\+\d+\s+(?:für\s+eine\s+der\s+Parteien,\s+)?egal\s+(?:für\s+welche|welche)\s+Seite/i.test(t) ||
+      /\+\d+\s+nur\s+für\s+Monster/i.test(t) ||
+      /\+\d+\s+für\s+die\s+Munchkin-Seite/i.test(t);
+  }
+
+  function isCombatPotion(c) {
+    if (!c || c.category !== 'treasure_other') return false;
+    if (COMBAT_POTION_NAMES.has(c.name)) return true;
+    return COMBAT_PLAYABLE_RE.test(c.text || '') && combatPotionAmountFound(c.text);
   }
 
   function mkBtn(label, onClick) {

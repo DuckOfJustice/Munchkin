@@ -11,14 +11,18 @@ Munchkin hat hunderte Karten mit jeweils **individuellem** Regeltext (Sondermons
 **Automatisiert:**
 - Tür-/Schatzstapel (Mischen, Ziehen, Ablegen, Neu-Mischen wenn leer)
 - Die 4 Zug-Phasen (Tür eintreten, Auf Ärger aus sein, Raum plündern, Milde Gabe inkl. 5-Karten-Limit)
-- Kampf-Mathematik (Stufe + Ausrüstungsboni vs. Monsterstufe), inkl. Hilfe anfragen/annehmen
-- Fluchtwurf (Würfel ≥ 5 nötig) mit frei eintragbarem Modifikator
+- Kampf-Mathematik (Stufe + Ausrüstungsboni vs. Monsterstufe), inkl. Hilfe anfragen/annehmen, inkl. der wenigen Gegenstände mit gegner-/rassenabhängigem Zusatzbonus, die sich aus den Kartendaten eindeutig berechnen lassen (Geiler Helm, Vorpale Klinge, Alles außer Krakzilla Abschlachtendes Schwert, Schreckliche Socken)
+- Fluchtwurf (Würfel ≥ 5 nötig) mit frei eintragbarem Modifikator, plus garantierte Flucht-Karten (Fertigmauer, Baby-Öl, Der Andere Ring) als eigener Knopf
 - Ausrüstung anlegen/ablegen mit Körperteil-Regeln (1 Kopf, 1 Rüstung, 1 Schuhwerk, max. 2 Hände)
-- Gegenstände verkaufen (1.000 Goldstücke = 1 Stufe)
-- Rasse/Klasse spielen (max. 1 von jeder – Super Munchkin/Halb-Blut-Ausnahmen aktuell nicht automatisiert)
+- Gegenstände verkaufen (1.000 Goldstücke = 1 Stufe), inkl. Machtgruppe Alchemist ("Blei zu Gold": mind. 300 GS pro Gegenstand)
+- Rasse/Klasse/Machtgruppe spielen (max. 1 von jeder, max. 2 mit Halb-Blut/Super Munchkin/Doppelleben)
+- „Schlimme Dinge" und Flüche: für die meisten Monster- und Fluch-Texte (inkl. der fehlkategorisierten Pathfinder-Flüche, die in den Rohdaten als normale Türkarte statt als Fluch geführt werden) wird die Stufen-/Ausrüstungs-/Handkonsequenz automatisch berechnet und angewendet; bietet die Karte eine echte Wahl, gibt es zwei Buttons statt Rechnerei (siehe `tests/auto-consequence.test.js`)
+- Ein großer Teil der Schatzkarten-Sonderkräfte: einfache „Steige eine Stufe auf"-Karten und Kampf-Tränke (+N für eine Seite) lassen sich per Klick einsetzen, dazu einzelne kuratierte Sonderfälle (Klaue eine Stufe, Schatzhort!, Wünschelstab, ...) - siehe `tests/card-abilities.test.js`
 - Sieg bei Stufe 10
 
-**Manuell (mit Werkzeug-Unterstützung):** Boni gegen bestimmte Rassen/Klassen, der genaue Effekt von Flüchen und "Schlimme Dinge", Sonderkräfte von Rassen/Klassen, Wanderndes Monster/Kumpel, Handeln zwischen Spieler:innen. Der **Original-Kartentext wird immer angezeigt** (Klick auf eine Karte). Bei Konsequenzen (Fluch/Niederlage) gibt es ein generisches Werkzeug (±1 Stufe, Gegenstand ablegen, „ich bin gestorben"), mit dem ihr die Auswirkung wie am echten Tisch selbst nachvollzieht. Kampf-Boni/Mali aus Karteneffekten tragt ihr im Kampf-Panel als Zahl ein.
+**Manuell (mit Werkzeug-Unterstützung):** der genaue Effekt der übrigen, sehr individuellen Sonderkräfte (Wanderndes Monster/Kumpel, die meisten Rassen-/Klassen-/Machtgruppen-Sonderkräfte, Boni gegen bestimmte Rassen/Klassen/Machtgruppen auf Monsterkarten), Handeln zwischen Spieler:innen. Der **Original-Kartentext wird immer angezeigt** (Klick auf eine Karte). Bei Konsequenzen, die nicht automatisch erkannt werden, gibt es ein generisches Werkzeug (±1 Stufe, Gegenstand ablegen, „ich bin gestorben"), mit dem ihr die Auswirkung wie am echten Tisch selbst nachvollzieht. Kampf-Boni/Mali aus Karteneffekten, die nicht automatisch erkannt werden, tragt ihr im Kampf-Panel als Zahl ein.
+
+Bewusst **außerhalb des Umfangs** bleiben Karten, die einen Datenpunkt bräuchten, den `data/cards.json` nicht enthält (ein „Großer Gegenstand"-Flag, eine „Untot"-/Feuerimmunitäts-Kennzeichnung auf Monsterkarten, welche Machtgruppe ein Monster „hasst"), einen dauerhaften Fluch-/Status-Tracker, den dieser Server nicht führt (z. B. Wunschring - es gibt schlicht keinen laufenden Fluch-Zustand zum Beenden), oder eine echte freie Auswahl mit Wertgrenze aus dem gesamten Ablagestapel (Flohmarkt, Einheitsgröße). Die vollständige, kommentierte Liste steht direkt im Code bei `CONSEQUENCE_OVERRIDES`, `DOOR_OTHER_AS_CURSE`, `TREASURE_POWER_OVERRIDES` und `COMBAT_POTION_OVERRIDES` in `server.js`.
 
 ## Warum keine Kartenbilder?
 
