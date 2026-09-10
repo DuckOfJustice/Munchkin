@@ -169,8 +169,12 @@ function touchRoom(room) {
   room.cleanupTimer = setTimeout(() => { rooms.delete(room.code); }, ROOM_CLEANUP_MS);
 }
 
-function log(room, text) {
-  room.logs.push({ text, at: Date.now() });
+function log(room, text, cardIds) {
+  // cardIds: optionale Liste öffentlich bekannter Karten, auf die sich dieser
+  // Eintrag bezieht (z.B. eine aufgedeckte Türkarte) - der Client macht daraus
+  // im Verlauf anklickbare Kartenverweise. NIE für private/verdeckte Karten
+  // befüllen (z.B. verdeckt gezogene Türkarten beim Plündern)!
+  room.logs.push({ text, at: Date.now(), cardIds: (cardIds && cardIds.length) ? cardIds.filter(Boolean) : undefined });
   if (room.logs.length > 300) room.logs.shift();
 }
 
@@ -300,9 +304,19 @@ function publicState(room) {
 
 function sendInfoTo(room, player) {
   if (!player.socketId) return;
+  const trades = room.trades || [];
+  // Handelsangebote sind privat, bis sie angenommen wurden (sie verraten
+  // Handkarten) - jede:r sieht nur die eigenen offenen Angebote, nicht die
+  // aller anderen. Nach Annahme landet das Ergebnis öffentlich im Verlauf.
+  const incomingTrades = trades.filter((t) => t.status === 'pending' && t.toId === player.id)
+    .map((t) => ({ id: t.id, fromId: t.fromId, fromName: (findPlayer(room, t.fromId) || {}).name || '?', offerCardIds: t.offerCardIds }));
+  const outgoingTrades = trades.filter((t) => t.status === 'pending' && t.fromId === player.id)
+    .map((t) => ({ id: t.id, toId: t.toId, toName: (findPlayer(room, t.toId) || {}).name || '?', offerCardIds: t.offerCardIds }));
   io.to(player.socketId).emit('yourInfo', {
     playerId: player.id,
     hand: player.hand,
+    incomingTrades,
+    outgoingTrades,
   });
 }
 
@@ -351,6 +365,7 @@ function startGame(room) {
   room.winner = null;
   room.phase = 'playing';
   room.logs = [];
+  room.trades = [];
   log(room, `Das Spiel beginnt mit ${room.players.length} Spieler:innen. Jede:r hat 4 Tür- und 4 Schatzkarten auf der Hand.`);
   log(room, `${currentPlayer(room).name} ist am Zug (Phase 1: Tür eintreten).`);
 }
@@ -387,7 +402,7 @@ function handleDrawDoor(room, playerId) {
   if (!id) { log(room, 'Türstapel ist leer.'); return; }
   room.revealedDoorCard = id;
   const c = card(id);
-  log(room, `${player.name} deckt "${c.name}" auf (${c.setLabel}).`);
+  log(room, `${player.name} deckt "${c.name}" auf (${c.setLabel}).`, [id]);
 
   if (c.category === 'monster') {
     room.revealedDoorCard = null;
@@ -396,12 +411,12 @@ function handleDrawDoor(room, playerId) {
     room.pendingConsequence = { playerId: player.id, kind: 'curse', cardId: id, text: c.text || c.name };
     room.doorDiscard.push(id);
     room.revealedDoorCard = null;
-    log(room, `Fluch! ${player.name} muss die Auswirkung anwenden: "${c.name}".`);
+    log(room, `Fluch! ${player.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
   } else {
     player.hand.push(id);
     room.revealedDoorCard = null;
     room.turnPhase = 'aerger';
-    log(room, `${player.name} nimmt "${c.name}" auf die Hand. Phase 2: Auf Ärger aus sein.`);
+    log(room, `${player.name} nimmt "${c.name}" auf die Hand. Phase 2: Auf Ärger aus sein.`, [id]);
   }
 }
 
@@ -441,7 +456,7 @@ function handleApplyConsequenceAction(room, playerId, action) {
       discardCard(room, cardId);
     } else return;
     const c = card(cardId);
-    log(room, `${player.name} legt "${c ? c.name : cardId}" ab.`);
+    log(room, `${player.name} legt "${c ? c.name : cardId}" ab.`, [cardId]);
   } else if (action.type === 'death') {
     room.doorDiscard.push(...player.hand.filter((id) => card(id).type === 'door'));
     room.treasureDiscard.push(...player.hand.filter((id) => card(id).type === 'treasure'));
@@ -532,13 +547,53 @@ function combatTotals(room) {
   return { playerStrength, monsterStrength, monsterLevel };
 }
 
+// Monster-Verstärker: Türkarten (Kategorie "door_other"), die laut Text
+// jederzeit während eines beliebigen Kampfes ausgespielt werden dürfen und
+// einen festen Bonus/Malus "für das Monster" geben (z.B. Uralt +10, Baby -5).
+// Diese lassen sich automatisch erkennen (nicht-null/nicht-0 bonus-Feld +
+// passender Kartentext) und daher automatisch verrechnen, statt dass die
+// Zahl manuell eingetragen werden muss.
+function isMonsterEnhancerCard(c) {
+  return !!c && c.category === 'door_other' && typeof c.bonus === 'number' && c.bonus !== 0 &&
+    /für\s+(das\s+)?Monster/i.test(c.text || '');
+}
+
 function handleSetCombatModifier(room, playerId, who, value) {
   if (!room.combat) return;
   const c = room.combat;
-  if (c.actorId !== playerId && c.helperId !== playerId) return;
+  if (c.mustFlee) return;
+  const player = findPlayer(room, playerId);
+  if (!player) return;
+  // Jede:r am Tisch darf hier eingreifen (Karteneffekte, die das Monster
+  // stärken/schwächen oder den Kämpfenden helfen/schaden, manuell eintragen) -
+  // nicht nur die kämpfende Person selbst.
   const v = Math.max(-99, Math.min(99, Math.round(Number(value) || 0)));
-  if (who === 'monster') c.monsterModifier = v;
-  else c.actorModifier = v;
+  if (who === 'monster') {
+    if (c.monsterModifier === v) return;
+    c.monsterModifier = v;
+    log(room, `${player.name} setzt den Monster-Bonus/Malus auf ${v >= 0 ? '+' : ''}${v}.`);
+  } else {
+    if (c.actorModifier === v) return;
+    c.actorModifier = v;
+    log(room, `${player.name} setzt den Bonus/Malus der Kämpfenden auf ${v >= 0 ? '+' : ''}${v}.`);
+  }
+  touchRoom(room);
+}
+
+// Jede:r Spieler:in (nicht nur Angreifer:in/Helfer:in) darf einen
+// Monster-Verstärker aus der eigenen Hand in den laufenden Kampf spielen -
+// z.B. um das Monster zu stärken (mehr Risiko, mehr Schatz) oder zu
+// schwächen und so der kämpfenden Person zu helfen.
+function handlePlayCombatCard(room, playerId, cardId) {
+  if (!room.combat || room.combat.mustFlee) return;
+  const player = findPlayer(room, playerId);
+  if (!player || !player.hand.includes(cardId)) return;
+  const c = card(cardId);
+  if (!isMonsterEnhancerCard(c)) return;
+  removeFromHand(player, cardId);
+  room.combat.monsterModifier += c.bonus;
+  room.doorDiscard.push(cardId);
+  log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster).`, [cardId]);
   touchRoom(room);
 }
 
@@ -597,7 +652,7 @@ function resolveCombatWin(room) {
   // Weitergabe von Schätzen kann jederzeit frei "gehandelt" werden.
   drawn.forEach((id) => actor.hand.push(id));
   c.monsterIds.forEach((id) => room.doorDiscard.push(id));
-  log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${treasureCount} Schatzkarte(n) gezogen.`);
+  log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${treasureCount} Schatzkarte(n) gezogen.`, c.monsterIds);
   if (helper) log(room, `(${helper.name} hat geholfen.)`);
   room.combat = null;
   const won = checkWin(room, actor);
@@ -648,7 +703,7 @@ function handleEquipItem(room, playerId, cardId) {
     if (c.handsCost === 2) { player.equipped.hands = [cardId, cardId]; }
     else { const idx = player.equipped.hands.indexOf(null); player.equipped.hands[idx] = cardId; }
   } else return;
-  log(room, `${player.name} legt "${c.name}" an.`);
+  log(room, `${player.name} legt "${c.name}" an.`, [cardId]);
   touchRoom(room);
 }
 
@@ -659,7 +714,7 @@ function handleUnequipItem(room, playerId, cardId) {
   unequipSlotCard(player, cardId);
   player.hand.push(cardId);
   const c = card(cardId);
-  log(room, `${player.name} legt "${c ? c.name : cardId}" wieder in die Hand.`);
+  log(room, `${player.name} legt "${c ? c.name : cardId}" wieder in die Hand.`, [cardId]);
   touchRoom(room);
 }
 
@@ -708,7 +763,7 @@ function handlePlayRaceOrClass(room, playerId, cardId) {
     removeFromHand(player, cardId);
     player.classes.push(cardId);
   } else return;
-  log(room, `${player.name} spielt "${c.name}".`);
+  log(room, `${player.name} spielt "${c.name}".`, [cardId]);
   touchRoom(room);
 }
 
@@ -718,7 +773,7 @@ function handleDiscardFromHand(room, playerId, cardId) {
   removeFromHand(player, cardId);
   discardCard(room, cardId);
   const c = card(cardId);
-  log(room, `${player.name} legt "${c ? c.name : cardId}" ab.`);
+  log(room, `${player.name} legt "${c ? c.name : cardId}" ab.`, [cardId]);
   touchRoom(room);
 }
 
@@ -728,6 +783,63 @@ function handleEndTurnAction(room, playerId) {
   if (room.turnPhase !== 'gabe') return;
   if (player.hand.length > HAND_LIMIT) return;
   endTurn(room);
+  touchRoom(room);
+}
+
+// ---------------------------------------------------------------------------
+// Handel zwischen Spielenden (Gold- und andere Karten) - jederzeit möglich,
+// nicht an Zug/Phase gebunden, ganz wie am echten Tisch. Da Handkarten privat
+// sind, kann man nur die eigenen Karten anbieten; die Gegenseite wählt beim
+// Annehmen selbst, was sie (falls überhaupt) zurückgibt - so muss nie auf
+// fremde Handkarten Bezug genommen werden, die man gar nicht kennt.
+// ---------------------------------------------------------------------------
+
+function handleProposeTrade(room, playerId, toId, offerCardIds) {
+  const from = findPlayer(room, playerId);
+  const to = findPlayer(room, toId);
+  if (!from || !to || from.id === to.id || !to.connected) return;
+  const ids = [...new Set(offerCardIds || [])].filter((id) => from.hand.includes(id));
+  if (!ids.length) return;
+  if (!room.trades) room.trades = [];
+  // Nur ein offenes Angebot pro Richtung gleichzeitig - ein neues ersetzt ein altes.
+  room.trades = room.trades.filter((t) => !(t.fromId === from.id && t.toId === to.id && t.status === 'pending'));
+  room.trades.push({ id: makeId(), fromId: from.id, toId: to.id, offerCardIds: ids, status: 'pending', at: Date.now() });
+  log(room, `${from.name} bietet ${to.name} einen Handel an (${ids.length} Karte(n)).`);
+  touchRoom(room);
+}
+
+function handleCancelTrade(room, playerId, tradeId) {
+  if (!room.trades) return;
+  const trade = room.trades.find((t) => t.id === tradeId && t.status === 'pending' && t.fromId === playerId);
+  if (!trade) return;
+  room.trades = room.trades.filter((t) => t.id !== tradeId);
+  const from = findPlayer(room, playerId);
+  log(room, `${from.name} zieht ein Handelsangebot zurück.`);
+  touchRoom(room);
+}
+
+function handleRespondTrade(room, playerId, tradeId, accept, counterCardIds) {
+  if (!room.trades) return;
+  const trade = room.trades.find((t) => t.id === tradeId && t.status === 'pending' && t.toId === playerId);
+  if (!trade) return;
+  const from = findPlayer(room, trade.fromId);
+  const to = findPlayer(room, trade.toId);
+  room.trades = room.trades.filter((t) => t.id !== tradeId);
+  if (!from || !to) return;
+  if (!accept) {
+    log(room, `${to.name} lehnt den Handel von ${from.name} ab.`);
+    touchRoom(room);
+    return;
+  }
+  // Erneut gegen die aktuelle Hand prüfen - die Karten könnten seither
+  // anderweitig verwendet worden sein (abgelegt, angelegt, verkauft, ...).
+  const offerIds = trade.offerCardIds.filter((id) => from.hand.includes(id));
+  const counterIds = [...new Set(counterCardIds || [])].filter((id) => to.hand.includes(id));
+  offerIds.forEach((id) => { removeFromHand(from, id); to.hand.push(id); });
+  counterIds.forEach((id) => { removeFromHand(to, id); from.hand.push(id); });
+  const offerNames = offerIds.map((id) => card(id).name).join(', ') || '(nichts mehr davon verfügbar)';
+  const counterNames = counterIds.length ? counterIds.map((id) => card(id).name).join(', ') : '(nichts zurück)';
+  log(room, `Handel: ${from.name} gibt [${offerNames}] an ${to.name}, erhält dafür [${counterNames}].`, [...offerIds, ...counterIds]);
   touchRoom(room);
 }
 
@@ -965,6 +1077,10 @@ io.on('connection', (socket) => {
   socket.on('skipToLoot', () => act(socket, (room, pid) => handleSkipToLoot(room, pid)));
   socket.on('lootRoom', () => act(socket, (room, pid) => handleLootRoom(room, pid)));
   socket.on('setCombatModifier', ({ who, value }) => act(socket, (room, pid) => handleSetCombatModifier(room, pid, who, value)));
+  socket.on('playCombatCard', ({ cardId }) => act(socket, (room, pid) => handlePlayCombatCard(room, pid, cardId)));
+  socket.on('proposeTrade', ({ toId, offerCardIds }) => act(socket, (room, pid) => handleProposeTrade(room, pid, toId, offerCardIds)));
+  socket.on('cancelTrade', ({ tradeId }) => act(socket, (room, pid) => handleCancelTrade(room, pid, tradeId)));
+  socket.on('respondTrade', ({ tradeId, accept, counterCardIds }) => act(socket, (room, pid) => handleRespondTrade(room, pid, tradeId, accept, counterCardIds)));
   socket.on('requestHelp', ({ targetId }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId)));
   socket.on('respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
   socket.on('evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));

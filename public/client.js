@@ -11,6 +11,17 @@
   const basePath = computeBasePath();
   const socket = io({ path: basePath + '/socket.io' });
 
+  // Läuft diese Seite hinter dem Spielehub (also unter einem Pfad-Präfix),
+  // zeigen wir einen Link zurück zur Spielauswahl (Hub-Startseite). Bei
+  // direktem Zugriff ohne Hub gibt es keine Spielauswahl - dann bleibt er versteckt.
+  if (basePath) {
+    const backHub = document.getElementById('btnBackHub');
+    if (backHub) {
+      backHub.href = '/';
+      backHub.classList.remove('hidden');
+    }
+  }
+
   const CATEGORY_LABELS = {
     monster: 'Monster', curse: 'Fluch', race: 'Rasse', class: 'Klasse',
     item: 'Gegenstand', treasure_other: 'Schatz', door_other: 'Türkarte',
@@ -21,6 +32,19 @@
   let myInfo = { playerId: null, hand: [] };
   let session = loadSession();
   let sellSelection = new Set();
+
+  // -- Handel (Trading) --
+  let tradeComposeTargetId = null; // gerade ein neues Angebot an diese Person zusammenstellen
+  let tradeComposeSelection = new Set(); // eigene Handkarten, die dabei angeboten werden
+  let tradeCounterForId = null; // gerade ein Gegenangebot für dieses eingehende Angebot zusammenstellen
+  let tradeCounterSelection = new Set();
+
+  function startTradeCompose(targetId) {
+    tradeComposeTargetId = targetId;
+    tradeComposeSelection = new Set();
+    tradeCounterForId = null;
+    render();
+  }
 
   function loadSession() {
     try { return JSON.parse(localStorage.getItem('munchkin_session') || 'null'); } catch (e) { return null; }
@@ -47,8 +71,18 @@
   // Start-Screen
   // ---------------------------------------------------------------------
 
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.tab-panel').forEach((p) => p.classList.add('hidden'));
+      $('tab-' + btn.dataset.tab).classList.remove('hidden');
+      showStartError('');
+    });
+  });
+
   $('btnCreate').addEventListener('click', () => {
-    const name = $('nameInput').value.trim();
+    const name = $('createNameInput').value.trim();
     if (!name) return showStartError('Bitte einen Namen eingeben.');
     socket.emit('createRoom', { name }, (res) => {
       if (!res.ok) return showStartError(res.error);
@@ -57,7 +91,7 @@
   });
 
   $('btnJoin').addEventListener('click', () => {
-    const name = $('nameInput').value.trim();
+    const name = $('joinNameInput').value.trim();
     const code = $('codeInput').value.trim().toUpperCase();
     if (!name) return showStartError('Bitte einen Namen eingeben.');
     if (!code) return showStartError('Bitte einen Raum-Code eingeben.');
@@ -69,11 +103,13 @@
 
   function showStartError(msg) { $('startError').textContent = msg || ''; }
 
-  $('btnLeave').addEventListener('click', () => {
+  function doLeaveRoom() {
     socket.emit('leaveRoom');
     clearSession();
     location.reload();
-  });
+  }
+  $('btnLeave').addEventListener('click', doLeaveRoom);
+  $('btnLeaveLobby').addEventListener('click', doLeaveRoom);
 
   socket.on('connect', () => {
     if (session && session.code) {
@@ -103,6 +139,8 @@
 
   function renderLobby() {
     $('lobbyCode').textContent = state.code;
+    $('lobbyCount').textContent = state.players.length;
+    $('lobbyMax').textContent = state.maxPlayers;
     const list = $('lobbyPlayers');
     list.innerHTML = '';
     state.players.forEach((p) => {
@@ -166,6 +204,7 @@
     renderCombat();
     renderConsequence();
     renderPhaseActions();
+    renderTradeArea();
     renderMyPanel();
     renderLog();
 
@@ -188,7 +227,7 @@
     box.innerHTML = '<h3>Spieler:innen</h3>';
     state.players.forEach((p) => {
       const row = document.createElement('div');
-      row.className = 'prow' + (p.id === state.turnPlayerId ? ' active-turn' : '');
+      row.className = 'prow clickable' + (p.id === state.turnPlayerId ? ' active-turn' : '');
       const equip = [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands]
         .filter(Boolean).length;
       row.innerHTML = `<span>${escapeHtml(p.name)}${p.isBot ? ' 🤖' : ''}</span>` +
@@ -198,7 +237,168 @@
         (!p.connected ? '<span class="tag off">offline</span> ' : '') +
         `<span class="tag">Stufe ${p.level}</span> <span class="tag">⚔ ${p.strength}</span> <span class="tag">🎒 ${equip}</span>` +
         `</span>`;
+      row.title = 'Klicken für Ausrüstung';
+      row.addEventListener('click', () => openPlayerModal(p.id));
+      if (p.id !== myInfo.playerId && p.connected) {
+        const tradeBtn = document.createElement('button');
+        tradeBtn.className = 'small'; tradeBtn.textContent = '🤝 Handeln';
+        tradeBtn.style.marginTop = '6px';
+        tradeBtn.onclick = (e) => { e.stopPropagation(); startTradeCompose(p.id); };
+        row.appendChild(tradeBtn);
+      }
       box.appendChild(row);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Spieler-Modal (Ausrüstung ansehen)
+  // ---------------------------------------------------------------------
+
+  function openPlayerModal(playerId) {
+    const p = state.players.find((pl) => pl.id === playerId);
+    if (!p) return;
+    const body = $('cardModalBody');
+    body.innerHTML = `<h3>${escapeHtml(p.name)}${p.isBot ? ' 🤖' : ''} - Stufe ${p.level}</h3>`;
+
+    const badges = document.createElement('div');
+    badges.className = 'row gap wrap';
+    badges.style.marginBottom = '12px';
+    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)')));
+    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
+    if (!p.races.length && !p.classes.length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+    body.appendChild(badges);
+
+    const equip = document.createElement('div');
+    equip.className = 'row gap wrap';
+    const slotDefs = [
+      ['Kopf', p.equipped.head], ['Rüstung', p.equipped.armor], ['Schuhe', p.equipped.feet],
+      ['Hand 1', p.equipped.hands[0]], ['Hand 2', p.equipped.hands[1]],
+    ];
+    slotDefs.forEach(([label, cardId]) => {
+      const el = document.createElement('div');
+      el.className = 'equipslot' + (cardId ? ' filled' : '');
+      if (cardId) {
+        const c = card(cardId);
+        const img = document.createElement('img');
+        img.className = 'eqimg'; img.alt = ''; img.src = cardImageUrl(cardId);
+        img.onerror = () => img.remove();
+        el.innerHTML = `<b>${label}</b>`;
+        el.appendChild(img);
+        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`));
+        el.style.cursor = 'pointer';
+        el.onclick = () => openCardModal(cardId);
+      } else {
+        el.innerHTML = `<b>${label}</b><span class="hint">leer</span>`;
+      }
+      equip.appendChild(el);
+    });
+    body.appendChild(equip);
+    $('cardModal').classList.remove('hidden');
+  }
+
+  // ---------------------------------------------------------------------
+  // Handel (Trading) - jederzeit möglich, nicht an den eigenen Zug gebunden.
+  // ---------------------------------------------------------------------
+
+  function tradePickGrid(ids, selection) {
+    const grid = document.createElement('div');
+    grid.className = 'row gap wrap tradegrid';
+    ids.forEach((id) => {
+      const c = card(id);
+      const label = document.createElement('label');
+      label.className = 'tradepick' + (selection.has(id) ? ' picked' : '');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = selection.has(id);
+      cb.onchange = () => {
+        if (cb.checked) selection.add(id); else selection.delete(id);
+        renderTradeArea();
+      };
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(` ${c.name}${typeof c.gold === 'number' ? ` (${c.gold} GS)` : ''}`));
+      grid.appendChild(label);
+    });
+    if (!ids.length) grid.appendChild(textNode('Keine Karten auf der Hand.'));
+    return grid;
+  }
+
+  function renderTradeArea() {
+    const box = $('tradeArea');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!state || state.phase !== 'playing') return;
+
+    if (tradeComposeTargetId) {
+      const target = state.players.find((p) => p.id === tradeComposeTargetId);
+      if (!target || !target.connected) {
+        tradeComposeTargetId = null;
+      } else {
+        const panel = document.createElement('div');
+        panel.className = 'tradebox';
+        panel.innerHTML = `<h3>🤝 Handel anbieten an ${escapeHtml(target.name)}</h3>` +
+          `<p class="hint">Wähle Karten aus deiner Hand, die du anbietest (Gold- oder andere Karten). ${target.name} entscheidet dann, was sie/er im Gegenzug gibt.</p>`;
+        panel.appendChild(tradePickGrid(myInfo.hand, tradeComposeSelection));
+        const actions = document.createElement('div');
+        actions.className = 'row gap'; actions.style.marginTop = '10px';
+        const sendBtn = mkBtn('Angebot senden', () => {
+          if (!tradeComposeSelection.size) return;
+          socket.emit('proposeTrade', { toId: tradeComposeTargetId, offerCardIds: Array.from(tradeComposeSelection) });
+          tradeComposeTargetId = null; tradeComposeSelection = new Set();
+          renderTradeArea();
+        });
+        sendBtn.className = 'primary';
+        sendBtn.disabled = !tradeComposeSelection.size;
+        const cancelBtn = mkBtn('Abbrechen', () => { tradeComposeTargetId = null; tradeComposeSelection = new Set(); renderTradeArea(); });
+        actions.appendChild(sendBtn); actions.appendChild(cancelBtn);
+        panel.appendChild(actions);
+        box.appendChild(panel);
+      }
+    }
+
+    (myInfo.incomingTrades || []).forEach((t) => {
+      const panel = document.createElement('div');
+      panel.className = 'tradebox';
+      panel.innerHTML = `<h3>🤝 Handelsangebot von ${escapeHtml(t.fromName)}</h3><p>Bietet an:</p>`;
+      const preview = document.createElement('div');
+      preview.className = 'row gap wrap';
+      t.offerCardIds.forEach((id) => {
+        const chip = document.createElement('a');
+        chip.href = '#'; chip.className = 'logcardlink';
+        chip.textContent = `[${card(id).name}]`;
+        chip.onclick = (e) => { e.preventDefault(); openCardModal(id); };
+        preview.appendChild(chip);
+      });
+      panel.appendChild(preview);
+
+      const actions = document.createElement('div');
+      actions.className = 'row gap wrap'; actions.style.marginTop = '10px';
+      const acceptBtn = mkBtn('Annehmen', () => socket.emit('respondTrade', { tradeId: t.id, accept: true, counterCardIds: [] }));
+      acceptBtn.className = 'primary';
+      const counterBtn = mkBtn('Annehmen + selbst etwas geben...', () => { tradeCounterForId = t.id; tradeCounterSelection = new Set(); renderTradeArea(); });
+      const declineBtn = mkBtn('Ablehnen', () => socket.emit('respondTrade', { tradeId: t.id, accept: false }));
+      declineBtn.className = 'danger';
+      actions.appendChild(acceptBtn); actions.appendChild(counterBtn); actions.appendChild(declineBtn);
+      panel.appendChild(actions);
+
+      if (tradeCounterForId === t.id) {
+        panel.appendChild(tradePickGrid(myInfo.hand, tradeCounterSelection));
+        const confirmBtn = mkBtn('Gegenangebot bestätigen & annehmen', () => {
+          socket.emit('respondTrade', { tradeId: t.id, accept: true, counterCardIds: Array.from(tradeCounterSelection) });
+          tradeCounterForId = null; tradeCounterSelection = new Set();
+        });
+        confirmBtn.className = 'primary'; confirmBtn.style.marginTop = '6px';
+        panel.appendChild(confirmBtn);
+      }
+      box.appendChild(panel);
+    });
+
+    (myInfo.outgoingTrades || []).forEach((t) => {
+      const panel = document.createElement('div');
+      panel.className = 'tradebox';
+      const names = t.offerCardIds.map((id) => card(id).name).join(', ');
+      panel.innerHTML = `<h3>🤝 Dein Angebot an ${escapeHtml(t.toName)}</h3><p>Du bietest an: <b>${escapeHtml(names)}</b> - wartet auf Antwort...</p>`;
+      const cancelBtn = mkBtn('Zurückziehen', () => socket.emit('cancelTrade', { tradeId: t.id }));
+      panel.appendChild(cancelBtn);
+      box.appendChild(panel);
     });
   }
 
@@ -244,7 +444,6 @@
 
     const iAmActor = c.actorId === myInfo.playerId;
     const iAmHelper = c.helperId === myInfo.playerId;
-    const canAdjust = iAmActor || iAmHelper;
 
     const strengthRow = document.createElement('div');
     strengthRow.className = 'strengthrow';
@@ -252,17 +451,22 @@
       `<div class="vs">vs.</div><div>Monster: <b>${monsterStrength}</b></div>`;
     div.appendChild(strengthRow);
 
-    if (canAdjust) {
+    // Jede:r am Tisch darf hier eingreifen - nicht nur Angreifer:in/Helfer:in -
+    // um z.B. einen Fluch oder eine Hilfskarte zu verrechnen, die nicht
+    // automatisch erkannt wird (Monster-Verstärkerkarten mit festem Bonus
+    // rechnen sich weiter unten automatisch ein, siehe "Im Kampf spielen").
+    if (!c.mustFlee) {
       const modRow = document.createElement('div');
       modRow.className = 'row gap wrap';
       modRow.innerHTML = `
-        <label style="margin:0">Euer Bonus/Malus (Karteneffekte manuell eintragen)
+        <label style="margin:0">Bonus/Malus der Kämpfenden (Karteneffekte manuell eintragen)
           <input type="number" id="actorModInput" value="${c.actorModifier}" style="width:80px">
         </label>
-        <label style="margin:0">Monster Bonus/Malus
+        <label style="margin:0">Monster Bonus/Malus (Karteneffekte manuell eintragen)
           <input type="number" id="monsterModInput" value="${c.monsterModifier}" style="width:80px">
         </label>`;
       div.appendChild(modRow);
+      div.appendChild(textNode('Jede:r am Tisch darf hier eintragen - z.B. um dem Monster zu helfen/schaden oder den Kämpfenden zu unterstützen.'));
       modRow.querySelector('#actorModInput').onchange = (e) => socket.emit('setCombatModifier', { who: 'actor', value: e.target.value });
       modRow.querySelector('#monsterModInput').onchange = (e) => socket.emit('setCombatModifier', { who: 'monster', value: e.target.value });
     }
@@ -488,7 +692,20 @@
       const btn = mkBtn('Ablegen', () => socket.emit('discardFromHand', { cardId: id }));
       wrap.appendChild(btn);
     }
+    // Monster-Verstärkerkarten ("+X für das Monster") darf jede:r am Tisch
+    // jederzeit während eines laufenden Kampfes ausspielen, nicht nur die
+    // kämpfende Person - der Bonus/Malus wird automatisch verrechnet.
+    if (state.combat && !state.combat.mustFlee && isMonsterEnhancer(c)) {
+      const sign = c.bonus > 0 ? '+' : '';
+      const btn = mkBtn(`⚔️ Im Kampf spielen (${sign}${c.bonus} Monster)`, () => socket.emit('playCombatCard', { cardId: id }));
+      wrap.appendChild(btn);
+    }
     return wrap;
+  }
+
+  function isMonsterEnhancer(c) {
+    return c.category === 'door_other' && typeof c.bonus === 'number' && c.bonus !== 0 &&
+      /für\s+(das\s+)?Monster/i.test(c.text || '');
   }
 
   function mkBtn(label, onClick) {
@@ -519,7 +736,23 @@
     state.logs.slice().reverse().forEach((l, i) => {
       const div = document.createElement('div');
       div.className = 'logline' + (i === 0 ? ' logline-latest' : '');
-      div.textContent = l.text;
+      div.appendChild(document.createTextNode(l.text));
+      // Bezieht sich der Eintrag auf öffentlich bekannte Karten (z.B. eine
+      // aufgedeckte Türkarte), zeigen wir sie als anklickbare Verweise an,
+      // die die Karte im Modal aufrufen.
+      if (l.cardIds && l.cardIds.length) {
+        div.appendChild(document.createTextNode(' '));
+        l.cardIds.forEach((id) => {
+          const c = cardIndex[id];
+          if (!c) return;
+          const link = document.createElement('a');
+          link.href = '#'; link.className = 'logcardlink';
+          link.textContent = `[${c.name}]`;
+          link.addEventListener('click', (e) => { e.preventDefault(); openCardModal(id); });
+          div.appendChild(link);
+          div.appendChild(document.createTextNode(' '));
+        });
+      }
       feed.appendChild(div);
     });
   }

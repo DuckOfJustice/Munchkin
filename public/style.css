@@ -82,8 +82,35 @@ button.secondary { background: linear-gradient(135deg, var(--gold), #d9a53a); bo
 button.ghost { background: transparent; }
 button.danger { background: var(--danger); border-color: var(--danger); color: white; }
 button.small { padding: 5px 10px; font-size: 0.8em; }
+button.wide { width: 100%; }
+
+/* Wie button.*, aber für <a>-Elemente (z. B. den Zurück-zur-Spielauswahl-Link) -
+   button {} greift nur auf echte <button>-Tags, .btn deckt beide ab. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--panel-alt); border: 1px solid var(--border); color: var(--text);
+  padding: 10px 16px; border-radius: 10px; cursor: pointer; font-size: 0.95em; font-weight: 600;
+  text-decoration: none; transition: transform 0.05s ease, filter 0.15s ease;
+}
+.btn:hover { filter: brightness(1.14); }
+.btn.ghost { background: transparent; }
+.btn.small { padding: 5px 10px; font-size: 0.8em; }
+.back-hub-home { margin-top: 14px; }
+
+.tabs { display: flex; gap: 8px; margin: 14px 0 4px; }
+.tab-btn {
+  flex: 1; padding: 10px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--bg-alt); color: var(--text-dim); cursor: pointer; font-weight: 600;
+}
+.tab-btn.active { background: var(--door); color: white; border-color: var(--door); }
+
+.eyebrow { color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.lobby-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
+.code.big { font-size: 1.5rem; padding: 4px 14px; }
 
 .screen { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 24px 12px; }
+#screen-start, #screen-lobby { align-items: center; }
+#screen-start { flex-direction: column; gap: 14px; }
 #screen-game { display: block; padding: 0; min-height: 100vh; }
 .panel {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
@@ -95,11 +122,14 @@ button.small { padding: 5px 10px; font-size: 0.8em; }
 
 .playerlist { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .playerlist li, .playerlist .prow {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
   background: var(--bg-alt); border: 1px solid var(--border); padding: 9px 12px; border-radius: 10px;
 }
 .playerlist .prow.active-turn, .playerlist li.active-turn { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
 .playerlist.compact .prow { font-size: 0.85em; padding: 7px 10px; }
+.playerlist .prow.clickable { cursor: pointer; transition: border-color 0.12s ease; }
+.playerlist .prow.clickable:hover { border-color: var(--door-bright); }
+.playerlist .prow > button { flex: 1 0 100%; }
 .tag { font-size: 0.7em; padding: 2px 8px; border-radius: 999px; background: var(--panel-alt); color: var(--text-dim); }
 .tag.you { background: var(--door); color: white; }
 .tag.off { background: var(--danger); color: white; }
@@ -140,8 +170,26 @@ button.small { padding: 5px 10px; font-size: 0.8em; }
   border-radius: 6px; padding-left: 9px;
   border-left: 3px solid var(--door);
 }
+.logcardlink {
+  color: var(--door-bright); text-decoration: none; font-weight: 600; cursor: pointer;
+}
+.logcardlink:hover { text-decoration: underline; }
 
 .table { min-height: 60vh; }
+
+.tradebox {
+  background: var(--panel); border: 1px solid var(--gold); border-radius: var(--radius); padding: 16px 18px;
+  margin-bottom: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+.tradebox h3 { color: var(--gold-bright); }
+.tradegrid { max-height: 220px; overflow-y: auto; padding: 2px; }
+.tradepick {
+  display: inline-flex; align-items: center; gap: 6px; margin: 0;
+  background: var(--bg-alt); border: 1px solid var(--border); border-radius: 999px;
+  padding: 5px 12px 5px 8px; font-size: 0.85em; cursor: pointer;
+}
+.tradepick input { width: auto; }
+.tradepick.picked { border-color: var(--gold); background: rgba(244,201,93,0.14); color: var(--gold-bright); }
 .banner {
   background: linear-gradient(135deg, var(--gold), #d9a53a); color: #241a05;
   padding: 12px 16px; border-radius: var(--radius); font-weight: 700; margin-bottom: 12px;
@@ -187,26 +235,33 @@ button.small { padding: 5px 10px; font-size: 0.8em; }
 .mypanel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
 
 /* -------- Handkarten-Leiste (unten fixiert, wie bei Wizard) -------- */
+/* max-height + überall überlaufsicher (overflow-y: auto statt hidden) -
+   Munchkin-Karten haben (anders als Wizards reine Bildkarten) unterschiedlich
+   viel Inhalt (Bild+Name+Meta+Aktionsknöpfe), darum werden sie zusätzlich per
+   clamp() an die Fensterhöhe angepasst, damit auf niedrigen/kleinen Screens
+   nichts mehr aus der Leiste rausklippt - im äußersten Fall bleibt die Hand
+   selbst vertikal scrollbar statt Inhalte unsichtbar abzuschneiden. */
 .hand-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
   background: var(--bg-alt); border-top: 1px solid var(--border);
   padding: 10px 16px 14px; box-shadow: 0 -8px 24px rgba(0,0,0,0.35);
+  max-height: 46vh; display: flex; flex-direction: column;
 }
-.hand-bar-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.hand-bar-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
 .hand-bar-label { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
 .hand-list {
-  display: flex; gap: 12px; overflow-x: auto; overflow-y: hidden; padding: 4px 4px 8px;
-  justify-content: safe center; scrollbar-width: thin;
+  display: flex; align-items: flex-start; gap: 12px; overflow-x: auto; overflow-y: auto; padding: 6px 4px 8px;
+  justify-content: safe center; scrollbar-width: thin; flex: 1 1 auto; min-height: 0;
 }
 .hand-list .cardtile {
-  width: 190px; flex-shrink: 0; transition: transform 0.12s ease, box-shadow 0.12s ease;
+  width: clamp(122px, 17vw, 190px); flex-shrink: 0; transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
-.hand-list .cardtile:hover { transform: translateY(-8px); box-shadow: 0 10px 26px rgba(0,0,0,0.5); }
-.hand-list .cardtile .ctimgwrap { height: 150px; }
-.hand-list .cardtile .ctbody { gap: 6px; }
+.hand-list .cardtile:hover { transform: translateY(-6px); box-shadow: 0 10px 26px rgba(0,0,0,0.5); }
+.hand-list .cardtile .ctimgwrap { height: clamp(88px, 15vh, 150px); }
+.hand-list .cardtile .ctbody { gap: 4px; font-size: 0.94em; }
 @media (max-width: 640px) {
-  .hand-list .cardtile { width: 148px; }
-  .hand-list .cardtile .ctimgwrap { height: 116px; }
+  .hand-list .cardtile { width: clamp(112px, 34vw, 148px); }
+  .hand-list .cardtile .ctimgwrap { height: clamp(78px, 13vh, 116px); }
 }
 
 .combatbox, .consequencebox, .revealbox {

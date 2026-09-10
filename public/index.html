@@ -13,29 +13,47 @@
   <div class="panel narrow">
     <h1>🚪 Munchkin <span class="sub">Online</span></h1>
     <p class="hint">Browser-Version für dich und deine Freund:innen. Basierend auf dem offiziellen Regelwerk (Grundregeln) - Details siehe README.</p>
-    <label>Dein Name</label>
-    <input id="nameInput" maxlength="20" placeholder="z. B. Oualid">
-    <div class="row gap">
-      <button id="btnCreate" class="primary">Raum erstellen</button>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="create">Raum erstellen</button>
+      <button class="tab-btn" data-tab="join">Raum beitreten</button>
     </div>
-    <hr>
-    <label>Raum-Code beitreten</label>
-    <div class="row gap">
-      <input id="codeInput" maxlength="4" placeholder="ABCD" style="text-transform:uppercase">
-      <button id="btnJoin">Beitreten</button>
+
+    <div id="tab-create" class="tab-panel">
+      <label>Dein Name</label>
+      <input id="createNameInput" maxlength="20" placeholder="z. B. Oualid">
+      <button id="btnCreate" class="primary wide">Neuen Raum erstellen</button>
     </div>
+
+    <div id="tab-join" class="tab-panel hidden">
+      <label>Dein Name</label>
+      <input id="joinNameInput" maxlength="20" placeholder="z. B. Alex">
+      <label>Raum-Code</label>
+      <input id="codeInput" maxlength="4" placeholder="z. B. AB12" style="text-transform:uppercase">
+      <button id="btnJoin" class="primary wide">Beitreten</button>
+    </div>
+
     <p id="startError" class="error"></p>
+    <p class="hint">3–6 Spieler:innen · ein Gerät pro Person</p>
   </div>
+
+  <a id="btnBackHub" class="btn ghost small hidden back-hub-home" href="/">← Spielauswahl</a>
 </div>
 
 <div id="screen-lobby" class="screen hidden">
   <div class="panel">
-    <h2>Lobby - Raum <span id="lobbyCode" class="code"></span></h2>
-    <p class="hint">Diesen Code an deine Mitspieler:innen weitergeben. Offiziell werden 3-6 Spieler:innen empfohlen, zu zweit/allein geht es auch zum Testen.</p>
+    <div class="lobby-header">
+      <div>
+        <div class="eyebrow">Raum-Code – an deine Mitspieler:innen weitergeben</div>
+        <div id="lobbyCode" class="code big"></div>
+      </div>
+      <button id="btnLeaveLobby" class="ghost small">Verlassen</button>
+    </div>
+    <p class="hint">Offiziell werden 3-6 Spieler:innen empfohlen, zu zweit/allein geht es auch zum Testen.</p>
 
     <div class="row wrap gap" id="setToggles"></div>
 
-    <h3>Spieler:innen</h3>
+    <h3>Spieler:innen (<span id="lobbyCount">0</span>/<span id="lobbyMax">6</span>)</h3>
     <ul id="lobbyPlayers" class="playerlist"></ul>
 
     <div class="row gap" id="hostControls">
@@ -68,17 +86,12 @@
       <div id="combatArea"></div>
       <div id="consequenceArea"></div>
       <div id="phaseActions" class="row gap wrap"></div>
+      <div id="tradeArea"></div>
 
       <section class="mypanel">
         <h3>Meine Figur - Stufe <span id="myLevel"></span></h3>
         <div id="myBadges" class="row gap wrap"></div>
         <div id="myEquip" class="row gap wrap"></div>
-        <h3>Meine Hand</h3>
-        <div id="myHand" class="cardgrid"></div>
-        <div class="row gap" id="sellBar">
-          <span id="sellSum">Ausgewählt: 0 Goldstücke</span>
-          <button id="btnSell" disabled>Verkaufen (je 1000 = 1 Stufe)</button>
-        </div>
       </section>
     </main>
 
@@ -86,6 +99,17 @@
       <h3>Verlauf</h3>
       <div id="logFeed" class="logfeed"></div>
     </aside>
+  </div>
+
+  <div id="hand-bar" class="hand-bar">
+    <div class="hand-bar-top">
+      <div class="hand-bar-label">Deine Hand</div>
+      <div class="row gap" id="sellBar">
+        <span id="sellSum">Ausgewählt: 0 Goldstücke</span>
+        <button id="btnSell" class="small" disabled>Verkaufen (je 1000 = 1 Stufe)</button>
+      </div>
+    </div>
+    <div id="myHand" class="hand-list"></div>
   </div>
 </div>
 
