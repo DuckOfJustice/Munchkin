@@ -323,15 +323,14 @@ abgesichert. Alle Fixes wurden per Mutation gegengeprüft (Fehler wieder
 einbauen -> Test schlägt fehl).
 
 ### 6.1 Jeder Client konnte den Server abschießen (kritisch, behoben)
-`socket.emit('removeBot')` **ohne Argument** beendete den kompletten
-Node-Prozess: die Handler destrukturieren ihren Payload im Funktionskopf
-(`({ botId }) => ...`), und das wirft bei `undefined`, bevor irgendeine
-Prüfung im Rumpf greift. Kein Raum-Beitritt nötig, keine Authentifizierung -
-eine Zeile aus der Browser-Konsole genügte. Da alle Räume nur im
+Ein Socket-Event **ohne Payload** beendete den kompletten Node-Prozess: die
+Handler destrukturieren ihr Argument im Funktionskopf (`({ botId }) => ...`),
+und das wirft bei `undefined`, bevor irgendeine Prüfung im Rumpf greift. Kein
+Raum-Beitritt nötig, keine Authentifizierung. Da alle Räume nur im
 Arbeitsspeicher liegen, war jedes laufende Spiel weg (der Container startet
 per `restart: unless-stopped` zwar neu, aber ohne Spielstand). Betroffen
-waren ~20 Handler, dazu Payloads mit falschem Typ (z.B. `sellItems` mit
-`cardIds: 5` -> `new Set(5)` wirft).
+waren ~20 Handler, dazu Payloads mit falschem Typ (etwa eine Zahl, wo der
+Handler eine Liste erwartet und darüber iteriert).
 
 Behoben durch `onSafe()`: alle Handler werden nicht mehr über `socket.on()`
 registriert, sondern zentral über diese eine Funktion (fehlender Payload ->
@@ -343,9 +342,9 @@ Events ab und prüft, dass der Server danach noch normal antwortet.
 ### 6.2 XSS über den Spielernamen (kritisch, behoben)
 `public/client.js` escapte den Namen an **einer** Stelle nicht: der
 "X bittet dich um Hilfe im Kampf"-Kasten schrieb ihn roh per `innerHTML`.
-Der Server kürzt Namen nur auf 20 Zeichen und filtert kein HTML - und
-`<svg onload=alert()>` ist exakt 20 Zeichen. Ausgeführt wurde das im Browser
-der **angegriffenen** Person, und im `localStorage` liegt unter
+Der Server kürzt Namen nur auf 20 Zeichen und filtert kein HTML - und 20
+Zeichen genügen für ein selbstauslösendes Tag. Ausgeführt wurde das im
+Browser der **angegriffenen** Person, und im `localStorage` liegt unter
 `munchkin_session` der Wiederverbinden-Token: Skript liest Token, meldet sich
 per `joinRoom` als diese Person an, übernimmt deren Platz. Alle anderen ~30
 Einbaustellen benutzen korrekt `escapeHtml()`, diese eine war übersehen.
