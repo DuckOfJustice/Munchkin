@@ -1,0 +1,603 @@
+// Munchkin Online - Client
+(function () {
+  'use strict';
+
+  // -- Pfad-Präfix automatisch ermitteln (für Betrieb hinter dem Spielehub) --
+  function computeBasePath() {
+    const parts = location.pathname.split('/').filter(Boolean);
+    if (parts.length && !parts[0].includes('.')) return '/' + parts[0];
+    return '';
+  }
+  const basePath = computeBasePath();
+  const socket = io({ path: basePath + '/socket.io' });
+
+  const CATEGORY_LABELS = {
+    monster: 'Monster', curse: 'Fluch', race: 'Rasse', class: 'Klasse',
+    item: 'Gegenstand', treasure_other: 'Schatz', door_other: 'Türkarte',
+  };
+
+  let cardIndex = {};
+  let state = null;
+  let myInfo = { playerId: null, hand: [] };
+  let session = loadSession();
+  let sellSelection = new Set();
+
+  function loadSession() {
+    try { return JSON.parse(localStorage.getItem('munchkin_session') || 'null'); } catch (e) { return null; }
+  }
+  function saveSession(s) {
+    session = s;
+    try { localStorage.setItem('munchkin_session', JSON.stringify(s)); } catch (e) { /* ignore */ }
+  }
+  function clearSession() {
+    session = null;
+    try { localStorage.removeItem('munchkin_session'); } catch (e) { /* ignore */ }
+  }
+
+  function $(id) { return document.getElementById(id); }
+  function showScreen(name) {
+    ['start', 'lobby', 'game'].forEach((s) => {
+      $('screen-' + s).classList.toggle('hidden', s !== name);
+    });
+  }
+
+  function card(id) { return cardIndex[id] || { name: id, category: 'door_other', text: '', badstuff: '' }; }
+
+  // ---------------------------------------------------------------------
+  // Start-Screen
+  // ---------------------------------------------------------------------
+
+  $('btnCreate').addEventListener('click', () => {
+    const name = $('nameInput').value.trim();
+    if (!name) return showStartError('Bitte einen Namen eingeben.');
+    socket.emit('createRoom', { name }, (res) => {
+      if (!res.ok) return showStartError(res.error);
+      saveSession({ code: res.code, playerId: res.playerId, token: res.token, name });
+    });
+  });
+
+  $('btnJoin').addEventListener('click', () => {
+    const name = $('nameInput').value.trim();
+    const code = $('codeInput').value.trim().toUpperCase();
+    if (!name) return showStartError('Bitte einen Namen eingeben.');
+    if (!code) return showStartError('Bitte einen Raum-Code eingeben.');
+    socket.emit('joinRoom', { code, name }, (res) => {
+      if (!res.ok) return showStartError(res.error);
+      saveSession({ code: res.code, playerId: res.playerId, token: res.token, name });
+    });
+  });
+
+  function showStartError(msg) { $('startError').textContent = msg || ''; }
+
+  $('btnLeave').addEventListener('click', () => {
+    socket.emit('leaveRoom');
+    clearSession();
+    location.reload();
+  });
+
+  socket.on('connect', () => {
+    if (session && session.code) {
+      socket.emit('joinRoom', { code: session.code, name: session.name, token: session.token }, (res) => {
+        if (!res.ok) { clearSession(); showScreen('start'); return; }
+        saveSession({ code: res.code, playerId: res.playerId, token: res.token, name: session.name });
+      });
+    }
+  });
+
+  socket.on('cardIndex', (idx) => { cardIndex = idx; if (state) render(); });
+  socket.on('yourInfo', (info) => { myInfo = info; if (state) render(); });
+  socket.on('gameState', (s) => { state = s; render(); });
+
+  // ---------------------------------------------------------------------
+  // Rendering
+  // ---------------------------------------------------------------------
+
+  function render() {
+    if (!state) return;
+    if (state.phase === 'lobby') { showScreen('lobby'); renderLobby(); }
+    else { showScreen('game'); renderGame(); }
+  }
+
+  function me() { return state.players.find((p) => p.id === myInfo.playerId); }
+  function isMyTurn() { return state.turnPlayerId === myInfo.playerId; }
+
+  function renderLobby() {
+    $('lobbyCode').textContent = state.code;
+    const list = $('lobbyPlayers');
+    list.innerHTML = '';
+    state.players.forEach((p) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${p.isHost ? '⭐ ' : ''}${escapeHtml(p.name)}${p.isBot ? ' <span class="tag">Bot</span>' : ''}</span>` +
+        (p.id === myInfo.playerId ? '<span class="tag you">Du</span>' : '');
+      if (p.isBot && me() && me().isHost) {
+        const btn = document.createElement('button');
+        btn.className = 'small'; btn.textContent = 'entfernen';
+        btn.onclick = () => socket.emit('removeBot', { botId: p.id });
+        li.appendChild(btn);
+      }
+      list.appendChild(li);
+    });
+
+    const toggles = $('setToggles');
+    toggles.innerHTML = '<b>Sets:</b>';
+    state.setKeys.forEach((k) => {
+      const label = document.createElement('label');
+      label.style.display = 'inline-flex'; label.style.alignItems = 'center'; label.style.gap = '4px'; label.style.margin = '0';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.style.width = 'auto';
+      cb.checked = !!state.settings.sets[k];
+      cb.disabled = !(me() && me().isHost);
+      cb.onchange = () => {
+        const sets = Object.assign({}, state.settings.sets);
+        sets[k] = cb.checked;
+        socket.emit('updateSets', sets);
+      };
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(state.setLabels[k]));
+      toggles.appendChild(label);
+    });
+
+    const iAmHost = me() && me().isHost;
+    $('hostControls').classList.toggle('hidden', !iAmHost);
+    $('btnAddBot').onclick = () => socket.emit('addBot');
+    $('btnStart').onclick = () => socket.emit('startGame');
+    $('btnStart').disabled = state.players.length < 1;
+  }
+
+  function renderGame() {
+    $('gameCode').textContent = state.code;
+    $('deckInfo').textContent = `🚪 Tür: ${state.doorDeckCount} | 💰 Schatz: ${state.treasureDeckCount}`;
+
+    if (state.phase === 'gameend') {
+      const winner = state.players.find((p) => p.id === state.winner);
+      $('turnBanner').textContent = `🏆 ${winner ? winner.name : '?'} hat gewonnen!`;
+    } else {
+      const tp = state.players.find((p) => p.id === state.turnPlayerId);
+      const phaseLabel = {
+        tuer: 'Phase 1: Tür eintreten', aerger: 'Phase 2: Auf Ärger aus sein',
+        pluendern: 'Phase 3: Raum plündern', gabe: 'Phase 4: Milde Gabe', kampf: 'Kampf!',
+      }[state.turnPhase] || '';
+      $('turnBanner').textContent = `${tp ? tp.name : '?'} ist am Zug - ${phaseLabel}`;
+    }
+
+    renderPlayerList();
+    renderDiscardPeek();
+    renderReveal();
+    renderCombat();
+    renderConsequence();
+    renderPhaseActions();
+    renderMyPanel();
+    renderLog();
+
+    if (state.phase === 'gameend') {
+      const banner = $('banner');
+      banner.classList.remove('hidden');
+      const winner = state.players.find((p) => p.id === state.winner);
+      banner.textContent = `🏆 Spiel vorbei! ${winner ? winner.name : '?'} hat Stufe 10 erreicht.`;
+      const btn = document.createElement('button');
+      btn.textContent = 'Zurück zur Lobby'; btn.style.marginLeft = '12px';
+      btn.onclick = () => socket.emit('resetGame');
+      banner.appendChild(btn);
+    } else {
+      $('banner').classList.add('hidden');
+    }
+  }
+
+  function renderPlayerList() {
+    const box = $('playerList');
+    box.innerHTML = '<h3>Spieler:innen</h3>';
+    state.players.forEach((p) => {
+      const row = document.createElement('div');
+      row.className = 'prow' + (p.id === state.turnPlayerId ? ' active-turn' : '');
+      const equip = [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands]
+        .filter(Boolean).length;
+      row.innerHTML = `<span>${escapeHtml(p.name)}${p.isBot ? ' 🤖' : ''}</span>` +
+        `<span>` +
+        (p.id === state.turnPlayerId ? '<span class="tag turn">Zug</span> ' : '') +
+        (p.id === myInfo.playerId ? '<span class="tag you">Du</span> ' : '') +
+        (!p.connected ? '<span class="tag off">offline</span> ' : '') +
+        `<span class="tag">Stufe ${p.level}</span> <span class="tag">⚔ ${p.strength}</span> <span class="tag">🎒 ${equip}</span>` +
+        `</span>`;
+      box.appendChild(row);
+    });
+  }
+
+  function renderDiscardPeek() {
+    const box = $('discardPeek');
+    let html = '<h3>Ablagestapel</h3>';
+    html += `<div class="hint">Tür (${state.doorDiscardCount}): ${state.doorDiscardTop ? escapeHtml(card(state.doorDiscardTop).name) : '-'}</div>`;
+    html += `<div class="hint">Schatz (${state.treasureDiscardCount}): ${state.treasureDiscardTop ? escapeHtml(card(state.treasureDiscardTop).name) : '-'}</div>`;
+    box.innerHTML = html;
+  }
+
+  function renderReveal() {
+    const box = $('revealArea');
+    box.innerHTML = '';
+    if (!state.revealedDoorCard) return;
+    const c = card(state.revealedDoorCard);
+    const div = document.createElement('div');
+    div.className = 'revealbox';
+    div.innerHTML = `<h3>Aufgedeckte Türkarte</h3>`;
+    div.appendChild(cardTile(state.revealedDoorCard, {}));
+    box.appendChild(div);
+  }
+
+  function renderCombat() {
+    const box = $('combatArea');
+    box.innerHTML = '';
+    const c = state.combat;
+    if (!c) return;
+    const actor = state.players.find((p) => p.id === c.actorId);
+    const helper = c.helperId ? state.players.find((p) => p.id === c.helperId) : null;
+    const monsterLevel = c.monsterIds.reduce((s, id) => s + (card(id).level || 0), 0);
+    const playerStrength = (actor ? actor.strength : 0) + (helper ? helper.strength : 0) + c.actorModifier;
+    const monsterStrength = monsterLevel + c.monsterModifier;
+
+    const div = document.createElement('div');
+    div.className = 'combatbox';
+    div.innerHTML = `<h3>⚔️ Kampf gegen ${c.monsterIds.map((id) => card(id).name).join(' + ')}</h3>`;
+
+    const monsterRow = document.createElement('div');
+    monsterRow.className = 'cardgrid';
+    c.monsterIds.forEach((id) => monsterRow.appendChild(cardTile(id, {})));
+    div.appendChild(monsterRow);
+
+    const iAmActor = c.actorId === myInfo.playerId;
+    const iAmHelper = c.helperId === myInfo.playerId;
+    const canAdjust = iAmActor || iAmHelper;
+
+    const strengthRow = document.createElement('div');
+    strengthRow.className = 'strengthrow';
+    strengthRow.innerHTML = `<div>Ihr: <span class="${playerStrength > monsterStrength ? 'strengthgood' : 'strengthbad'}">${playerStrength}</span></div>` +
+      `<div class="vs">vs.</div><div>Monster: <b>${monsterStrength}</b></div>`;
+    div.appendChild(strengthRow);
+
+    if (canAdjust) {
+      const modRow = document.createElement('div');
+      modRow.className = 'row gap wrap';
+      modRow.innerHTML = `
+        <label style="margin:0">Euer Bonus/Malus (Karteneffekte manuell eintragen)
+          <input type="number" id="actorModInput" value="${c.actorModifier}" style="width:80px">
+        </label>
+        <label style="margin:0">Monster Bonus/Malus
+          <input type="number" id="monsterModInput" value="${c.monsterModifier}" style="width:80px">
+        </label>`;
+      div.appendChild(modRow);
+      modRow.querySelector('#actorModInput').onchange = (e) => socket.emit('setCombatModifier', { who: 'actor', value: e.target.value });
+      modRow.querySelector('#monsterModInput').onchange = (e) => socket.emit('setCombatModifier', { who: 'monster', value: e.target.value });
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'row gap wrap';
+
+    if (iAmActor && !c.mustFlee) {
+      const evalBtn = document.createElement('button');
+      evalBtn.className = 'primary'; evalBtn.textContent = 'Kampf auswerten';
+      evalBtn.onclick = () => socket.emit('evaluateCombat');
+      actions.appendChild(evalBtn);
+
+      if (!c.helperId && !c.helperPending) {
+        const helpSelect = document.createElement('select');
+        helpSelect.innerHTML = '<option value="">Um Hilfe bitten...</option>' +
+          state.players.filter((p) => p.id !== c.actorId && p.connected)
+            .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+        helpSelect.onchange = () => { if (helpSelect.value) socket.emit('requestHelp', { targetId: helpSelect.value }); };
+        actions.appendChild(helpSelect);
+      }
+      if (c.helperPending) {
+        actions.appendChild(textNode(`Warte auf Antwort von ${state.players.find((p) => p.id === c.helperPending.targetId).name}...`));
+      }
+    }
+
+    if (c.helperPending && c.helperPending.targetId === myInfo.playerId) {
+      const ask = document.createElement('div');
+      ask.innerHTML = `<b>${state.players.find((p) => p.id === c.actorId).name} bittet dich um Hilfe im Kampf!</b>`;
+      const yes = document.createElement('button'); yes.textContent = 'Helfen'; yes.className = 'primary';
+      yes.onclick = () => socket.emit('respondHelp', { accept: true });
+      const no = document.createElement('button'); no.textContent = 'Ablehnen';
+      no.onclick = () => socket.emit('respondHelp', { accept: false });
+      ask.appendChild(yes); ask.appendChild(no);
+      div.appendChild(ask);
+    }
+
+    if (iAmActor && c.mustFlee) {
+      div.appendChild(textNode('Ihr verliert diesen Kampf - jetzt fliehen (Würfelwurf ≥ 5 nötig)!'));
+      const fleeRow = document.createElement('div');
+      fleeRow.className = 'row gap';
+      fleeRow.innerHTML = `<label style="margin:0">Wurf-Modifikator <input type="number" id="fleeModInput" value="0" style="width:70px"></label>`;
+      const fleeBtn = document.createElement('button');
+      fleeBtn.className = 'primary'; fleeBtn.textContent = '🎲 Fliehen';
+      fleeBtn.onclick = () => socket.emit('attemptFlee', { modifier: fleeRow.querySelector('#fleeModInput').value });
+      fleeRow.appendChild(fleeBtn);
+      div.appendChild(fleeRow);
+    }
+
+    div.appendChild(actions);
+    box.appendChild(div);
+  }
+
+  function renderConsequence() {
+    const box = $('consequenceArea');
+    box.innerHTML = '';
+    const pc = state.pendingConsequence;
+    if (!pc) return;
+    const player = state.players.find((p) => p.id === pc.playerId);
+    const div = document.createElement('div');
+    div.className = 'consequencebox';
+    div.innerHTML = `<h3>${pc.kind === 'curse' ? '💀 Fluch' : '☠️ Schlimme Dinge'} - ${escapeHtml(player.name)}</h3>` +
+      `<p>${pc.text ? formatCardText(pc.text) : '(kein Text)'}</p>`;
+
+    if (pc.playerId === myInfo.playerId) {
+      div.appendChild(textNode('Wende die Auswirkung mit den Werkzeugen unten an (Original-Kartentext oben beachten), dann "Fertig".'));
+      const tools = document.createElement('div');
+      tools.className = 'row gap wrap';
+      const minus = document.createElement('button'); minus.textContent = '-1 Stufe';
+      minus.onclick = () => socket.emit('applyConsequenceAction', { type: 'levelDelta', delta: -1 });
+      const plus = document.createElement('button'); plus.textContent = '+1 Stufe';
+      plus.onclick = () => socket.emit('applyConsequenceAction', { type: 'levelDelta', delta: 1 });
+      const death = document.createElement('button'); death.className = 'danger'; death.textContent = '💀 Ich bin gestorben';
+      death.onclick = () => { if (confirm('Charakter wirklich zurücksetzen (Stufe 1, Hand & Ausrüstung leer)?')) socket.emit('applyConsequenceAction', { type: 'death' }); };
+      tools.appendChild(minus); tools.appendChild(plus); tools.appendChild(death);
+      div.appendChild(tools);
+
+      const myPlayer = me();
+      const discardables = [...myPlayer.hand || myInfo.hand, ...[]];
+      const allMine = [...myInfo.hand, ...equippedIdsOf(myPlayer)];
+      if (allMine.length) {
+        const sel = document.createElement('select');
+        sel.innerHTML = '<option value="">Gegenstand/Karte ablegen...</option>' +
+          allMine.map((id) => `<option value="${id}">${escapeHtml(card(id).name)}</option>`).join('');
+        sel.onchange = () => { if (sel.value) { socket.emit('applyConsequenceAction', { type: 'discardCard', cardId: sel.value }); sel.value = ''; } };
+        div.appendChild(sel);
+      }
+
+      const doneBtn = document.createElement('button');
+      doneBtn.className = 'primary'; doneBtn.textContent = 'Fertig';
+      doneBtn.onclick = () => socket.emit('ackConsequence');
+      div.appendChild(doneBtn);
+    } else {
+      div.appendChild(textNode('Warte darauf, dass die Auswirkung angewendet wird...'));
+    }
+    box.appendChild(div);
+  }
+
+  function equippedIdsOf(p) {
+    if (!p) return [];
+    return [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands].filter(Boolean);
+  }
+
+  function renderPhaseActions() {
+    const box = $('phaseActions');
+    box.innerHTML = '';
+    if (state.phase === 'gameend' || state.combat || state.pendingConsequence) return;
+    if (!isMyTurn()) { box.appendChild(textNode('Warte, bis du an der Reihe bist...')); return; }
+
+    if (state.turnPhase === 'tuer' && !state.revealedDoorCard) {
+      const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = '🚪 Tür eintreten (Karte aufdecken)';
+      btn.onclick = () => socket.emit('drawDoor');
+      box.appendChild(btn);
+    } else if (state.turnPhase === 'aerger') {
+      const skip = document.createElement('button'); skip.className = 'primary'; skip.textContent = 'Kein Monster spielen -> weiter';
+      skip.onclick = () => socket.emit('skipToLoot');
+      box.appendChild(skip);
+      box.appendChild(textNode('Du kannst stattdessen unten bei einer Monster-Karte in deiner Hand "Als Monster spielen" wählen.'));
+    } else if (state.turnPhase === 'pluendern') {
+      const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = '📦 Raum plündern (verdeckt ziehen)';
+      btn.onclick = () => socket.emit('lootRoom');
+      box.appendChild(btn);
+    } else if (state.turnPhase === 'gabe') {
+      const myPlayer = me();
+      const over = myPlayer ? myInfo.hand.length - 5 : 0;
+      if (over > 0) {
+        box.appendChild(textNode(`Milde Gabe: bitte noch ${over} Karte(n) ablegen (max. 5 auf der Hand).`));
+      } else {
+        const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = 'Zug beenden';
+        btn.onclick = () => socket.emit('endTurn');
+        box.appendChild(btn);
+      }
+    }
+  }
+
+  function renderMyPanel() {
+    const p = me();
+    if (!p) return;
+    $('myLevel').textContent = p.level;
+
+    const badges = $('myBadges');
+    badges.innerHTML = '';
+    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)')));
+    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
+    if (!p.races.length && !p.classes.length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+
+    const equip = $('myEquip');
+    equip.innerHTML = '';
+    const slotDefs = [
+      ['head', 'Kopf', p.equipped.head],
+      ['armor', 'Rüstung', p.equipped.armor],
+      ['feet', 'Schuhe', p.equipped.feet],
+      ['hand1', 'Hand 1', p.equipped.hands[0]],
+      ['hand2', 'Hand 2', p.equipped.hands[1]],
+    ];
+    slotDefs.forEach(([key, label, cardId]) => {
+      const el = document.createElement('div');
+      el.className = 'equipslot' + (cardId ? ' filled' : '');
+      if (cardId) {
+        const c = card(cardId);
+        const img = document.createElement('img');
+        img.className = 'eqimg'; img.alt = ''; img.src = cardImageUrl(cardId);
+        img.onerror = () => img.remove();
+        el.innerHTML = `<b>${label}</b>`;
+        el.appendChild(img);
+        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`));
+        const btn = document.createElement('button');
+        btn.className = 'small'; btn.textContent = 'ablegen';
+        btn.onclick = () => socket.emit('unequipItem', { cardId });
+        el.appendChild(btn);
+      } else {
+        el.innerHTML = `<b>${label}</b><span class="hint">leer</span>`;
+      }
+      equip.appendChild(el);
+    });
+
+    renderHand(p);
+  }
+
+  function renderHand(p) {
+    const box = $('myHand');
+    box.innerHTML = '';
+    myInfo.hand.forEach((id) => {
+      const tile = cardTile(id, { hand: true });
+      tile.querySelector('.ctbody').appendChild(handActionsFor(id, p));
+      box.appendChild(tile);
+    });
+    updateSellBar();
+  }
+
+  function handActionsFor(id, p) {
+    const c = card(id);
+    const wrap = document.createElement('div');
+    wrap.className = 'row gap wrap';
+    wrap.style.marginTop = '4px';
+
+    const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence;
+
+    if (c.category === 'item' && myTurn) {
+      const btn = mkBtn('Anlegen', () => socket.emit('equipItem', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger') {
+      const btn = mkBtn('Als Monster spielen', () => socket.emit('playMonsterFromHand', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    if ((c.category === 'race' || c.category === 'class') && myTurn) {
+      const btn = mkBtn('Spielen', () => socket.emit('playRaceOrClass', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    if (typeof c.gold === 'number' && c.gold > 0) {
+      const label = document.createElement('label');
+      label.style.margin = '0'; label.style.display = 'inline-flex'; label.style.gap = '4px'; label.style.alignItems = 'center';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.style.width = 'auto';
+      cb.checked = sellSelection.has(id);
+      cb.onchange = () => { if (cb.checked) sellSelection.add(id); else sellSelection.delete(id); updateSellBar(); };
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(`${c.gold} GS`));
+      wrap.appendChild(label);
+    }
+    if (myTurn) {
+      const btn = mkBtn('Ablegen', () => socket.emit('discardFromHand', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    return wrap;
+  }
+
+  function mkBtn(label, onClick) {
+    const b = document.createElement('button');
+    b.className = 'small'; b.textContent = label; b.onclick = onClick;
+    return b;
+  }
+
+  function updateSellBar() {
+    // ungültige Auswahl (Karte nicht mehr auf der Hand) entfernen
+    for (const id of Array.from(sellSelection)) {
+      if (!myInfo.hand.includes(id)) sellSelection.delete(id);
+    }
+    let sum = 0;
+    sellSelection.forEach((id) => { sum += card(id).gold || 0; });
+    $('sellSum').textContent = `Ausgewählt: ${sum} Goldstücke`;
+    const btn = $('btnSell');
+    btn.disabled = sum < 1000;
+    btn.onclick = () => {
+      socket.emit('sellItems', { cardIds: Array.from(sellSelection) });
+      sellSelection.clear();
+    };
+  }
+
+  function renderLog() {
+    const feed = $('logFeed');
+    feed.innerHTML = '';
+    state.logs.slice().reverse().forEach((l, i) => {
+      const div = document.createElement('div');
+      div.className = 'logline' + (i === 0 ? ' logline-latest' : '');
+      div.textContent = l.text;
+      feed.appendChild(div);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Karten-Kacheln + Modal
+  // ---------------------------------------------------------------------
+
+  function cardImageUrl(id) { return `images/${id}.webp`; }
+
+  function cardTile(id, opts) {
+    opts = opts || {};
+    const c = card(id);
+    const div = document.createElement('div');
+    div.className = `cardtile cat-${c.category}${opts.slim ? ' slim' : ''}`;
+    let meta = '';
+    if (c.category === 'monster') meta = `Stufe ${c.level} | 🎁 ${c.treasureCount || 0}`;
+    else if (c.category === 'item') meta = `${c.slotLabel || ''}${c.bonus ? ` +${c.bonus}` : ''}${typeof c.gold === 'number' ? ` | ${c.gold} GS` : ''}`;
+    else if (typeof c.gold === 'number') meta = `${c.gold} GS`;
+
+    const imgWrap = document.createElement('div');
+    imgWrap.className = 'ctimgwrap';
+    const img = document.createElement('img');
+    img.className = 'ctimg'; img.loading = 'lazy'; img.alt = '';
+    img.src = cardImageUrl(id);
+    img.onerror = () => { div.classList.add('noimg'); imgWrap.remove(); };
+    imgWrap.appendChild(img);
+    div.appendChild(imgWrap);
+
+    const type = document.createElement('span');
+    type.className = 'cttype'; type.textContent = CATEGORY_LABELS[c.category] || '';
+    div.appendChild(type);
+
+    const body = document.createElement('div');
+    body.className = 'ctbody';
+    body.innerHTML = `<span class="ctname">${escapeHtml(c.name)}</span>` +
+      (meta ? `<span class="ctmeta">${escapeHtml(meta)}</span>` : '');
+    div.appendChild(body);
+
+    div.addEventListener('click', (e) => {
+      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'LABEL') return;
+      openCardModal(id);
+    });
+    return div;
+  }
+
+  function openCardModal(id) {
+    const c = card(id);
+    const img = new Image();
+    img.className = 'modalimg';
+    img.alt = '';
+    img.src = cardImageUrl(id);
+    img.onerror = () => img.remove();
+    $('cardModalBody').innerHTML = `<h3>${escapeHtml(c.name)}</h3>` +
+      `<p class="hint">${CATEGORY_LABELS[c.category] || ''} - ${escapeHtml(c.setLabel || '')}</p>` +
+      (c.text ? `<p>${formatCardText(c.text)}</p>` : '') +
+      (c.badstuff ? `<p><b>Schlimme Dinge:</b> ${formatCardText(c.badstuff)}</p>` : '');
+    $('cardModalBody').prepend(img);
+    $('cardModal').classList.remove('hidden');
+  }
+  $('cardModalClose').addEventListener('click', () => $('cardModal').classList.add('hidden'));
+
+  function smallTag(text, color) {
+    const span = document.createElement('span');
+    span.className = 'tag'; span.style.background = color; span.style.color = 'white';
+    span.textContent = text;
+    return span;
+  }
+  function textNode(text) { const s = document.createElement('span'); s.className = 'hint'; s.textContent = text; return s; }
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  }
+  // Kartentexte aus den eigenen Spieldaten enthalten vereinzelt einfache
+  // Formatierungs-Tags (<b>, <br>) - escapen und dann gezielt wieder
+  // freigeben, statt sie als sichtbaren Text ("&lt;b&gt;") anzuzeigen.
+  function formatCardText(s) {
+    return escapeHtml(s)
+      .replace(/&lt;b&gt;/gi, '<b>').replace(/&lt;\/b&gt;/gi, '</b>')
+      .replace(/&lt;br\s*\/?&gt;/gi, '<br>');
+  }
+})();

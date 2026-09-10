@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Munchkin – Online</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%AA%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="screen-start" class="screen">
+  <div class="panel narrow">
+    <h1>🚪 Munchkin <span class="sub">Online</span></h1>
+    <p class="hint">Browser-Version für dich und deine Freund:innen. Basierend auf dem offiziellen Regelwerk (Grundregeln) - Details siehe README.</p>
+    <label>Dein Name</label>
+    <input id="nameInput" maxlength="20" placeholder="z. B. Oualid">
+    <div class="row gap">
+      <button id="btnCreate" class="primary">Raum erstellen</button>
+    </div>
+    <hr>
+    <label>Raum-Code beitreten</label>
+    <div class="row gap">
+      <input id="codeInput" maxlength="4" placeholder="ABCD" style="text-transform:uppercase">
+      <button id="btnJoin">Beitreten</button>
+    </div>
+    <p id="startError" class="error"></p>
+  </div>
+</div>
+
+<div id="screen-lobby" class="screen hidden">
+  <div class="panel">
+    <h2>Lobby - Raum <span id="lobbyCode" class="code"></span></h2>
+    <p class="hint">Diesen Code an deine Mitspieler:innen weitergeben. Offiziell werden 3-6 Spieler:innen empfohlen, zu zweit/allein geht es auch zum Testen.</p>
+
+    <div class="row wrap gap" id="setToggles"></div>
+
+    <h3>Spieler:innen</h3>
+    <ul id="lobbyPlayers" class="playerlist"></ul>
+
+    <div class="row gap" id="hostControls">
+      <button id="btnAddBot">+ Bot</button>
+      <button id="btnStart" class="primary">Spiel starten</button>
+    </div>
+    <p class="hint">Nur der Host (⭐) sieht diese Steuerung.</p>
+  </div>
+</div>
+
+<div id="screen-game" class="screen hidden">
+  <header class="gamebar">
+    <div><b>Raum</b> <span id="gameCode" class="code"></span></div>
+    <div id="turnBanner" class="turnbanner"></div>
+    <div class="row gap">
+      <span id="deckInfo"></span>
+      <button id="btnLeave" class="ghost">Verlassen</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div id="playerList" class="playerlist compact"></div>
+      <div id="discardPeek" class="panel small"></div>
+    </aside>
+
+    <main class="table">
+      <div id="banner" class="banner hidden"></div>
+      <div id="revealArea"></div>
+      <div id="combatArea"></div>
+      <div id="consequenceArea"></div>
+      <div id="phaseActions" class="row gap wrap"></div>
+
+      <section class="mypanel">
+        <h3>Meine Figur - Stufe <span id="myLevel"></span></h3>
+        <div id="myBadges" class="row gap wrap"></div>
+        <div id="myEquip" class="row gap wrap"></div>
+        <h3>Meine Hand</h3>
+        <div id="myHand" class="cardgrid"></div>
+        <div class="row gap" id="sellBar">
+          <span id="sellSum">Ausgewählt: 0 Goldstücke</span>
+          <button id="btnSell" disabled>Verkaufen (je 1000 = 1 Stufe)</button>
+        </div>
+      </section>
+    </main>
+
+    <aside class="logpane">
+      <h3>Verlauf</h3>
+      <div id="logFeed" class="logfeed"></div>
+    </aside>
+  </div>
+</div>
+
+<div id="cardModal" class="modal hidden">
+  <div class="modalbox">
+    <div id="cardModalBody"></div>
+    <button id="cardModalClose">Schließen</button>
+  </div>
+</div>
+
+<script src="socket.io/socket.io.js"></script>
+<script src="client.js"></script>
+</body>
+</html>
