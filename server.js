@@ -18,6 +18,7 @@
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
 
@@ -71,8 +72,12 @@ function makeRoomCode() {
   return code;
 }
 
+// Wird u.a. für den Wiederverbinden-Token benutzt. Wer den Token einer anderen
+// Person kennt, übernimmt deren Platz im Spiel (siehe joinRoom) - deshalb aus
+// crypto und nicht aus Math.random(), dessen Zustand sich aus wenigen
+// beobachteten Werten rekonstruieren lässt.
 function makeId() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return crypto.randomBytes(16).toString('hex');
 }
 
 function shuffle(arr) {
@@ -239,8 +244,20 @@ function equippedBonusSum(player) {
   }, 0);
 }
 
+// Machtgruppe Höllenritter, "Höllenritterrüstung": eine im Kampf +5 werte
+// Rüstung, die zugleich als Rüstung UND Kopfbedeckung zählt - laut Karte darf
+// daneben keine andere Rüstung/Kopfbedeckung getragen werden. Statt das
+// Anlegen zu blockieren, zählt der Bonus nur, solange beide Slots frei sind:
+// gleiches Ergebnis, egal in welcher Reihenfolge Karte und Ausrüstung kommen,
+// und die Spielerin sieht die Zahl sofort statt einer Fehlermeldung.
+// ponytail: bewusst keine Blockier-Logik im Anlegen-Pfad.
+function hellknightArmorBonus(player) {
+  if (!hasPowerGroup(player, 'HÖLLENRITTER')) return 0;
+  return (player.equipped.armor || player.equipped.head) ? 0 : 5;
+}
+
 function baseStrength(player) {
-  return player.level + equippedBonusSum(player);
+  return player.level + equippedBonusSum(player) + hellknightArmorBonus(player);
 }
 
 // Ein paar Gegenstände geben laut Kartentext einen zusätzlichen Bonus/Malus,
@@ -510,9 +527,12 @@ function discardCard(room, cardId) {
 }
 
 function applyDeathConsequence(room, player) {
-  room.doorDiscard.push(...player.hand.filter((id) => card(id).type === 'door'));
-  room.treasureDiscard.push(...player.hand.filter((id) => card(id).type === 'treasure'));
-  room.doorDiscard.push(...equippedItemIds(player));
+  // Über discardCard(), weil das nach Kartentyp auf den richtigen Stapel legt.
+  // Angelegte Gegenstände sind ausnahmslos Schatzkarten (handleEquipItem lässt
+  // nur category 'item' zu, und die gibt es nur als type 'treasure') - früher
+  // landeten sie hier pauschal auf dem Tür-Ablagestapel und wurden beim
+  // Neumischen zu Türkarten.
+  [...player.hand, ...equippedItemIds(player)].forEach((id) => discardCard(room, id));
   player.hand = [];
   player.equipped = { head: null, armor: null, feet: null, hands: [null, null] };
   setLevel(player, 1);
@@ -1708,12 +1728,37 @@ function handleRespondHelp(room, playerId, accept) {
   touchRoom(room);
 }
 
+// "Du gewinnst bei einem Gleichstand im Kampf." ALUFOLIE ist eine
+// treasure_other-Karte und damit nicht anlegbar - sie liegt auf der Hand.
+// Ohne sie verliert ein Gleichstand immer, sie einzusetzen ist also nie
+// schlechter als sie liegen zu lassen. Deshalb ohne Rückfrage automatisch,
+// statt dafür eine eigene Kampf-Schaltfläche zu bauen.
+// ponytail: als Einwegkarte behandelt (Text nennt keine Dauerwirkung).
+const TIE_BREAKER_CARD = 'ALUFOLIE';
+
+function findTieBreaker(room) {
+  const c = room.combat;
+  const sides = [findPlayer(room, c.actorId), c.helperId ? findPlayer(room, c.helperId) : null];
+  for (const p of sides) {
+    if (!p) continue;
+    const cardId = p.hand.find((id) => { const cd = card(id); return cd && cd.name === TIE_BREAKER_CARD; });
+    if (cardId) return { player: p, cardId };
+  }
+  return null;
+}
+
 function handleEvaluateCombat(room, playerId) {
   if (!room.combat) return;
   const c = room.combat;
   if (c.actorId !== playerId) return;
   const { playerStrength, monsterStrength } = combatTotals(room);
-  if (playerStrength > monsterStrength) {
+  const tie = playerStrength === monsterStrength ? findTieBreaker(room) : null;
+  if (tie) {
+    removeFromHand(tie.player, tie.cardId);
+    discardCard(room, tie.cardId);
+    log(room, `${tie.player.name} setzt "${TIE_BREAKER_CARD}" ein: Gleichstand (${playerStrength} vs. ${monsterStrength}) zählt als Sieg.`, [tie.cardId]);
+  }
+  if (playerStrength > monsterStrength || tie) {
     resolveCombatWin(room);
   } else {
     c.mustFlee = true;
@@ -1751,7 +1796,11 @@ function handleAttemptFlee(room, playerId, modifier) {
   if (c.actorId !== playerId) return;
   const actor = findPlayer(room, c.actorId);
   const roll = rollDie();
-  const mod = Math.max(-9, Math.min(9, Math.round(Number(modifier) || 0)));
+  // Machtgruppe Assassine der Roten Mantis, "Heimlichkeit": +1 auf Weglaufen.
+  // Kommt nach der Begrenzung dazu, weil `modifier` aus dem Client stammt und
+  // dieser Bonus serverseitig feststeht.
+  const stealth = hasPowerGroup(actor, 'ASSASSINE DER ROTEN MANTIS') ? 1 : 0;
+  const mod = Math.max(-9, Math.min(9, Math.round(Number(modifier) || 0))) + stealth;
   const total = roll + mod;
   const success = total >= 5;
   log(room, `${actor.name} würfelt ${roll} (${mod >= 0 ? '+' : ''}${mod} = ${total}) zum Weglaufen: ${success ? 'geschafft!' : 'gescheitert!'}`);
@@ -2098,8 +2147,29 @@ function scheduleBotActionsIfNeeded(room) {
 // Socket.IO
 // ---------------------------------------------------------------------------
 
+// Ein Client bestimmt Event-Namen UND Payload selbst - beides ist ungeprüfte
+// Fremdeingabe. Ohne Absicherung genügte ein `socket.emit('removeBot')` ganz
+// ohne Argument, um den kompletten Serverprozess zu beenden (Destrukturierung
+// von undefined im Parameter der Handler-Funktion) und damit ALLE laufenden
+// Spiele zu verlieren - die Räume liegen nur im Arbeitsspeicher.
+//
+// Deshalb wird jeder Handler zentral über diese Funktion registriert statt
+// über socket.on() direkt: fehlender Payload wird zu {}, ein fehlender
+// Callback zu einer No-Op-Funktion, und ein Fehler im Handler beendet nur
+// dieses eine Event statt des Prozesses. Damit greift der Schutz auch für
+// jeden künftig ergänzten Handler, ohne dass daran gedacht werden muss.
+function onSafe(socket, event, handler) {
+  socket.on(event, (payload, cb) => {
+    try {
+      handler(payload == null ? {} : payload, typeof cb === 'function' ? cb : () => {});
+    } catch (err) {
+      console.error(`Fehler im Event "${event}" (Socket ${socket.id}):`, err && err.message);
+    }
+  });
+}
+
 io.on('connection', (socket) => {
-  socket.on('createRoom', ({ name }, cb) => {
+  onSafe(socket, 'createRoom', ({ name }, cb) => {
     try {
       if (isRateLimited(`createRoom:${getClientIp(socket)}`, 8, 60 * 1000)) {
         return cb({ ok: false, error: 'Zu viele neue Räume in kurzer Zeit. Bitte kurz warten.' });
@@ -2121,7 +2191,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('joinRoom', ({ code, name, token }, cb) => {
+  onSafe(socket, 'joinRoom', ({ code, name, token }, cb) => {
     if (isRateLimited(`joinRoom:${getClientIp(socket)}`, 20, 60 * 1000)) {
       return cb({ ok: false, error: 'Zu viele Versuche. Bitte kurz warten.' });
     }
@@ -2160,7 +2230,7 @@ io.on('connection', (socket) => {
     broadcastState(room);
   });
 
-  socket.on('leaveRoom', () => {
+  onSafe(socket, 'leaveRoom', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room) return;
     const player = findPlayer(room, socket.data.playerId);
@@ -2176,17 +2246,23 @@ io.on('connection', (socket) => {
     socket.leave(room.code);
     socket.data.roomCode = null;
     socket.data.playerId = null;
-    if (room.players.length === 0) rooms.delete(room.code); else broadcastState(room);
+    if (room.players.length === 0) {
+      // Aufräum-Timer mitnehmen, sonst hält er den Raum noch stundenlang im
+      // Speicher, obwohl ihn niemand mehr erreichen kann.
+      if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+      if (room.botTimer) clearTimeout(room.botTimer);
+      rooms.delete(room.code);
+    } else broadcastState(room);
   });
 
-  socket.on('addBot', () => {
+  onSafe(socket, 'addBot', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.phase !== 'lobby' || socket.data.playerId !== room.hostId) return;
     addBot(room);
     broadcastState(room);
   });
 
-  socket.on('removeBot', ({ botId }) => {
+  onSafe(socket, 'removeBot', ({ botId }) => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.phase !== 'lobby' || socket.data.playerId !== room.hostId) return;
     const bot = findPlayer(room, botId);
@@ -2195,7 +2271,7 @@ io.on('connection', (socket) => {
     broadcastState(room);
   });
 
-  socket.on('updateSets', (sets) => {
+  onSafe(socket, 'updateSets', (sets) => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.phase !== 'lobby' || socket.data.playerId !== room.hostId) return;
     SET_KEYS.forEach((k) => { if (typeof sets[k] === 'boolean') room.settings.sets[k] = sets[k]; });
@@ -2203,7 +2279,7 @@ io.on('connection', (socket) => {
     broadcastState(room);
   });
 
-  socket.on('startGame', () => {
+  onSafe(socket, 'startGame', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.phase !== 'lobby' || socket.data.playerId !== room.hostId) return;
     if (room.players.length < 1 || room.players.length > MAX_PLAYERS) return;
@@ -2211,7 +2287,7 @@ io.on('connection', (socket) => {
     broadcastState(room);
   });
 
-  socket.on('resetGame', () => {
+  onSafe(socket, 'resetGame', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || socket.data.playerId !== room.hostId) return;
     room.phase = 'lobby';
@@ -2225,35 +2301,35 @@ io.on('connection', (socket) => {
   });
 
   // --- Spielzüge ---
-  socket.on('drawDoor', () => act(socket, (room, pid) => handleDrawDoor(room, pid)));
-  socket.on('ackConsequence', () => act(socket, (room, pid) => handleAckConsequence(room, pid)));
-  socket.on('applyConsequenceAction', (action) => act(socket, (room, pid) => handleApplyConsequenceAction(room, pid, action)));
-  socket.on('resolveConsequenceChoice', ({ optionId }) => act(socket, (room, pid) => handleResolveConsequenceChoice(room, pid, optionId)));
-  socket.on('useCardPower', ({ cardId }) => act(socket, (room, pid) => handleUseCardPower(room, pid, cardId)));
-  socket.on('resolveCardChoice', ({ optionId }) => act(socket, (room, pid) => handleResolveCardChoice(room, pid, optionId)));
-  socket.on('resolveCardTarget', ({ targetId }) => act(socket, (room, pid) => handleResolveCardTarget(room, pid, targetId)));
-  socket.on('resolveCardCardChoice', ({ cardId }) => act(socket, (room, pid) => handleResolveCardCardChoice(room, pid, cardId)));
-  socket.on('useGuaranteedFlee', ({ cardId }) => act(socket, (room, pid) => handleUseGuaranteedFlee(room, pid, cardId)));
-  socket.on('playMonsterFromHand', ({ cardId }) => act(socket, (room, pid) => handlePlayMonsterFromHand(room, pid, cardId)));
-  socket.on('skipToLoot', () => act(socket, (room, pid) => handleSkipToLoot(room, pid)));
-  socket.on('lootRoom', () => act(socket, (room, pid) => handleLootRoom(room, pid)));
-  socket.on('setCombatModifier', ({ who, value }) => act(socket, (room, pid) => handleSetCombatModifier(room, pid, who, value)));
-  socket.on('playCombatCard', ({ cardId }) => act(socket, (room, pid) => handlePlayCombatCard(room, pid, cardId)));
-  socket.on('proposeTrade', ({ toId, offerCardIds }) => act(socket, (room, pid) => handleProposeTrade(room, pid, toId, offerCardIds)));
-  socket.on('cancelTrade', ({ tradeId }) => act(socket, (room, pid) => handleCancelTrade(room, pid, tradeId)));
-  socket.on('respondTrade', ({ tradeId, accept, counterCardIds }) => act(socket, (room, pid) => handleRespondTrade(room, pid, tradeId, accept, counterCardIds)));
-  socket.on('requestHelp', ({ targetId }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId)));
-  socket.on('respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
-  socket.on('evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
-  socket.on('attemptFlee', ({ modifier }) => act(socket, (room, pid) => handleAttemptFlee(room, pid, modifier)));
-  socket.on('equipItem', ({ cardId }) => act(socket, (room, pid) => handleEquipItem(room, pid, cardId)));
-  socket.on('unequipItem', ({ cardId }) => act(socket, (room, pid) => handleUnequipItem(room, pid, cardId)));
-  socket.on('sellItems', ({ cardIds }) => act(socket, (room, pid) => handleSellItems(room, pid, cardIds)));
-  socket.on('playRaceOrClass', ({ cardId }) => act(socket, (room, pid) => handlePlayRaceOrClass(room, pid, cardId)));
-  socket.on('discardFromHand', ({ cardId }) => act(socket, (room, pid) => handleDiscardFromHand(room, pid, cardId)));
-  socket.on('endTurn', () => act(socket, (room, pid) => handleEndTurnAction(room, pid)));
+  onSafe(socket, 'drawDoor', () => act(socket, (room, pid) => handleDrawDoor(room, pid)));
+  onSafe(socket, 'ackConsequence', () => act(socket, (room, pid) => handleAckConsequence(room, pid)));
+  onSafe(socket, 'applyConsequenceAction', (action) => act(socket, (room, pid) => handleApplyConsequenceAction(room, pid, action)));
+  onSafe(socket, 'resolveConsequenceChoice', ({ optionId }) => act(socket, (room, pid) => handleResolveConsequenceChoice(room, pid, optionId)));
+  onSafe(socket, 'useCardPower', ({ cardId }) => act(socket, (room, pid) => handleUseCardPower(room, pid, cardId)));
+  onSafe(socket, 'resolveCardChoice', ({ optionId }) => act(socket, (room, pid) => handleResolveCardChoice(room, pid, optionId)));
+  onSafe(socket, 'resolveCardTarget', ({ targetId }) => act(socket, (room, pid) => handleResolveCardTarget(room, pid, targetId)));
+  onSafe(socket, 'resolveCardCardChoice', ({ cardId }) => act(socket, (room, pid) => handleResolveCardCardChoice(room, pid, cardId)));
+  onSafe(socket, 'useGuaranteedFlee', ({ cardId }) => act(socket, (room, pid) => handleUseGuaranteedFlee(room, pid, cardId)));
+  onSafe(socket, 'playMonsterFromHand', ({ cardId }) => act(socket, (room, pid) => handlePlayMonsterFromHand(room, pid, cardId)));
+  onSafe(socket, 'skipToLoot', () => act(socket, (room, pid) => handleSkipToLoot(room, pid)));
+  onSafe(socket, 'lootRoom', () => act(socket, (room, pid) => handleLootRoom(room, pid)));
+  onSafe(socket, 'setCombatModifier', ({ who, value }) => act(socket, (room, pid) => handleSetCombatModifier(room, pid, who, value)));
+  onSafe(socket, 'playCombatCard', ({ cardId }) => act(socket, (room, pid) => handlePlayCombatCard(room, pid, cardId)));
+  onSafe(socket, 'proposeTrade', ({ toId, offerCardIds }) => act(socket, (room, pid) => handleProposeTrade(room, pid, toId, offerCardIds)));
+  onSafe(socket, 'cancelTrade', ({ tradeId }) => act(socket, (room, pid) => handleCancelTrade(room, pid, tradeId)));
+  onSafe(socket, 'respondTrade', ({ tradeId, accept, counterCardIds }) => act(socket, (room, pid) => handleRespondTrade(room, pid, tradeId, accept, counterCardIds)));
+  onSafe(socket, 'requestHelp', ({ targetId }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId)));
+  onSafe(socket, 'respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
+  onSafe(socket, 'evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
+  onSafe(socket, 'attemptFlee', ({ modifier }) => act(socket, (room, pid) => handleAttemptFlee(room, pid, modifier)));
+  onSafe(socket, 'equipItem', ({ cardId }) => act(socket, (room, pid) => handleEquipItem(room, pid, cardId)));
+  onSafe(socket, 'unequipItem', ({ cardId }) => act(socket, (room, pid) => handleUnequipItem(room, pid, cardId)));
+  onSafe(socket, 'sellItems', ({ cardIds }) => act(socket, (room, pid) => handleSellItems(room, pid, cardIds)));
+  onSafe(socket, 'playRaceOrClass', ({ cardId }) => act(socket, (room, pid) => handlePlayRaceOrClass(room, pid, cardId)));
+  onSafe(socket, 'discardFromHand', ({ cardId }) => act(socket, (room, pid) => handleDiscardFromHand(room, pid, cardId)));
+  onSafe(socket, 'endTurn', () => act(socket, (room, pid) => handleEndTurnAction(room, pid)));
 
-  socket.on('disconnect', () => {
+  onSafe(socket, 'disconnect', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room) return;
     const player = findPlayer(room, socket.data.playerId);
@@ -2286,4 +2362,6 @@ module.exports = {
   DOOR_OTHER_AS_CURSE, isInstantLevelUpCard, TREASURE_POWER_OVERRIDES,
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
   POWER_GROUP_NAMES, GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
+  handleDrawDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
+  handleApplyConsequenceAction,
 };

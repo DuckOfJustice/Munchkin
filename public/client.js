@@ -498,7 +498,8 @@
 
     if (c.helperPending && c.helperPending.targetId === myInfo.playerId) {
       const ask = document.createElement('div');
-      ask.innerHTML = `<b>${state.players.find((p) => p.id === c.actorId).name} bittet dich um Hilfe im Kampf!</b>`;
+      const asker = state.players.find((p) => p.id === c.actorId);
+      ask.innerHTML = `<b>${escapeHtml(asker ? asker.name : '?')} bittet dich um Hilfe im Kampf!</b>`;
       const yes = document.createElement('button'); yes.textContent = 'Helfen'; yes.className = 'primary';
       yes.onclick = () => socket.emit('respondHelp', { accept: true });
       const no = document.createElement('button'); no.textContent = 'Ablehnen';

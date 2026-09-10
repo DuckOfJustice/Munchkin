@@ -13,8 +13,9 @@ hunderten individuellen Karten-Sonderregeln (die laut ursprünglichem
 Server-Design bewusst "Trust-Prinzip"-manuell blieben) tatsächlich im Server
 nachgebildet werden - inklusive eines komplett neuen dritten Charakter-Merkmals
 ("Machtgruppe", Pathfinder-Set). Das ist über mehrere Runden passiert; diese
-Datei ist der Stand nach der letzten Runde (Nachtrag: fehlkategorisierte
-Basis-Set-Flüche).
+Datei ist der Stand nach der Runde vom **2026-09-10**: Verifikation des
+Basis-Set-Fluch-Nachtrags, ALUFOLIE-Gleichstand behoben, die passiven
+Machtgruppen-Kräfte (Höllenritter, Assassine) ergänzt.
 
 ## 1. Architektur / etablierte Muster
 
@@ -85,27 +86,18 @@ keine Datenbank).
   `tryClick()`-Helper in den Skripten), sonst "Element is not attached to
   the DOM"-Fehler.
 
-## 2. Lieferweg (wichtig!)
+## 2. Lieferweg
 
-`mcp__remote-devices__device_bash` (Shell auf dem Windows-PC des Nutzers) ist
-in dieser Session **durchgehend fehlgeschlagen** ("no Plan9 drive shares
-mounted"). Direkter `git`-Zugriff auf dem PC des Nutzers war daher nicht
-möglich. Stattdessen wurde jede Änderung so ausgeliefert:
+**Erledigt/überholt.** Eine frühere Session musste über
+`SendUserFile` + `device_commit_files` ausliefern, weil kein Shell-Zugriff
+auf den PC des Nutzers bestand. Seit der Session vom 2026-09-10 läuft Claude
+Code direkt in `C:\git\Munchkin` mit normalem Datei- und `git`-Zugriff -
+einfach direkt im Repo arbeiten.
 
-1. `SendUserFile` auf die geänderte Datei (aus `/home/claude/Munchkin/...`).
-2. `mcp__remote-devices__device_commit_files` schreibt sie an den passenden
-   Pfad unter `C:\git\Munchkin\...` (verbundener Ordner).
-3. Dem Nutzer werden manuelle `git add`/`commit`/`push`-Befehle mitgegeben,
-   da kein Push von hier aus möglich ist.
-
-Verbundene Ordner laut `get_device_info`: `C:\Users\ouali\Desktop\Munchkin.
-Digital.Build.21578161`, `C:\Users\ouali\Desktop`, `C:\git`. Das lokale
-Repo liegt unter `C:\git\Munchkin`.
-
-**Falls `device_bash` in einer neuen Session wieder funktioniert**: direkt
-im verbundenen Ordner arbeiten (Lesen/Schreiben/`git`) statt über den
-Stage/Commit-Umweg - deutlich schneller, siehe generelle Nutzungsregeln
-oben im System-Prompt.
+Einziger Stolperstein: `node_modules` ist nicht eingecheckt. Nach einem
+frischen Clone zuerst `npm install`, sonst schlagen alle Tests mit
+`Cannot find module 'express'` fehl (das sieht nach Regression aus, ist aber
+nur die fehlende Installation).
 
 ## 3. Was in dieser Runde neu ergänzt wurde (Nachtrag Basis-Set-Flüche)
 
@@ -152,13 +144,38 @@ jetzt ergänzt:
 - README-Zeile zu "Was automatisiert ist" aktualisiert (nicht mehr nur
   "Pathfinder-Flüche", sondern "Basis-Set und Erweiterungen").
 
-**Was hierbei NICHT geprüft wurde**: Live-Playwright-Verifikation der neuen
-Karten im Browser (wegen fehlender `device_bash`-Verbindung und um die
-Session nicht unnötig zu verlängern - die Unit-/Integrationstests decken die
-reine Logik aber ab). Empfehlung für die nächste Session: kurzer
-Playwright-Lauf, der gezielt einen Raum mit vielen Basis-Set-Türkarten
-durchspielt und prüft, dass die neuen Flüche als Fluch-Popup erscheinen statt
-stillschweigend auf der Hand zu landen.
+**Verifikation nachgeholt (2026-09-10), aber anders als hier empfohlen.**
+Der vorgeschlagene Playwright-Lauf wäre der schlechtere Test gewesen: er
+hätte die fraglichen Karten nur zufällig gezogen und Playwright hätte erst
+einen Browser-Download gebraucht. Stattdessen prüft
+`tests/card-abilities.test.js` jetzt **deterministisch alle 46** Karten aus
+`DOOR_OTHER_AS_CURSE`: Karte auf den Türstapel legen, `handleDrawDoor()`
+aufrufen, und dann sicherstellen, dass sie als Fluch aufläuft
+(`pendingConsequence.kind === 'curse'`), **nicht** auf der Hand landet, auf
+dem Türablagestapel landet und nicht als offene Türkarte hängen bleibt. Dazu
+eine Gegenprobe mit einer normalen Türkarte (muss weiterhin auf der Hand
+landen), damit der Check nicht trivial durchläuft. Der Test wurde per
+Mutation gegengeprüft: entfernt man `DOOR_OTHER_AS_CURSE.has(c.name)` aus
+`handleDrawDoor()`, schlägt er fehl.
+
+Zusätzlich neu: ein Check, dass **kein** Eintrag in `CONSEQUENCE_OVERRIDES`,
+`TREASURE_POWER_OVERRIDES`, `COMBAT_POTION_OVERRIDES`,
+`ITEM_CONDITIONAL_BONUS`, `DOOR_OTHER_AS_CURSE`, `POWER_GROUP_NAMES` oder
+`GUARANTEED_FLEE_CARDS` ins Leere zeigt. Ein Tippfehler im Kartennamen wäre
+sonst ein still wirkungsloser Eintrag - der wahrscheinlichste Fehler beim
+Pflegen dieser Tabellen. Aktueller Stand: 0 Treffer, alle 170 Namen passen.
+
+**Client-Rendering** braucht dafür keinen eigenen Browser-Test:
+`renderConsequence()` in `public/client.js` rendert ausschließlich aus
+`state.pendingConsequence` und verzweigt nirgends nach Kartenkategorie oder
+-name. Eine `DOOR_OTHER_AS_CURSE`-Karte erzeugt exakt dasselbe
+`pendingConsequence`-Objekt wie ein echter Fluch (`server.js`, in
+`handleDrawDoor()`) und damit exakt dieselbe Anzeige.
+
+Weiterhin offen: eine echte Sichtprüfung im Browser. In der Session vom
+2026-09-10 war die Chrome-Erweiterung nicht verbunden ("Browser extension is
+not connected"), der Server selbst lief und lieferte aus (HTTP 200 auf `/`
+und `/client.js`).
 
 ## 4. Was weiterhin bewusst offen bleibt (nicht trivial nachrüstbar)
 
@@ -183,19 +200,42 @@ Zustand (z. B. für Wunschring-Aufhebung). Betrifft u. a.: BLUTSCHLEIER,
 RAUSCHPOCKEN, TOURISTENFALLE, NARRENGOLD, MIESER SPIEGEL, STINKER, WINZIGE
 HÄNDE, HUHN AUF DEINEM KOPF, GESCHLECHTSUMWANDLUNG (permanenter Malus).
 
-### 4.3 Machtgruppen-Sonderkräfte (nur Alchemist ist umgesetzt)
-Nur die zwei Alchemist-Kräfte sind implementiert ("Blei zu Gold" beim
-Verkauf, Wünschelstab-artige Sonderfälle). Folgende Machtgruppen-Kräfte
-bleiben komplett manuell:
-- Nekromant: "Reanimation", "Geheimnisse der Untoten"
-- Paktmagier: "Eidolon", "Beschwören"
-- Hexe: "Hex", "Begleitung"
-- Höllenritter: permanenter Rüstungs+Kopfbedeckungs-Slot
-- Adlerritter: "Standhaft bleiben"
-- Assassine der Roten Mantis: "Heimlichkeit", "Auftragsmörder"
-- Kundschafter: "Das Geheimnis aufdecken" (die "Verliere den Pfad"-
-  Ausweichoption für Kundschafter IST bereits automatisiert, siehe
-  `VERLIERE DEN PFAD` in `CONSEQUENCE_OVERRIDES`)
+### 4.3 Machtgruppen-Sonderkräfte (teilweise umgesetzt)
+Umgesetzt sind inzwischen alle **passiven** Kräfte, also die, die ohne jede
+Spieler-Interaktion auskommen:
+- Alchemist: "Blei zu Gold" (Verkauf), "Tränkemeister" (doppelter Bonus bei
+  "nur einmal einsetzbar"-Karten)
+- Höllenritter: "Höllenritterrüstung" (+5 im Kampf) - seit 2026-09-10, siehe
+  `hellknightArmorBonus()`. Der Bonus zählt nur, solange Rüstungs- **und**
+  Kopf-Slot frei sind. Die Karte sagt zwar "du darfst keine andere Rüstung
+  tragen", aber die Bonus-Bedingung ist die kürzere Variante: sie ist in
+  jeder Reihenfolge korrekt (Ausrüstung zuerst oder Machtgruppe zuerst) und
+  braucht keine Blockier-Logik im Anlegen-Pfad.
+- Assassine der Roten Mantis: "Heimlichkeit" (+1 auf Weglaufen) - seit
+  2026-09-10, in `handleAttemptFlee()`. Wird **nach** der Begrenzung des
+  Client-Modifikators addiert, weil der Bonus serverseitig feststeht.
+
+Weiterhin manuell, weil jede dieser Kräfte echte Spieler-Interaktion braucht
+(Karten auswählen, Ziel wählen) - der `pendingCardAction`-Mechanismus
+(`choice` / `targetPlayer` / `chooseCard`) wäre dafür jeweils das Werkzeug:
+- Adlerritter "Standhaft bleiben" und Assassine "Auftragsmörder": bis zu 3
+  Handkarten ablegen für je +2 im Kampf. **Die beiden einfachsten
+  verbleibenden Fälle** - nur eine Kartenauswahl aus der eigenen Hand plus
+  ein Kampfmodifikator, kein neuer Zustand. (Adlerritter zusätzlich −1 auf
+  Weglaufen je abgelegter Karte, das braucht einen Zähler am Kampf.)
+- Paktmagier "Eidolon" (Monster aus der Hand als Bonus = 2× `treasureCount`)
+  und "Beschwören" (oberstes Monster vom Türablagestapel auf die Hand)
+- Hexe "Hex" (Schlimme Dinge eines Monsters einem anderen Spieler als Fluch
+  zufügen) und "Begleitung" (Fluch-Schutz beim Türeintreten)
+- Kundschafter "Das Geheimnis aufdecken" (oberste 2 Türkarten ansehen, eine
+  zurücklegen, eine ablegen). Die "Verliere den Pfad"-Ausweichoption für
+  Kundschafter IST bereits automatisiert, siehe `VERLIERE DEN PFAD` in
+  `CONSEQUENCE_OVERRIDES`.
+- Nekromant "Reanimation" / "Geheimnisse der Untoten": **zusätzlich durch
+  fehlende Daten blockiert**, nicht nur durch Aufwand - beide hängen am
+  Begriff "untotes Monster", und eine Untot-Kennzeichnung gibt es in
+  `data/cards.json` nicht (siehe 4.1). Eine frühere Fassung dieser Datei
+  empfahl Nekromant als guten Einstieg; das ist irreführend.
 
 ### 4.4 Architektonisch aufwändigere Einzelfälle (brauchen mehr als einen
 Override-Eintrag)
@@ -227,24 +267,120 @@ lässt sich jederzeit reproduzieren mit einem kurzen Node-Skript, das
 über `isInstantLevelUpCard`/`isCombatPotionCard`/`TREASURE_POWER_OVERRIDES`
 abgedeckten Namen ausschließt.
 
-### 4.6 Bekannter, nicht behobener Detail-Bug: Kampf-Gleichstand
-`handleEvaluateCombat()` nutzt striktes `if (playerStrength > monsterStrength)`
-- bei einem Gleichstand gewinnt aktuell **immer** das Monster. Der
-  Gegenstand ALUFOLIE ("Du gewinnst bei einem Gleichstand im Kampf") setzt
-  aber voraus, dass ein Gleichstand *manchmal* zugunsten der Spielerseite
-  ausgehen kann. Diese Karten-spezifische Tie-Break-Regel ist nirgends
-  verdrahtet - würde eine `equippedItems`-Prüfung auf "ALUFOLIE" direkt in
-  `handleEvaluateCombat()` erfordern. Nicht behoben, nur dokumentiert.
+### 4.6 Kampf-Gleichstand / ALUFOLIE - BEHOBEN (2026-09-10)
+`handleEvaluateCombat()` nutzte striktes `playerStrength > monsterStrength`,
+ein Gleichstand ging also immer ans Monster, und ALUFOLIE ("Du gewinnst bei
+einem Gleichstand im Kampf") war wirkungslos.
+
+**Achtung, die frühere Fassung dieser Datei lag hier falsch**: sie empfahl
+eine `equippedItems`-Prüfung auf "ALUFOLIE". Das wäre toter Code gewesen -
+ALUFOLIE hat `category: "treasure_other"`, und `handleEquipItem()` lehnt
+alles ab, was nicht `category === 'item'` ist. Die Karte kann also gar nicht
+angelegt werden, sie liegt auf der Hand.
+
+Umgesetzt ist deshalb: bei Gleichstand sucht `findTieBreaker()` die Karte auf
+der Hand der kämpfenden **oder** der helfenden Person, verbraucht sie
+(Ablagestapel) und der Kampf gilt als gewonnen. Bewusst **ohne** Rückfrage-UI
+- ein Gleichstand ist ohne die Karte immer eine Niederlage, sie einzusetzen
+ist also nie schlechter als sie liegen zu lassen, und damit gibt es nichts zu
+entscheiden. Als Einwegkarte behandelt (der Kartentext nennt keine
+Dauerwirkung), markiert mit einem `ponytail:`-Kommentar.
 
 ## 5. Empfohlene nächste Schritte für eine neue Session
 
-1. Playwright-Live-Verifikation des Basis-Set-Fluch-Nachtrags (siehe 3.).
-2. Falls gewünscht: ALUFOLIE-Tie-Break (4.6) beheben - kleiner, klar
-   umrissener Fix.
-3. Falls gewünscht: eine der Machtgruppen-Sonderkräfte aus 4.3 umsetzen
-   (Nekromant/Paktmagier/Hexe sind vermutlich die "interessantesten" für
-   Spieler:innen).
-4. Bei jedem neuen Karten-Feature: zuerst `data/cards.json` nach dem exakten
-   Kartentext durchsuchen (`node -e "..."`-Einzeiler, siehe Muster oben),
-   dann Override + ggf. `applyPrimitiveAction`-Fall + Test ergänzen, dann
-   `node -c server.js` + `node tests/run.js`, dann liefern (Abschnitt 2).
+Die drei Punkte, die hier vorher standen, sind erledigt (siehe 3., 4.3, 4.6).
+Was sinnvollerweise als Nächstes kommt:
+
+1. **Sichtprüfung im Browser**, sobald die Chrome-Erweiterung verbunden ist:
+   Server mit `PORT=3111 node server.js` starten, Raum mit Bots aufmachen,
+   und einmal mit eigenen Augen einen Fluch, einen Kampf-Gleichstand mit
+   Alufolie und die Höllenritter-Kampfstärke ansehen. Die Logik ist getestet,
+   die Optik nicht.
+2. **Adlerritter "Standhaft bleiben" / Assassine "Auftragsmörder"** (4.3) -
+   die beiden einfachsten verbleibenden Machtgruppen-Kräfte, weil sie nur
+   eine Kartenauswahl aus der eigenen Hand brauchen und keinen neuen
+   dauerhaften Zustand.
+3. Alles Weitere in Abschnitt 4 ist bewusst offen und sollte nur angefasst
+   werden, wenn der Nutzer es ausdrücklich will - 4.1 (fehlende Datenpunkte
+   in `cards.json`) und 4.2 (Fluch-/Status-Tracker) sind echte
+   Vorbedingungen, keine Fleißarbeit.
+
+Bei jedem neuen Karten-Feature: zuerst `data/cards.json` nach dem exakten
+Kartentext durchsuchen (`node -e "..."`-Einzeiler, siehe Muster oben), dann
+Override + ggf. `applyPrimitiveAction`-Fall + Test ergänzen, dann
+`node -c server.js` + `node tests/run.js`.
+
+**Und: nicht ungeprüft aus dieser Datei heraus arbeiten.** Zwei Angaben hier
+waren schlicht falsch (ALUFOLIE als anlegbarer Gegenstand, Nekromant als
+guter Einstieg) - beides wäre beim Nachlesen von `data/cards.json` bzw.
+`handleEquipItem()` in einer Minute aufgefallen. Erst die Karte und den
+Code-Pfad nachschlagen, dann bauen.
+
+## 6. Repo-Durchsicht 2026-09-10: gefundene und behobene Fehler
+
+Alle vier waren vorher unbemerkt und sind jetzt behoben und durch Tests
+abgesichert. Alle Fixes wurden per Mutation gegengeprüft (Fehler wieder
+einbauen -> Test schlägt fehl).
+
+### 6.1 Jeder Client konnte den Server abschießen (kritisch, behoben)
+`socket.emit('removeBot')` **ohne Argument** beendete den kompletten
+Node-Prozess: die Handler destrukturieren ihren Payload im Funktionskopf
+(`({ botId }) => ...`), und das wirft bei `undefined`, bevor irgendeine
+Prüfung im Rumpf greift. Kein Raum-Beitritt nötig, keine Authentifizierung -
+eine Zeile aus der Browser-Konsole genügte. Da alle Räume nur im
+Arbeitsspeicher liegen, war jedes laufende Spiel weg (der Container startet
+per `restart: unless-stopped` zwar neu, aber ohne Spielstand). Betroffen
+waren ~20 Handler, dazu Payloads mit falschem Typ (z.B. `sellItems` mit
+`cardIds: 5` -> `new Set(5)` wirft).
+
+Behoben durch `onSafe()`: alle Handler werden nicht mehr über `socket.on()`
+registriert, sondern zentral über diese eine Funktion (fehlender Payload ->
+`{}`, fehlender Callback -> No-Op, Fehler beendet nur das eine Event). Damit
+greift der Schutz automatisch für jeden künftig ergänzten Handler.
+Regressionstest: `tests/malformed-input.test.js` feuert 765 fehlerhafte
+Events ab und prüft, dass der Server danach noch normal antwortet.
+
+### 6.2 XSS über den Spielernamen (kritisch, behoben)
+`public/client.js` escapte den Namen an **einer** Stelle nicht: der
+"X bittet dich um Hilfe im Kampf"-Kasten schrieb ihn roh per `innerHTML`.
+Der Server kürzt Namen nur auf 20 Zeichen und filtert kein HTML - und
+`<svg onload=alert()>` ist exakt 20 Zeichen. Ausgeführt wurde das im Browser
+der **angegriffenen** Person, und im `localStorage` liegt unter
+`munchkin_session` der Wiederverbinden-Token: Skript liest Token, meldet sich
+per `joinRoom` als diese Person an, übernimmt deren Platz. Alle anderen ~30
+Einbaustellen benutzen korrekt `escapeHtml()`, diese eine war übersehen.
+
+### 6.3 Tod verunreinigte beide Kartenstapel (behoben)
+`applyDeathConsequence()` legte die **angelegten Gegenstände** pauschal auf
+den **Tür**-Ablagestapel. Alle 58 anlegbaren Gegenstände sind aber
+Schatzkarten (`handleEquipItem()` lässt nur `category: 'item'` zu, und die
+gibt es ausschließlich als `type: 'treasure'`). Folge: Nach jedem Tod
+wanderten Schatzkarten in den Türstapel, wurden beim Neumischen zu Türkarten
+und landeten beim "Tür eintreten" wortlos auf der Hand - und fehlten dem
+Schatzstapel dauerhaft. Behoben, indem die vorhandene Hilfsfunktion
+`discardCard()` benutzt wird, die nach Kartentyp auf den richtigen Stapel
+legt. Der Test prüft zusätzlich generell, dass auf jedem Ablagestapel nur
+Karten des passenden Typs liegen.
+
+### 6.4 Sitzungs-Token aus `Math.random()` (behoben)
+`makeId()` erzeugte den Wiederverbinden-Token aus `Math.random()`. Dessen
+interner Zustand lässt sich aus wenigen beobachteten Werten rekonstruieren -
+und wer den Token kennt, übernimmt den Platz (siehe 6.2). Jetzt
+`crypto.randomBytes(16)`.
+
+### 6.5 Kleinigkeit: Aufräum-Timer (behoben)
+Beim Löschen eines leeren Raums wurden `cleanupTimer`/`botTimer` nicht
+gestoppt, der Raum blieb also bis zu 3 Stunden im Speicher. Harmlos, aber
+jetzt mit aufgeräumt.
+
+### 6.6 Bewusst nicht angefasst
+- Die `setTimeout`-Rückrufe der Bot-Logik haben kein `try/catch`. Ein Fehler
+  dort beendet weiterhin den Prozess. Anders als 6.1 ist das aber kein
+  Angriffsweg (der Zustand kommt vom Server selbst), und ein pauschales
+  `catch` würde echte Fehler verstecken. Wenn Abstürze im Betrieb auftauchen:
+  hier zuerst schauen.
+- Der Docker-Build kopiert nur `package.json`, keine `package-lock.json` -
+  Builds sind damit nicht reproduzierbar.
+- Raumcodes sind 4 Zeichen aus 32 (~1 Mio) und werden ebenfalls über
+  `Math.random()` erzeugt. Beitreten ist aber nur in der Lobby möglich, und
+  mehr als "in eine fremde Lobby stolpern" geht damit nicht.

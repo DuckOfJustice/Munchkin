@@ -12,9 +12,11 @@ Munchkin hat hunderte Karten mit jeweils **individuellem** Regeltext (Sondermons
 - Tür-/Schatzstapel (Mischen, Ziehen, Ablegen, Neu-Mischen wenn leer)
 - Die 4 Zug-Phasen (Tür eintreten, Auf Ärger aus sein, Raum plündern, Milde Gabe inkl. 5-Karten-Limit)
 - Kampf-Mathematik (Stufe + Ausrüstungsboni vs. Monsterstufe), inkl. Hilfe anfragen/annehmen, inkl. der wenigen Gegenstände mit gegner-/rassenabhängigem Zusatzbonus, die sich aus den Kartendaten eindeutig berechnen lassen (Geiler Helm, Vorpale Klinge, Alles außer Krakzilla Abschlachtendes Schwert, Schreckliche Socken)
+- Kampf-Gleichstand: gewinnt normal das Monster, mit Alufolie auf der Hand die Spielerseite (die Karte wird dabei verbraucht)
 - Fluchtwurf (Würfel ≥ 5 nötig) mit frei eintragbarem Modifikator, plus garantierte Flucht-Karten (Fertigmauer, Baby-Öl, Der Andere Ring) als eigener Knopf
 - Ausrüstung anlegen/ablegen mit Körperteil-Regeln (1 Kopf, 1 Rüstung, 1 Schuhwerk, max. 2 Hände)
 - Gegenstände verkaufen (1.000 Goldstücke = 1 Stufe), inkl. Machtgruppe Alchemist ("Blei zu Gold": mind. 300 GS pro Gegenstand)
+- Passive Machtgruppen-Kräfte: Höllenritter ("Höllenritterrüstung": +5 im Kampf, solange Rüstungs- und Kopf-Slot frei bleiben), Assassine der Roten Mantis ("Heimlichkeit": +1 auf Weglaufen)
 - Rasse/Klasse/Machtgruppe spielen (max. 1 von jeder, max. 2 mit Halb-Blut/Super Munchkin/Doppelleben)
 - „Schlimme Dinge" und Flüche: für die meisten Monster- und Fluch-Texte (inkl. der ca. 45 fehlkategorisierten Flüche aus Basis-Set und Erweiterungen, die in den Rohdaten als normale Türkarte statt als Fluch geführt werden - siehe `DOOR_OTHER_AS_CURSE` in `server.js`) wird die Stufen-/Ausrüstungs-/Handkonsequenz automatisch berechnet und angewendet; bietet die Karte eine echte Wahl, gibt es zwei Buttons statt Rechnerei (siehe `tests/auto-consequence.test.js`)
 - Ein großer Teil der Schatzkarten-Sonderkräfte: einfache „Steige eine Stufe auf"-Karten und Kampf-Tränke (+N für eine Seite) lassen sich per Klick einsetzen, dazu einzelne kuratierte Sonderfälle (Klaue eine Stufe, Schatzhort!, Wünschelstab, ...) - siehe `tests/card-abilities.test.js`
