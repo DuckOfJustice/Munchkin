@@ -16,7 +16,7 @@ Munchkin hat hunderte Karten mit jeweils **individuellem** Regeltext (Sondermons
 - Ausrüstung anlegen/ablegen mit Körperteil-Regeln (1 Kopf, 1 Rüstung, 1 Schuhwerk, max. 2 Hände)
 - Gegenstände verkaufen (1.000 Goldstücke = 1 Stufe), inkl. Machtgruppe Alchemist ("Blei zu Gold": mind. 300 GS pro Gegenstand)
 - Rasse/Klasse/Machtgruppe spielen (max. 1 von jeder, max. 2 mit Halb-Blut/Super Munchkin/Doppelleben)
-- „Schlimme Dinge" und Flüche: für die meisten Monster- und Fluch-Texte (inkl. der fehlkategorisierten Pathfinder-Flüche, die in den Rohdaten als normale Türkarte statt als Fluch geführt werden) wird die Stufen-/Ausrüstungs-/Handkonsequenz automatisch berechnet und angewendet; bietet die Karte eine echte Wahl, gibt es zwei Buttons statt Rechnerei (siehe `tests/auto-consequence.test.js`)
+- „Schlimme Dinge" und Flüche: für die meisten Monster- und Fluch-Texte (inkl. der ca. 45 fehlkategorisierten Flüche aus Basis-Set und Erweiterungen, die in den Rohdaten als normale Türkarte statt als Fluch geführt werden - siehe `DOOR_OTHER_AS_CURSE` in `server.js`) wird die Stufen-/Ausrüstungs-/Handkonsequenz automatisch berechnet und angewendet; bietet die Karte eine echte Wahl, gibt es zwei Buttons statt Rechnerei (siehe `tests/auto-consequence.test.js`)
 - Ein großer Teil der Schatzkarten-Sonderkräfte: einfache „Steige eine Stufe auf"-Karten und Kampf-Tränke (+N für eine Seite) lassen sich per Klick einsetzen, dazu einzelne kuratierte Sonderfälle (Klaue eine Stufe, Schatzhort!, Wünschelstab, ...) - siehe `tests/card-abilities.test.js`
 - Sieg bei Stufe 10
 

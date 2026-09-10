@@ -87,6 +87,30 @@ function run() {
   });
 
   // -------------------------------------------------------------------
+  // Fehlkategorisierte Flüche (Basis-Set + Erweiterungen), neu entdeckter
+  // Nachtrag zur obigen Pathfinder-Runde
+  // -------------------------------------------------------------------
+  assert.ok(DOOR_OTHER_AS_CURSE.size >= 43, 'Basis-Set-Fluch-Nachtrag darf nicht verschwinden');
+  ['Rüstung verlieren', 'VERLIERE DEINE RASSE', 'KLASSE WECHSELN', 'RASSE WECHSELN', 'MIESER SPIEGEL', 'STINKER'].forEach((n) => {
+    assert.ok(DOOR_OTHER_AS_CURSE.has(n), `${n} muss als Fluch geroutet werden`);
+  });
+
+  assert.deepStrictEqual(resolveConsequenceSpec('Rüstung verlieren', '', makePlayer()), { type: 'discardSlot', slot: 'armor' });
+  assert.deepStrictEqual(resolveConsequenceSpec('VERLIERE DEINE RASSE', '', makePlayer()), { type: 'discardRaceCards' });
+
+  const c1 = 'c1'; const c2 = 'c2';
+  const oneClassSpec = resolveConsequenceSpec('VERLIERE DEINE KLASSE', '', makePlayer({ classes: [c1] }));
+  assert.deepStrictEqual(oneClassSpec, { type: 'discardClassCards' }, 'mit genau 1 Klasse: direkt ablegen, keine Wahl nötig');
+  const noClassSpec = resolveConsequenceSpec('VERLIERE DEINE KLASSE', '', makePlayer({ classes: [] }));
+  assert.deepStrictEqual(noClassSpec, { type: 'levelDelta', amount: 1 }, 'ohne Klasse: 1 Stufe verlieren');
+  const twoClassSpec = resolveConsequenceSpec('VERLIERE DEINE KLASSE', '', makePlayer({ classes: [c1, c2] }));
+  assert.strictEqual(twoClassSpec.type, 'choice', 'mit 2 Klassen (Super Munchkin): echte Wahl, welche abgelegt wird');
+  assert.strictEqual(twoClassSpec.options.length, 2);
+
+  assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer({ equipped: { head: null, armor: null, feet: 'boots', hands: [null, null] } })), { type: 'discardSlot', slot: 'feet' });
+  assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer()), { type: 'noEffect' }, 'ohne Schuhwerk: kein Effekt');
+
+  // -------------------------------------------------------------------
   // Machtgruppen
   // -------------------------------------------------------------------
   assert.strictEqual(POWER_GROUP_NAMES.size, 8);

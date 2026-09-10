@@ -671,6 +671,40 @@ function applyPrimitiveAction(room, player, action) {
       if (player.classCapCard) { discardCard(room, player.classCapCard); player.classCapCard = null; }
       return `Klassenkarte(n) abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
     }
+    case 'discardSpecificClassCard': {
+      const idx = player.classes.indexOf(action.cardId);
+      if (idx < 0) return 'Klassenkarte nicht (mehr) vorhanden';
+      const id = player.classes.splice(idx, 1)[0];
+      discardCard(room, id);
+      if (!player.classes.length && player.classCapCard) { discardCard(room, player.classCapCard); player.classCapCard = null; }
+      return `Klassenkarte "${card(id).name}" abgelegt`;
+    }
+    // "Verliere zwei Karten": der/die Nächste bzw. Vorherige in der
+    // Zugreihenfolge zieht je eine ZUFÄLLIGE Karte aus der Hand des Opfers
+    // (welche genau, legt die Originalkarte nicht fest).
+    case 'giveHandCardsToNeighbors': {
+      if (!player.hand.length) return 'Hand war leer';
+      const idx = room.players.findIndex((p) => p.id === player.id);
+      const n = room.players.length;
+      const results = [];
+      const giveOne = (targetIdx) => {
+        if (!player.hand.length) return;
+        const target = room.players[targetIdx];
+        if (!target || target.id === player.id) return;
+        const cid = player.hand[Math.floor(Math.random() * player.hand.length)];
+        removeFromHand(player, cid);
+        target.hand.push(cid);
+        results.push(`${target.name} erhält 1 Karte`);
+      };
+      if (n >= 2) giveOne((idx + 1) % n);
+      if (n >= 3) giveOne((idx - 1 + n) % n);
+      return results.length ? results.join('; ') : 'keine Mitspieler:innen vorhanden';
+    }
+    // "Regeln der Neuauflage": betrifft ALLE am Tisch, nicht nur die
+    // ziehende Person (der Wunschring-Aufhebungs-Sonderfall bleibt manuell).
+    case 'levelDeltaAllPlayers':
+      room.players.forEach((p) => setLevel(p, p.level - action.amount));
+      return `alle Spieler:innen -${action.amount} Stufe`;
     case 'discardPowerGroupCards': {
       const ids = [...player.powerGroups];
       if (!ids.length) return 'keine Machtgruppenkarte(n)';
@@ -692,8 +726,8 @@ function applyPrimitiveAction(room, player, action) {
       currentIds.forEach((id) => discardCard(room, id));
       player[arrField] = [];
       if (player[capField]) { discardCard(room, player[capField]); player[capField] = null; }
-      const matches = action.category === 'class'
-        ? (cc) => cc.category === 'class'
+      const matches = (action.category === 'class' || action.category === 'race')
+        ? (cc) => cc.category === action.category
         : (cc) => cc.category === 'door_other' && POWER_GROUP_NAMES.has((cc.name || '').toUpperCase());
       for (let i = room.doorDiscard.length - 1; i >= 0; i--) {
         const cc = card(room.doorDiscard[i]);
@@ -935,6 +969,65 @@ const CONSEQUENCE_OVERRIDES = {
     }
     return { type: 'noEffect' };
   },
+
+  // --- Fehlkategorisierte Flüche (Basis-Set + Erweiterungen): stehen in den
+  // Rohdaten in "door_other" statt "curse", sind aber textlich eindeutig
+  // sofort beim Ziehen wirkende Flüche - siehe DOOR_OTHER_AS_CURSE unten. ---
+  'Rüstung verlieren': () => ({ type: 'discardSlot', slot: 'armor' }),
+  'Kopfbedeckung verlieren': () => ({ type: 'discardSlot', slot: 'head' }),
+  'SCHUHWERK VERLIEREN': () => ({ type: 'discardSlot', slot: 'feet' }),
+  'VERLIERE 1 STUFE': () => ({ type: 'levelDelta', amount: 1 }),
+  'VERLIERE DEINE KLASSE': (player) => {
+    if (player.classes.length >= 2) {
+      return {
+        type: 'choice',
+        options: player.classes.map((cid) => ({
+          id: `class-${cid}`,
+          label: `${card(cid) ? card(cid).name : 'Klasse'} ablegen`,
+          action: { type: 'discardSpecificClassCard', cardId: cid },
+        })),
+      };
+    }
+    if (player.classes.length === 1) return { type: 'discardClassCards' };
+    return { type: 'levelDelta', amount: 1 };
+  },
+  'VERLIERE DEINE RASSE': () => ({ type: 'discardRaceCards' }),
+  'KLASSE WECHSELN': () => ({ type: 'replaceTraitFromDiscard', arrField: 'classes', capField: 'classCapCard', category: 'class', label: 'Klasse' }),
+  'RASSE WECHSELN': () => ({ type: 'replaceTraitFromDiscard', arrField: 'races', capField: 'raceCapCard', category: 'race', label: 'Rasse' }),
+  // "Du darfst kein Schuhwerk tragen. Wenn du gerade Schuhwerk trägst, wird
+  // es zerstört ...":
+  'QUANTEN': (player) => (player.equipped.feet ? { type: 'discardSlot', slot: 'feet' } : { type: 'noEffect' }),
+  'REGELN DER NEUAUFLAGE': () => ({ type: 'levelDeltaAllPlayers', amount: 1 }), // Wunschring-Sonderfall bleibt manuell
+  // "Du kannst keine Gegenstände tragen, die mehr als eine Hand benötigen." -
+  // Dauereffekt, den dieser Server (wie andere Dauer-Mali) nicht mechanisch
+  // durchsetzt; nur zur Anzeige als Fluch, kein Sofort-Effekt:
+  'WINZIGE HÄNDE': () => ({ type: 'noEffect' }),
+  'VERLIERE ZWEI KARTEN': () => ({ type: 'giveHandCardsToNeighbors' }),
+  // "Verliere 2 Stufen" (fällt bereits unter den generischen Fallback, hier
+  // nur zur Klarheit/Dokumentation nicht nötig - kein Override nötig).
+  // Bewusst NICHT automatisch (freie Auswahl aus dem gesamten Ablagestapel
+  // ohne Wertgrenze in den Rohdaten, o.ä.) - bleibt manuell:
+  'VERLIERE 1 GROSSEN GEGENSTAND': () => null,
+  'VERLIERE 1 KLEINEN GEGENSTAND': () => null,
+  // Persistente Mali/Flags ohne laufenden Status-Tracker in diesem Server -
+  // bleiben nach dem Einordnen als Fluch bewusst manuell/nur textlich:
+  'GESCHLECHTSUMWANDLUNG': () => null,
+  'HUHN AUF DEINEM KOPF': () => null,
+  'NARRENGOLD': () => null,
+  'BLUTSCHLEIER': () => null,
+  'RAUSCHPOCKEN': () => null,
+  'TOURISTENFALLE': () => null,
+  'MIESER SPIEGEL': () => null,
+  'STINKER': () => null,
+  // Braucht Datenpunkte/Mechaniken, die es hier nicht gibt (freie Handel-
+  // Reihenfolge, wiederkehrender Rundenend-Hook, neue Kampfauslösung
+  // mitten in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-
+  // Status) - bleiben bewusst manuell:
+  'EDELMUT': () => null,
+  'HUNGRIGER RUCKSACK': () => null,
+  'KLEINER FEHLER': () => null,
+  'TEMPORÄRE ANMNESIE': () => null,
+  'DU STOLPERST ÜBER DEINE EIGENE TRUHE': () => null,
 };
 
 // Karten aus dem Pathfinder-Set, die in den Rohdaten als "door_other"
@@ -950,6 +1043,17 @@ const DOOR_OTHER_AS_CURSE = new Set([
   'VERSAGEN BEI DER PRÜFUNG DES STERNSTEINS', 'ROTE VERZIERUNG',
   'EXPLODIERENDE KNIESCHÜTZER', 'VERLIERE DEN PFAD', 'GRÜNSCHLEIM',
   'SCHARLACHLEPRA', 'HÄNGENGELASSEN', 'SCHNELLES GELD', 'GOBLINAUSSCHLAG',
+  // Basis-Set + Erweiterungen (siehe CONSEQUENCE_OVERRIDES oben für Details
+  // zu jeder einzelnen Karte):
+  'Rüstung verlieren', 'Kopfbedeckung verlieren', 'SCHUHWERK VERLIEREN',
+  'VERLIERE 1 STUFE', 'VERLIERE DEINE KLASSE', 'VERLIERE DEINE RASSE',
+  'KLASSE WECHSELN', 'RASSE WECHSELN', 'QUANTEN', 'REGELN DER NEUAUFLAGE',
+  'WINZIGE HÄNDE', 'VERLIERE ZWEI KARTEN', 'VERLIERE 1 GROSSEN GEGENSTAND',
+  'VERLIERE 1 KLEINEN GEGENSTAND', 'GESCHLECHTSUMWANDLUNG',
+  'HUHN AUF DEINEM KOPF', 'NARRENGOLD', 'BLUTSCHLEIER', 'RAUSCHPOCKEN',
+  'TOURISTENFALLE', 'EDELMUT', 'HUNGRIGER RUCKSACK', 'KLEINER FEHLER',
+  'TEMPORÄRE ANMNESIE', 'DU STOLPERST ÜBER DEINE EIGENE TRUHE',
+  'ENTE DES SCHRECKENS', 'MIESER SPIEGEL', 'STINKER',
 ]);
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
