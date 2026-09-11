@@ -2022,6 +2022,28 @@ const COMBAT_POTION_OVERRIDES = {
   // "... aber nur, wenn du mindestens eine freie Hand hast. +4 für die
   // Munchkin-Seite."
   'FLÜSSIGKLINGE': (player) => (player.equipped.hands.includes(null) ? { type: 'modifier', side: 'actor', amount: 4 } : null),
+  // "Einmal pro Zug kannst du in deinem Zug ein Monster aus dem Kampf
+  // entfernen, indem du 3 Karten ablegst und seinen Schatz zurücklässt.
+  // Verzauberte Monster gewähren keine Stufen! Nachdem du ein Monster
+  // verzaubert hast, würfelst du. Bei einer 1 legst du das Verzauberarmband
+  // ab." -> "seinen Schatz zurücklässt" + "keine Stufen" ist genau
+  // endCombatNoLevel/leavesTreasure. Nur im eigenen Zug und nur bei genau
+  // EINEM Monster im Kampf einsetzbar: endCombatNoLevel legt immer alle
+  // Monster ab und würde bei mehreren auch den Schatz der nicht verzauberten
+  // ausschütten - ein einzelnes Monster samt seinem Schatz herauszulösen
+  // bräuchte eine Monster-Auswahl, die es hier nicht gibt (dann bewusst
+  // manuell abwickeln). Die 3 abzulegenden Karten bleiben ebenfalls manuell
+  // (es gibt keinen Mehrfach-Kartenwähler; 'discardFromHand' macht das von
+  // Hand) - geprüft wird nur, dass sie überhaupt auf der Hand liegen. Der
+  // Würfelwurf danach entfällt, weil die Karte hier wie jeder Kampf-Trank
+  // immer verbraucht wird: strenger als die Regel, dafür braucht "einmal pro
+  // Zug" keinen eigenen Zähler.
+  'VERZAUBERARMBAND': (player, room) => {
+    const onTurn = currentPlayer(room);
+    return onTurn && onTurn.id === player.id && room.combat.monsterIds.length === 1 && player.hand.length >= 4
+      ? { type: 'endCombatNoLevel', leavesTreasure: true }
+      : null;
+  },
 };
 
 function isCombatPotionCard(c) {
@@ -2144,7 +2166,9 @@ function handlePlayCombatCard(room, playerId, cardId) {
     return;
   }
   removeFromHand(player, cardId);
-  room.doorDiscard.push(cardId); // treasure_other-Karten landen mechanisch wie alle "Nur einmal einsetzbar"-Karten im Ablagestapel
+  // Über discardCard(), weil Kampf-Tränke type 'treasure' sind: auf dem
+  // Tür-Ablagestapel würden sie beim Neumischen (drawDoor) zu Türkarten.
+  discardCard(room, cardId);
   if (spec.type === 'modifier' && spec.side === 'either') {
     openCardChoice(room, player, c.name, [
       { id: 'munchkins', label: `+${spec.amount} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount: spec.amount } },

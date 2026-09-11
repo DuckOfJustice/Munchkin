@@ -284,6 +284,13 @@ function run() {
     polly.room.logs.some((l) => l.text.includes('Schatzkarte(n)') && l.text.includes('keine Stufe')),
     'der Verlauf muss Schatz ohne Stufe nennen'
   );
+  // Auch der verbrauchte Trank muss auf dem Stapel seines eigenen Typs landen:
+  // Kampf-Tränke sind Schatzkarten und wurden beim Neumischen des Türstapels
+  // sonst zu Türkarten (siehe Tod-Test weiter unten).
+  assert.ok(polly.room.treasureDiscard.includes(polly.potionId), 'der verbrauchte Kampf-Trank ist eine Schatzkarte und gehört auf den Schatz-Ablagestapel');
+  assert.ok(!polly.room.doorDiscard.includes(polly.potionId), 'der verbrauchte Kampf-Trank darf nicht auf dem Tür-Ablagestapel landen');
+  polly.room.doorDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'door', 'auf dem Tür-Ablagestapel darf nur type=door liegen'));
+  polly.room.treasureDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'treasure', 'auf dem Schatz-Ablagestapel darf nur type=treasure liegen'));
 
   const irrelevanz = potionRoom('TRANK DER IRRELEVANZ');
   handlePlayCombatCard(irrelevanz.room, 'p1', irrelevanz.potionId);
@@ -299,6 +306,39 @@ function run() {
   assert.strictEqual(freundschaft.room.players[0].level, 3, 'FREUNDSCHAFTSTRANK bringt keine Stufe');
   assert.ok(!freundschaft.room.players[0].lastReward, 'ohne Schatz keine Beute-Animation');
   assert.strictEqual(freundschaft.room.turnPhase, 'pluendern', 'FREUNDSCHAFTSTRANK erlaubt danach das Plündern');
+
+  // VERZAUBERARMBAND: "ein Monster aus dem Kampf entfernen, indem du 3 Karten
+  // ablegst und seinen Schatz zurücklässt. Verzauberte Monster gewähren keine
+  // Stufen!" - Schatz ja, Stufe nein. Die 3 Karten werden nur als Bedingung
+  // geprüft (bewusst manuell abgelegt), bleiben hier also auf der Hand.
+  const armbandPay = ALL_CARDS.filter((c) => c.type === 'door').slice(0, 3).map((c) => c.id);
+  const armband = potionRoom('VERZAUBERARMBAND');
+  armband.room.players[0].hand.push(...armbandPay);
+  handlePlayCombatCard(armband.room, 'p1', armband.potionId);
+  if (armband.room.cleanupTimer) clearTimeout(armband.room.cleanupTimer);
+  const armbandActor = armband.room.players[0];
+  assert.strictEqual(armband.room.combat, null, 'VERZAUBERARMBAND beendet den Kampf gegen das verzauberte Monster');
+  assert.ok(armband.room.doorDiscard.includes(lootMonster.id), 'das verzauberte Monster liegt im Tür-Ablagestapel');
+  assert.ok(!armbandActor.hand.includes(armband.potionId), 'das Armband wird hier immer verbraucht (Würfelwurf bewusst manuell)');
+  assert.strictEqual(armbandActor.hand.length, armbandPay.length + lootMonster.treasureCount, 'zurückgelassener Schatz auf der Hand (Anzahl = treasureCount), Kostenkarten bleiben liegen');
+  assert.strictEqual(armbandActor.level, 3, 'verzauberte Monster gewähren keine Stufen');
+  assert.strictEqual(armbandActor.lastReward.levelsGained, 0, 'Beute-Animation zeigt 0 Stufen');
+  assert.strictEqual(armbandActor.lastReward.cardIds.length, lootMonster.treasureCount, 'Beute-Animation zeigt genau die zurückgelassenen Schätze');
+
+  // Bedingungen des Armbands: nur im eigenen Zug, nur bei genau einem Monster
+  // im Kampf, und nur mit 3 weiteren Karten auf der Hand.
+  const armbandCheck = potionRoom('VERZAUBERARMBAND');
+  armbandCheck.room.players[0].hand.push(...armbandPay);
+  const armbandSpec = () => COMBAT_POTION_OVERRIDES['VERZAUBERARMBAND'](armbandCheck.room.players[0], armbandCheck.room);
+  assert.deepStrictEqual(armbandSpec(), { type: 'endCombatNoLevel', leavesTreasure: true }, 'im eigenen Zug mit einem Monster und 3 Kostenkarten einsetzbar');
+  armbandCheck.room.turnIndex = 1;
+  assert.strictEqual(armbandSpec(), null, 'nicht im Zug eines anderen Spielers einsetzbar');
+  armbandCheck.room.turnIndex = 0;
+  armbandCheck.room.combat.monsterIds = [lootMonster.id, monster.id];
+  assert.strictEqual(armbandSpec(), null, 'bei mehreren Monstern bewusst nicht einsetzbar (Schatz wäre nicht zuordenbar)');
+  armbandCheck.room.combat.monsterIds = [lootMonster.id];
+  armbandCheck.room.players[0].hand = [armbandCheck.potionId, armbandPay[0]];
+  assert.strictEqual(armbandSpec(), null, 'ohne 3 ablegbare Karten nicht einsetzbar');
 
   // Gegenprobe: ALUFOLIE darf einen echten Rückstand nicht in einen Sieg drehen.
   const behind = combatRoomTie([alufolie.id]);
