@@ -16,7 +16,7 @@ const {
   MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
   FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
   MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
-  combatTotals, handLimit,
+  combatTotals, handLimit, handlePlayCombatCard,
 } = require('../server.js');
 
 function makePlayer(overrides) {
@@ -242,6 +242,63 @@ function run() {
   assert.strictEqual(reward.cardIds.length, monster.treasureCount || 0, 'Beute muss genau die Schaetze des Monsters enthalten');
   reward.cardIds.forEach((id) => assert.ok(tieWithCard.players[0].hand.includes(id), 'jede angezeigte Beutekarte muss auch wirklich auf der Hand liegen'));
   assert.deepStrictEqual(reward.monsterNames, [monster.name], 'Beute-Animation nennt das besiegte Monster');
+
+  // -------------------------------------------------------------------
+  // Kampf-Tränke, die den Kampf beenden: "lässt seinen Schatz zurück"
+  // (POLLYVERWANDLUNGSTRANK, TRANK DER IRRELEVANZ) muss die Schätze des
+  // Monsters bringen - aber keine Stufe, das Monster wird nicht besiegt.
+  // Gegenprobe FREUNDSCHAFTSTRANK: "Du erhältst keinen Schatz".
+  // -------------------------------------------------------------------
+  const lootMonster = ALL_CARDS.find((c) => c.category === 'monster' && (c.treasureCount || 0) >= 2);
+  function potionRoom(potionName) {
+    const potion = findCard(potionName, 'treasure_other');
+    const actor = makePlayer({ id: 'p1', name: 'A', level: 3, hand: [potion.id] });
+    return {
+      room: {
+        code: 'TEST', players: [actor, makePlayer({ id: 'p2', name: 'B' })],
+        turnIndex: 0, turnPhase: 'kampf', combatHappenedThisTurn: true,
+        doorDeck: [], doorDiscard: [], treasureDeck: filler.slice(), treasureDiscard: [],
+        revealedDoorCard: null, pendingConsequence: null, pendingCardAction: null,
+        winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+        settings: { sets: {} },
+        combat: { actorId: 'p1', helperId: null, monsterIds: [lootMonster.id], actorModifier: 0, monsterModifier: 0, mustFlee: false },
+      },
+      potionId: potion.id,
+    };
+  }
+
+  const polly = potionRoom('POLLYVERWANDLUNGSTRANK');
+  handlePlayCombatCard(polly.room, 'p1', polly.potionId);
+  if (polly.room.cleanupTimer) clearTimeout(polly.room.cleanupTimer);
+  const pollyActor = polly.room.players[0];
+  assert.strictEqual(polly.room.combat, null, 'POLLYVERWANDLUNGSTRANK beendet den Kampf');
+  assert.ok(polly.room.doorDiscard.includes(lootMonster.id), 'das weggeflogene Monster liegt im Ablagestapel');
+  assert.ok(!pollyActor.hand.includes(polly.potionId), 'der Trank wird verbraucht');
+  assert.strictEqual(pollyActor.hand.length, lootMonster.treasureCount, 'der zurückgelassene Schatz landet auf der Hand (Anzahl = treasureCount)');
+  assert.strictEqual(pollyActor.level, 3, 'das Monster wurde nicht besiegt - keine Stufe');
+  assert.ok(pollyActor.lastReward, 'zurückgelassener Schatz muss in der Beute-Animation auftauchen');
+  assert.strictEqual(pollyActor.lastReward.levelsGained, 0, 'Beute-Animation zeigt 0 Stufen');
+  assert.strictEqual(pollyActor.lastReward.cardIds.length, lootMonster.treasureCount, 'Beute-Animation zeigt genau die zurückgelassenen Schätze');
+  pollyActor.lastReward.cardIds.forEach((id) => assert.ok(pollyActor.hand.includes(id), 'jede Beutekarte liegt auch wirklich auf der Hand'));
+  assert.ok(
+    polly.room.logs.some((l) => l.text.includes('Schatzkarte(n)') && l.text.includes('keine Stufe')),
+    'der Verlauf muss Schatz ohne Stufe nennen'
+  );
+
+  const irrelevanz = potionRoom('TRANK DER IRRELEVANZ');
+  handlePlayCombatCard(irrelevanz.room, 'p1', irrelevanz.potionId);
+  if (irrelevanz.room.cleanupTimer) clearTimeout(irrelevanz.room.cleanupTimer);
+  assert.strictEqual(irrelevanz.room.players[0].hand.length, lootMonster.treasureCount, 'TRANK DER IRRELEVANZ lässt den Schatz ebenfalls zurück');
+  assert.strictEqual(irrelevanz.room.players[0].level, 3, 'TRANK DER IRRELEVANZ bringt keine Stufe');
+
+  const freundschaft = potionRoom('FREUNDSCHAFTSTRANK');
+  handlePlayCombatCard(freundschaft.room, 'p1', freundschaft.potionId);
+  if (freundschaft.room.cleanupTimer) clearTimeout(freundschaft.room.cleanupTimer);
+  assert.strictEqual(freundschaft.room.combat, null, 'FREUNDSCHAFTSTRANK beendet den Kampf');
+  assert.strictEqual(freundschaft.room.players[0].hand.length, 0, '"Du erhältst keinen Schatz" - die Hand bleibt leer');
+  assert.strictEqual(freundschaft.room.players[0].level, 3, 'FREUNDSCHAFTSTRANK bringt keine Stufe');
+  assert.ok(!freundschaft.room.players[0].lastReward, 'ohne Schatz keine Beute-Animation');
+  assert.strictEqual(freundschaft.room.turnPhase, 'pluendern', 'FREUNDSCHAFTSTRANK erlaubt danach das Plündern');
 
   // Gegenprobe: ALUFOLIE darf einen echten Rückstand nicht in einen Sieg drehen.
   const behind = combatRoomTie([alufolie.id]);
