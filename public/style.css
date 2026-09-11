@@ -221,7 +221,20 @@ button.wide { width: 100%; }
 }
 .cardtile.noimg .cttype { position: static; align-self: flex-start; margin: 8px 8px 0; }
 .cardtile .ctbody { padding: 6px 10px 9px; display: flex; flex-direction: column; gap: 3px; flex: 1; }
-.cardtile .ctname { font-weight: 700; line-height: 1.15; color: var(--ink); }
+/* Kartennamen sind sehr unterschiedlich lang (Rekord im Datensatz: "DING MIT
+   EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST", 70 Zeichen).
+   Ohne Begrenzung zog so ein Name die Kachel in die Hoehe und - weil .cardgrid
+   ein flex-wrap-Container ist - gleich die ganze Zeile mit: das Layout sprang
+   bei jedem Neuaufbau. Deshalb: hoechstens zwei Zeilen, danach Ellipse, und
+   per min-height sind auch Kacheln mit einzeiligem Namen exakt gleich hoch.
+   Der volle Name bleibt im Karten-Modal (Klick auf die Kachel) und im
+   title-Tooltip lesbar. overflow-wrap: anywhere bricht zusaetzlich
+   Einzelwoerter um, die breiter als die Kachel sind. */
+.cardtile .ctname {
+  font-weight: 700; line-height: 1.15; color: var(--ink);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere; min-height: 2.3em;
+}
 .cardtile .ctmeta { color: var(--ink-dim); font-size: 0.9em; }
 
 .cat-monster { --tile-accent: var(--c-monster); }
@@ -297,3 +310,171 @@ select { background: var(--bg-alt); color: var(--text); border: 1px solid var(--
   .cardtile { width: 128px; }
   .cardtile .ctimgwrap { height: 100px; }
 }
+
+/* -------- Aufdeck-Animation beim Tür eintreten: die gezogene Karte dreht
+   sich einmal groß in die Bildmitte und verschwindet wieder. Reine
+   Deko-Ebene (pointer-events: none), das Spiel ist währenddessen normal
+   bedienbar. -------- */
+.reveal-anim {
+  position: fixed; inset: 0; z-index: 150; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.reveal-anim .cardtile { width: 230px; font-size: 1.05em; cursor: default; }
+.reveal-anim .cardtile .ctimgwrap { height: 190px; }
+/* Hier ist Platz genug: die grosse Aufdeck-Karte darf den Namen ueber vier
+   Zeilen zeigen, statt ihn wie in der kleinen Kachel nach zwei zu kuerzen. */
+.reveal-anim .cardtile .ctname { -webkit-line-clamp: 4; line-clamp: 4; }
+.reveal-anim.play { animation: revealGlow 1.5s ease-out forwards; }
+.reveal-anim.play .cardtile { animation: revealFlip 1.5s ease-out forwards; }
+
+@keyframes revealGlow {
+  0%, 75% { background: radial-gradient(closest-side, rgba(224,122,63,0.22), rgba(6,8,5,0.55) 70%, rgba(6,8,5,0) 100%); }
+  100% { background: rgba(6,8,5,0); }
+}
+@keyframes revealFlip {
+  0%   { transform: perspective(900px) rotateY(-95deg) scale(0.65); opacity: 0; }
+  35%  { transform: perspective(900px) rotateY(0deg) scale(1.1); opacity: 1; }
+  75%  { transform: perspective(900px) rotateY(0deg) scale(1.1); opacity: 1; }
+  100% { transform: perspective(900px) rotateY(0deg) scale(0.8) translateY(-36px); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-anim.play, .reveal-anim.play .cardtile { animation: revealFadeOnly 1.5s ease-out forwards; }
+  @keyframes revealFadeOnly { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+}
+
+/* -------- Wuerfel-Animation beim Weglaufen: der Wuerfel rollt kurz und
+   bleibt dann sichtbar auf dem echten Ergebnis stehen. Wie .reveal-anim eine
+   reine Deko-Ebene (pointer-events: none). Alle am Tisch sehen sie, deshalb
+   steht der Name der wuerfelnden Person darueber. -------- */
+.die-anim {
+  position: fixed; inset: 0; z-index: 150; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.die-box {
+  background: rgba(6, 8, 5, 0.92); border: 2px solid var(--gold); border-radius: var(--radius);
+  padding: 18px 32px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+.die-who { color: var(--text-dim); font-size: 0.95em; margin-bottom: 6px; }
+.die-face { font-size: 5em; line-height: 1.05; color: var(--text); }
+.die-sum { font-size: 1.3em; font-weight: 700; color: var(--gold); margin-top: 4px; }
+.die-result { font-size: 1.15em; font-weight: 700; margin-top: 6px; }
+.die-result.good { color: var(--success); }
+.die-result.bad { color: var(--danger); }
+
+.die-anim.play { animation: dieFade 2.6s ease-out forwards; }
+.die-anim.play .die-face { animation: dieShake 0.9s linear; }
+.die-anim.play .die-sum, .die-anim.play .die-result { animation: dieResultIn 0.45s ease-out 0.9s backwards; }
+
+@keyframes dieFade {
+  0% { opacity: 0; }
+  6%, 88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes dieShake {
+  0%   { transform: rotate(-18deg) scale(0.85); }
+  25%  { transform: rotate(16deg) scale(1.1); }
+  50%  { transform: rotate(-12deg) scale(0.95); }
+  75%  { transform: rotate(10deg) scale(1.08); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+@keyframes dieResultIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Kein Rollen, kein Wackeln - das Ergebnis wird einfach eingeblendet. */
+  .die-anim.play .die-face, .die-anim.play .die-sum, .die-anim.play .die-result { animation: none; }
+}
+
+/* -------- Beute-Animation nach einem Kampfsieg: die gezogenen Schatzkarten
+   fliegen nacheinander ein. Sieht nur die/der Siegende (die Karten sind
+   Handkarten und damit geheim). Wie die anderen Animationen eine reine
+   Deko-Ebene mit pointer-events: none. -------- */
+.reward-anim {
+  position: fixed; inset: 0; z-index: 150; pointer-events: none;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.reward-box {
+  background: rgba(6, 8, 5, 0.93); border: 2px solid var(--gold); border-radius: var(--radius);
+  padding: 20px 28px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  max-width: 100%; max-height: 100%; overflow: hidden;
+}
+.reward-head { color: var(--text-dim); font-size: 0.95em; }
+.reward-level { color: var(--gold-bright); font-size: 2.1em; font-weight: 800; line-height: 1.2; }
+.reward-label { color: var(--text); font-size: 0.95em; margin: 6px 0 10px; }
+.reward-cards { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.reward-cards .cardtile { cursor: default; }
+
+.reward-anim.play { animation: rewardFade 3.4s ease-out forwards; }
+.reward-anim.play .reward-level { animation: rewardPop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) backwards; }
+.reward-anim.play .cardtile { animation: rewardCardIn 0.5s ease-out backwards; }
+
+@keyframes rewardFade {
+  0% { opacity: 0; }
+  5%, 88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes rewardPop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+@keyframes rewardCardIn {
+  from { transform: translateY(26px) rotate(-6deg) scale(0.8); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Kein Einfliegen - Beute wird einfach angezeigt. */
+  .reward-anim.play .reward-level, .reward-anim.play .cardtile { animation: none; }
+}
+
+/* Begründung des Weglaufen-Modifikators unter dem Würfelergebnis. */
+.die-note { color: var(--text-dim); font-size: 0.85em; margin-top: 8px; max-width: 260px; }
+
+/* Bereit-Check vor der Kampfauswertung. */
+.readyrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.readytag { font-size: 0.85em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); }
+.readytag.yes { color: var(--success); border-color: rgba(62, 207, 142, 0.5); }
+.readytag.no { color: var(--text-dim); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* -------- Schiebeschalter (Handkarten sortieren). Bewusst mit einer echten
+   Checkbox darunter statt mit einem <button>: nur optisch versteckt, nicht
+   per display:none - so bleiben Tastaturbedienung und Screenreader
+   unverändert, und die Beschriftung schaltet durch das umschließende
+   <label> ebenfalls. -------- */
+.switch {
+  display: inline-flex; align-items: center; gap: 10px; margin: 0; cursor: pointer;
+  font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.06em; user-select: none; white-space: nowrap;
+}
+.switch:hover { color: var(--text); }
+.switch input {
+  position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; padding: 0;
+  pointer-events: none;
+}
+.switch-track {
+  position: relative; flex-shrink: 0; width: 42px; height: 24px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--border);
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--text-dim); box-shadow: 0 1px 3px rgba(0,0,0,0.45);
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+.switch input:checked + .switch-track { background: var(--door); border-color: var(--door-bright); }
+.switch input:checked + .switch-track .switch-knob { transform: translateX(18px); background: #fff; }
+.switch input:checked ~ .switch-text,
+.switch:has(input:checked) .switch-text { color: var(--door-bright); }
+.switch input:focus-visible + .switch-track { outline: 2px solid var(--door-bright); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .switch-track, .switch-knob { transition: none; }
+}
+
+/* Verkaufen sitzt unter den Karten rechts, damit oben rechts der Schalter
+   allein steht. */
+.hand-bar-bottom { display: flex; justify-content: flex-end; flex-shrink: 0; margin-top: 8px; }

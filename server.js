@@ -159,6 +159,8 @@ function createRoom() {
     doorDeck: [], doorDiscard: [],
     treasureDeck: [], treasureDiscard: [],
     revealedDoorCard: null,
+    doorReveal: null, // {cardId, seq} - nur fuer die Aufdeck-Animation im Client
+    dieRoll: null, // {seq, roll, mod, total, success, playerId, playerName} - nur fuer die Wuerfel-Animation im Client
     combat: null,
     pendingConsequence: null,
     pendingCardAction: null,
@@ -324,6 +326,7 @@ function publicPlayer(room, p) {
     handCount: p.hand.length,
     equipped: p.equipped,
     strength: baseStrength(p),
+    handLimit: handLimit(p), // ZWERG darf 6 Karten halten, alle anderen 5
   };
 }
 
@@ -348,6 +351,8 @@ function publicState(room) {
     treasureDiscardTop: room.treasureDiscard.length ? room.treasureDiscard[room.treasureDiscard.length - 1] : null,
     treasureDiscardCount: room.treasureDiscard.length,
     revealedDoorCard: room.revealedDoorCard,
+    doorReveal: room.doorReveal,
+    dieRoll: room.dieRoll,
     combat: room.combat ? Object.assign({}, room.combat, combatConditionalBonusFields(room)) : null,
     pendingConsequence: room.pendingConsequence,
     pendingCardAction: room.pendingCardAction,
@@ -371,10 +376,22 @@ function sendInfoTo(room, player) {
     hand: player.hand,
     incomingTrades,
     outgoingTrades,
+    // Welche Klassenkraft diese Person im laufenden Kampf gerade einsetzen
+    // darf (Berserken/Vertreiben/Flugzauber) - privat, weil sie von der
+    // eigenen Hand und Klasse abhängt.
+    classCombatPower: classCombatPowerInfo(room, player),
+    // Beute-Animation nach einem Kampfsieg. Bewusst hier im privaten
+    // yourInfo statt im oeffentlichen publicState: welche Schatzkarten
+    // jemand gezogen hat, gehoert zur Hand und ist damit geheim - im
+    // Verlauf steht fuer alle nur die ANZAHL.
+    lastReward: player.lastReward || null,
   });
 }
 
 function broadcastState(room) {
+  // Muss VOR publicState laufen: veränderte Kampfwerte setzen den
+  // Bereit-Status zurück, und der Client soll den neuen Stand sehen.
+  refreshCombatReady(room);
   const cardCache = {};
   // Alle Karten mitschicken, die irgendwo referenziert sind, plus die Hände
   // der Spieler:innen einzeln - Kartendetails selbst sind kein Geheimnis
@@ -426,7 +443,7 @@ function startGame(room) {
 
 function endTurn(room) {
   if (room.pendingConsequence || room.combat) return;
-  if (currentPlayer(room) && currentPlayer(room).hand.length > HAND_LIMIT) return; // Milde Gabe erzwingen
+  if (currentPlayer(room) && currentPlayer(room).hand.length > handLimit(currentPlayer(room))) return; // Milde Gabe erzwingen
   room.turnIndex = (room.turnIndex + 1) % room.players.length;
   room.turnPhase = 'tuer';
   room.combatHappenedThisTurn = false;
@@ -455,24 +472,57 @@ function handleDrawDoor(room, playerId) {
   const id = drawDoor(room);
   if (!id) { log(room, 'Türstapel ist leer.'); return; }
   room.revealedDoorCard = id;
+  // Zaehler statt nur Karten-ID: dieselbe Karte kann (nach dem Neumischen des
+  // Ablagestapels) zweimal hintereinander aufgedeckt werden - der Client
+  // erkennt am seq trotzdem, dass es ein NEUES Aufdecken ist, und spielt die
+  // Animation genau einmal ab.
+  room.doorReveal = { cardId: id, seq: (room.doorReveal ? room.doorReveal.seq : 0) + 1 };
   const c = card(id);
   log(room, `${player.name} deckt "${c.name}" auf (${c.setLabel}).`, [id]);
 
   if (c.category === 'monster') {
     room.revealedDoorCard = null;
-    startCombat(room, player.id, [id], { fromHand: false });
+    // "Greift niemanden mit Stufe X oder niedriger an" / "Greift keinen Dieb
+    // an": das Monster zieht weiter, der Zug läuft mit Phase 2 weiter.
+    if (monsterRefusesTarget(id, player)) {
+      room.doorDiscard.push(id);
+      room.turnPhase = 'aerger';
+      log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter. Phase 2: Auf Ärger aus sein.`, [id]);
+    } else {
+      startCombat(room, player.id, [id], { fromHand: false });
+    }
   } else if (c.category === 'curse' || DOOR_OTHER_AS_CURSE.has(c.name)) {
-    room.pendingConsequence = { playerId: player.id, kind: 'curse', cardId: id, text: c.text || c.name, autoApplied: null, choice: null };
     room.doorDiscard.push(id);
     room.revealedDoorCard = null;
-    log(room, `Fluch! ${player.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
-    autoApplyLossConsequence(room, player, [{ name: c.name, text: c.text }]);
+    const shield = curseProtectionItem(player);
+    if (shield) {
+      // SCHUTZSANDALEN: gezogene Flüche haben keine Wirkung.
+      room.turnPhase = 'aerger';
+      log(room, `Fluch "${c.name}" - aber ${player.name} trägt "${card(shield).name}": keine Wirkung. Phase 2: Auf Ärger aus sein.`, [id, shield]);
+    } else {
+      room.pendingConsequence = { playerId: player.id, kind: 'curse', cardId: id, text: c.text || c.name, autoApplied: null, choice: null };
+      log(room, `Fluch! ${player.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
+      autoApplyLossConsequence(room, player, [{ name: c.name, text: c.text }]);
+    }
   } else {
-    player.hand.push(id);
-    room.revealedDoorCard = null;
-    room.turnPhase = 'aerger';
-    log(room, `${player.name} nimmt "${c.name}" auf die Hand. Phase 2: Auf Ärger aus sein.`, [id]);
+    // Karte bleibt offen auf dem Tisch liegen (wie ein Monster), bis sie per
+    // handleTakeRevealedDoor aktiv auf die Hand genommen wird - die Phase
+    // bleibt solange 'tuer' und blockiert damit alle Folgephasen.
+    log(room, `"${c.name}" liegt offen aus - ${player.name} kann sie auf die Hand nehmen.`, [id]);
   }
+}
+
+// Die offen liegende (Nicht-Monster-, Nicht-Fluch-)Tuerkarte auf die Hand
+// nehmen und damit Phase 1 abschliessen.
+function handleTakeRevealedDoor(room, playerId) {
+  const player = currentPlayer(room);
+  if (!player || player.id !== playerId) return;
+  if (room.turnPhase !== 'tuer' || !room.revealedDoorCard || room.combat || room.pendingConsequence) return;
+  const id = room.revealedDoorCard;
+  player.hand.push(id);
+  room.revealedDoorCard = null;
+  room.turnPhase = 'aerger';
+  log(room, `${player.name} nimmt "${card(id).name}" auf die Hand. Phase 2: Auf Ärger aus sein.`, [id]);
 }
 
 function handleAckConsequence(room, playerId) {
@@ -1430,6 +1480,15 @@ function handlePlayMonsterFromHand(room, playerId, cardId) {
   if (!player.hand.includes(cardId)) return;
   const c = card(cardId);
   if (!c || c.category !== 'monster') return;
+  // Auch ein aus der Hand gespieltes Monster greift nicht an, wenn sein Text
+  // das ausschließt - die Karte ist dann trotzdem verbraucht.
+  if (monsterRefusesTarget(cardId, player)) {
+    removeFromHand(player, cardId);
+    room.doorDiscard.push(cardId);
+    log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter.`, [cardId]);
+    touchRoom(room);
+    return;
+  }
   removeFromHand(player, cardId);
   startCombat(room, player.id, [cardId], { fromHand: true });
 }
@@ -1461,6 +1520,284 @@ function handleLootRoom(room, playerId) {
 }
 
 // ---------------------------------------------------------------------------
+// Dauerwirkungen von Karten (Basis-Set)
+//
+// Bis hierher wertete der Server nur Kartentexte aus, die jemand aktiv
+// ausspielt oder die als Konsequenz auflaufen. Daneben hat das Basis-Set eine
+// ganze Reihe DAUERWIRKUNGEN, die ohne Zutun gelten und schlicht ignoriert
+// wurden: "+6 gegen Zwerge", "Greift niemanden mit Stufe 3 oder niedriger
+// an", "Flüche haben keine Wirkung". Wer Schutzsandalen trug, bekam den
+// Fluch trotzdem ab - genau daran ist das hier aufgefallen.
+//
+// Bewusst kuratierte Tabellen statt Regex über den Kartentext: die
+// Formulierungen sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6
+// gegen Elfen"), und ein Regex spränge auf Karten an, die dieselbe Formel
+// in einer AKTIV auszuspielenden Kraft verwenden - der Zauberer hat "+1 Bonus
+// auf Weglaufen", aber nur, wenn er dafür Karten ablegt. Jede Regel steht
+// mit dem Original-Kartentext im Kommentar. Ein Test prüft, dass jeder
+// Tabellenname zu einer echten Karte gehört.
+//
+// ponytail: nur Basis-Set, wie beauftragt. Die Erweiterungs-Sets haben
+// dieselben Muster (z.B. "+5 gegen Elfen" bei RIESENKAKERLAKE) - dort
+// jeweils dieselben Tabellen ergänzen, die Mechanik darunter passt schon.
+// ---------------------------------------------------------------------------
+
+function hasClass(player, substr) {
+  return player.classes.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
+}
+
+function combatParticipants(room) {
+  const c = room.combat;
+  return [findPlayer(room, c.actorId), c.helperId ? findPlayer(room, c.helperId) : null].filter(Boolean);
+}
+
+function combatHasMonster(room, nameSet) {
+  return !!room.combat && room.combat.monsterIds.some((id) => { const c = card(id); return c && nameSet.has(c.name); });
+}
+
+// --- Fluchschutz -----------------------------------------------------------
+// SCHUTZSANDALEN: "Flüche, die du ziehst, nachdem du eine Tür
+// eintrittst, haben keine Wirkung. (Flüche von anderen Spielern wirken
+// weiterhin auf dich.)" Deshalb wird das NUR in handleDrawDoor geprüft.
+const CURSE_PROOF_ITEMS = new Set(['SCHUTZSANDALEN']);
+
+function curseProtectionItem(player) {
+  return equippedItemIds(player).find((id) => { const c = card(id); return c && CURSE_PROOF_ITEMS.has(c.name); }) || null;
+}
+
+// --- Monster, die bestimmte Munchkins gar nicht angreifen ------------------
+// "Greift niemanden mit Stufe X oder niedriger an." Das Monster zieht weiter:
+// kein Kampf, kein Schatz, keine Stufe. Die Karte wandert auf den Ablage-
+// stapel und der Zug läuft normal mit Phase 2 weiter - damit bleiben beide
+// regulären Optionen offen (Monster aus der Hand spielen oder plündern).
+const MONSTER_REFUSES = {
+  'PLUTONIUMDRACHE': (p) => p.level <= 5,
+  'BULLROG': (p) => p.level <= 4,
+  // "Greift niemanden mit Stufe 4 oder niedriger an, AUSSER Elfen."
+  'KRAKZILLA': (p) => p.level <= 4 && !hasRace(p, 'ELF'),
+  'HIPPOGREIF': (p) => p.level <= 3,
+  'KÖNIG TUT': (p) => p.level <= 3,
+  'GRUFTIGE GEBRÜDER': (p) => p.level <= 3,
+  // "Greift keinen Dieb an (berufliche Höflichkeit)." Die zusätzliche
+  // Dieb-Option (2 Schätze tauschen) bleibt manuell.
+  'ANWALT': (p) => hasClass(p, 'DIEB'),
+};
+
+function monsterRefusesTarget(cardId, player) {
+  const c = card(cardId);
+  const rule = c && MONSTER_REFUSES[c.name];
+  return !!rule && rule(player);
+}
+
+// --- Monsterboni gegen Rassen/Klassen --------------------------------------
+// Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
+// die Rasse/Klasse hat (Angreifer:in oder Helfer:in) - nicht einmal pro
+// Person.
+const MONSTER_TRAIT_BONUS = {
+  'UNGLAUBLICHER UNAUSSPRECHLICHER SCHRECKEN': { classes: ['KRIEGER'], bonus: 4 }, // "+4 gegen Krieger."
+  'KREISCHENDER DEPP': { classes: ['KRIEGER'], bonus: 6 },                         // "+6 gegen Krieger."
+  'ZUNGENDÄMON': { classes: ['PRIESTER'], bonus: 4 },                          // "+4 gegen Priester."
+  'HAMMER-RATTE': { classes: ['PRIESTER'], bonus: 3 },                              // "+3 gegen Priester."
+  'ENTIKOR': { classes: ['ZAUBERER'], bonus: 6 },                                   // "+6 gegen Zauberer."
+  'HARFIEN': { classes: ['ZAUBERER'], bonus: 5 },                                   // "+5 gegen Zauberer."
+  'BIGFOOT': { races: ['ZWERG', 'HALBLING'], bonus: 3 },                            // "+3 gegen Zwerge und Halblinge."
+  '3.872 ORKS': { races: ['ZWERG'], bonus: 6 },                                     // "+6 gegen Zwerge wegen uralter Feindschaft."
+  'UNTOTES PFERD': { races: ['ZWERG'], bonus: 5 },                                  // "+5 gegen Zwerge."
+  'GESICHTSSAUGER': { races: ['ELF'], bonus: 6 },                                   // "+6 gegen Elfen."
+  'LEPRACHAUN': { races: ['ELF'], bonus: 5 },                                       // "+5 gegen Elfen."
+  'SABBERNDER SCHLEIM': { races: ['ELF'], bonus: 4 },                               // "+4 gegen Elfen."
+  'KRAKZILLA': { races: ['ELF'], bonus: 4 },                                        // "Elfen haben -4!" = +4 für das Monster
+};
+
+function monsterTraitBonusSum(room) {
+  const parts = combatParticipants(room);
+  return room.combat.monsterIds.reduce((sum, id) => {
+    const c = card(id);
+    const rule = c && MONSTER_TRAIT_BONUS[c.name];
+    if (!rule) return sum;
+    const hit = parts.some((p) => (rule.races || []).some((r) => hasRace(p, r)) || (rule.classes || []).some((k) => hasClass(p, k)));
+    return sum + (hit ? rule.bonus : 0);
+  }, 0);
+}
+
+// --- Monster, die die Kampfrechnung selbst verändern ---------------------
+// "Deine Stufe zählt nicht im Kampf. Bekämpfe ihn nur mit deinen Boni!"
+const MONSTER_IGNORES_LEVEL = new Set(['VERSICHERUNGSVERTRETER']);
+// "Gegen sie dürfen keine Gegenstände oder andere Boni eingesetzt werden
+// - kämpfe nur mit deiner Charakterstufe."
+const MONSTER_IGNORES_BONUSES = new Set(['GEMEINE GHOULE']);
+// "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
+const MONSTER_FORBIDS_HELP = new Set(['PAVILLON']);
+// Die ersten beiden Regeln gelten für die ganze Munchkin-Seite: sobald
+// jemand mithilft, kämpfen beide gegen dasselbe Monster, also trifft die
+// Einschränkung auch die Helfer:in.
+
+// --- Weglaufen -------------------------------------------------------------
+// Feste Modifikatoren, die ohne Zutun gelten. Der Zauberer-Flugzauber ("+1
+// pro abgelegter Karte") steht bewusst NICHT hier - er kostet Karten und
+// bleibt darum eine manuelle Eingabe im Weglaufen-Feld.
+const FLEE_ITEM_BONUS = {
+  'STIEFEL ZUM ECHT SCHNELLEN DAVONLAUFEN': 2, // "Sie geben dir einen +2 Bonus auf Weglaufen."
+  'TUBA DER VERZAUBERUNG': 3,                  // "... und gibt dir +3 auf Weglaufen."
+};
+const FLEE_MONSTER_MOD = {
+  'SCHNECKEN AUF SPEED': -2, // "Du hast -2 auf Weglaufen."
+  'FLIEGENDE FROSCHE': -1,   // "Du hast -1 auf Weglaufen."
+  'GALLERT-OKTAEDER': 1,     // "Du hast +1 auf Weglaufen."
+  'LAHMER GOBLIN': 1,        // "Du hast +1 auf Weglaufen."
+};
+// FILZLAUSE: "Denen kannst du nicht entkommen!"
+// LAUFENDE NASE: "Verlierst du den Kampf, kannst du nicht fliehen."
+const FLEE_IMPOSSIBLE = new Set(['FILZLAUSE', 'LAUFENDE NASE']);
+// TOPFPFLANZE, Schlimme Dinge: "Keine. Automatische Flucht."
+const FLEE_AUTOMATIC = new Set(['TOPFPFLANZE']);
+// Stufenverlust trotz gelungener Flucht.
+const FLEE_PENALTY = {
+  'MR. BONES': () => 1,                          // "Auch bei einer erfolgreichen Flucht verlierst du 1 Stufe."
+  'KÖNIG TUT': (p) => (p.level > 3 ? 2 : 0), // "Charaktere mit höherer Stufe verlieren zwei Stufen, auch wenn sie fliehen."
+  'GRUFTIGE GEBRÜDER': (p) => (p.level > 3 ? 2 : 0),
+};
+// "Falls du erfolgreich Weglaufen kannst, zieh dir auf dem Weg nach draußen
+// noch verdeckt eine Schatzkarte."
+const FLEE_TREASURE_ITEMS = new Set(['TUBA DER VERZAUBERUNG']);
+
+// Summiert alle festen Weglaufen-Modifikatoren und liefert die Einzelposten
+// mit, damit Log und Würfelanimation sie benennen können.
+function fleeModifierParts(room, player) {
+  const parts = [];
+  if (hasRace(player, 'ELF')) parts.push({ label: 'Elf', amount: 1 }); // "Du hast +1 auf Weglaufen."
+  // Machtgruppe Assassine der Roten Mantis, "Heimlichkeit".
+  if (hasPowerGroup(player, 'ASSASSINE DER ROTEN MANTIS')) parts.push({ label: 'Heimlichkeit', amount: 1 });
+  equippedItemIds(player).forEach((id) => {
+    const c = card(id);
+    if (c && FLEE_ITEM_BONUS[c.name]) parts.push({ label: c.name, amount: FLEE_ITEM_BONUS[c.name] });
+  });
+  if (room.combat) {
+    room.combat.monsterIds.forEach((id) => {
+      const c = card(id);
+      if (c && FLEE_MONSTER_MOD[c.name]) parts.push({ label: c.name, amount: FLEE_MONSTER_MOD[c.name] });
+    });
+    // Bereits abgeworfene Flugzauber-Karten (siehe CLASS_FLEE_DISCARD).
+    if (room.combat.fleeBonus) parts.push({ label: 'Flugzauber', amount: room.combat.fleeBonus });
+  }
+  return parts;
+}
+
+// --- Bonusstufen und Bonusschätze beim Sieg ------------------------------
+// "Wenn du dieses Monster während deines Zugs besiegst, erhältst du eine
+// zusätzliche Stufe." (In diesem Server findet ein Kampf immer im eigenen
+// Zug statt, die Bedingung ist also erfüllt.)
+const MONSTER_EXTRA_LEVEL = new Set(['PLUTONIUMDRACHE', 'BULLROG', 'KRAKZILLA', 'HIPPOGREIF', 'KÖNIG TUT', 'GRUFTIGE GEBRÜDER']);
+// "Du gewinnst eine zusätzliche Stufe, wenn du es mit Feuer oder Flammen
+// besiegst."
+// ponytail: feste Liste der Feuer-Gegenstände des Basis-Sets - "Feuer oder
+// Flammen" lässt sich nicht zuverlässig aus dem Text ableiten. Neue
+// Feuerkarten hier ergänzen.
+const FIRE_ITEMS = new Set(['FLAMMENDE RÜSTUNG', 'NAPALMSTAB']);
+
+function monsterVictoryExtras(room, actor, helper, monsters) {
+  const c = room.combat;
+  let levels = 0;
+  let treasures = 0;
+  monsters.forEach((m) => {
+    if (MONSTER_EXTRA_LEVEL.has(m.name)) levels += 1;
+    // "Du erhältst eine Extrastufe, wenn du es ohne Hilfe und Boni besiegst."
+    if (m.name === 'PIKOTZU' && !helper && c.actorModifier === 0 && equippedBonusSum(actor) === 0) levels += 1;
+    if (m.name === 'GROSSES WUTENDES HUHN' && equippedItemIds(actor).some((id) => FIRE_ITEMS.has((card(id) || {}).name))) levels += 1;
+    // "Elfen ziehen 1 zusätzlichen Schatz, nachdem sie besiegt wurde."
+    if (m.name === 'TOPFPFLANZE' && hasRace(actor, 'ELF')) treasures += 1;
+  });
+  return { levels, treasures };
+}
+
+// --- Klassenkräfte: Karten im Kampf abwerfen ------------------------------
+// Drei der vier Basis-Klassen haben dieselbe Form: bis zu 3 Handkarten
+// abwerfen, jede gibt einen festen Bonus. Dafür gab es bisher überhaupt
+// keinen Weg im Spiel - nur das manuelle Bonus-Zahlenfeld, das aber keine
+// Karte abwirft.
+//
+// KRIEGER "Berserken": "Du darfst bis zu 3 Karten im Kampf ablegen. Jede
+// verleiht einen +1 Bonus."
+// PRIESTER "Vertreiben": "Du darfst bis zu 3 Karten in einem Kampf gegen eine
+// Untote Kreatur ablegen. Jede abgelegte Karte gibt dir +3 Bonus."
+const CLASS_COMBAT_DISCARD = {
+  'KRIEGER': { bonus: 1, max: 3, label: 'Berserken' },
+  'PRIESTER': { bonus: 3, max: 3, label: 'Vertreiben', requiresUndead: true },
+};
+
+// ponytail: cards.json kennt kein "Untot"-Merkmal - im Basis-Set steht es auf
+// keiner einzigen Monsterkarte im Text. Deshalb diese kuratierte Liste; sie
+// ist die EINZIGE Stelle, an der "untot" in diesem Server definiert ist.
+// Stimmt sie nicht mit euren Karten überein, hier korrigieren.
+const UNDEAD_MONSTERS = new Set(['MR. BONES', 'UNTOTES PFERD', 'KÖNIG TUT', 'GRUFTIGE GEBRÜDER']);
+
+// ZAUBERER "Flugzauber": "Du darfst bis zu 3 Karten ablegen, nachdem du
+// deinen Weglaufwurf gemacht hast. Jede verleiht dir +1 Bonus auf Weglaufen."
+// ponytail: hier VOR dem Wurf, weil dieser Server den Wurf sofort auflöst -
+// eine Zwischenphase "gewürfelt, aber noch nicht entschieden" gäbe es
+// bisher nirgends. Wer den Kartentext wörtlich will, braucht genau die.
+const CLASS_FLEE_DISCARD = {
+  'ZAUBERER': { bonus: 1, max: 3, label: 'Flugzauber' },
+};
+
+// DIEB "In den Rücken fallen" (-2 für eine ANDERE Person) fehlt hier
+// bewusst: die Kraft richtet sich gegen Mitspieler:innen, und genau das ist
+// laut Kommentar am Dateianfang durchgehend manuell gehalten.
+
+function classDiscardPower(room, player) {
+  const c = room.combat;
+  if (!c) return null;
+  const flee = !!c.mustFlee;
+  const table = flee ? CLASS_FLEE_DISCARD : CLASS_COMBAT_DISCARD;
+  const name = Object.keys(table).find((n) => hasClass(player, n));
+  if (!name) return null;
+  const rule = table[name];
+  if (rule.requiresUndead && !combatHasMonster(room, UNDEAD_MONSTERS)) return null;
+  const used = (c.classDiscards || {})[`${player.id}:${flee ? 'flee' : 'combat'}`] || 0;
+  return Object.assign({ className: name, kind: flee ? 'flee' : 'combat', used, remaining: Math.max(0, rule.max - used) }, rule);
+}
+
+// Was die/der Einzelne gerade nutzen darf - wandert ins private yourInfo,
+// damit der Client keine eigene Kopie der Tabellen braucht.
+function classCombatPowerInfo(room, player) {
+  const c = room.combat;
+  if (!c) return null;
+  if (player.id !== c.actorId && player.id !== c.helperId) return null;
+  const power = classDiscardPower(room, player);
+  if (!power) return null;
+  return { label: power.label, className: power.className, bonus: power.bonus, kind: power.kind, remaining: power.remaining };
+}
+
+function handleUseClassCombatDiscard(room, playerId, cardId) {
+  if (!room.combat) return;
+  const c = room.combat;
+  const player = findPlayer(room, playerId);
+  if (!player || !player.hand.includes(cardId)) return;
+  // Nur wer wirklich im Kampf steht - Zuschauer:innen dürfen nicht abwerfen.
+  if (playerId !== c.actorId && playerId !== c.helperId) return;
+  const power = classDiscardPower(room, player);
+  if (!power || power.remaining <= 0) return;
+  c.classDiscards = c.classDiscards || {};
+  c.classDiscards[`${playerId}:${power.kind}`] = power.used + 1;
+  removeFromHand(player, cardId);
+  discardCard(room, cardId);
+  if (power.kind === 'flee') {
+    c.fleeBonus = (c.fleeBonus || 0) + power.bonus;
+    log(room, `${player.name} (${power.className}) legt "${card(cardId).name}" ab - ${power.label}: +${power.bonus} auf Weglaufen.`, [cardId]);
+  } else {
+    c.actorModifier += power.bonus;
+    log(room, `${player.name} (${power.className}) legt "${card(cardId).name}" ab - ${power.label}: +${power.bonus} im Kampf.`, [cardId]);
+  }
+  touchRoom(room);
+}
+
+// --- Handkartenlimit -------------------------------------------------------
+// ZWERG: "Du darfst sechs Karten auf deiner Hand haben."
+function handLimit(player) {
+  return player && hasRace(player, 'ZWERG') ? HAND_LIMIT + 1 : HAND_LIMIT;
+}
+
+// ---------------------------------------------------------------------------
 // Kampf
 // ---------------------------------------------------------------------------
 
@@ -1476,7 +1813,73 @@ function startCombat(room, actorId, monsterIds, opts) {
     monsterModifier: 0,
     mustFlee: false,
     fromHand: !!opts.fromHand,
+    classDiscards: {}, // "<playerId>:combat"/"<playerId>:flee" -> Anzahl bereits abgeworfener Karten
+    fleeBonus: 0,      // Summe der Flugzauber-Karten
+    ready: {},         // playerId -> true, sobald jemand die Auswertung freigibt
+    readySignature: null,
   };
+  touchRoom(room);
+}
+
+// ---------------------------------------------------------------------------
+// Bereit-Check vor der Kampfauswertung
+//
+// Jede:r am Tisch darf in einen laufenden Kampf eingreifen (Monster-
+// Verstärker, Kampf-Tränke, das manuelle Bonusfeld). Vorher konnte die
+// kämpfende Person aber sofort auf "Kampf auswerten" drücken - wer das
+// Monster noch verstärken wollte, hatte nur seine Reaktionsgeschwindigkeit.
+// Deshalb muss jetzt jede:r andere bestätigen, dass nichts mehr kommt.
+// ---------------------------------------------------------------------------
+
+// Wer bestätigen muss: alle außer der kämpfenden Person. Bots greifen nie
+// ein und gelten sofort als bereit, Getrennte werden übersprungen - sonst
+// hängt das Spiel an jemandem, der gerade nicht am Gerät ist.
+function combatReadyRequired(room) {
+  const c = room.combat;
+  if (!c) return [];
+  return room.players.filter((p) => p.id !== c.actorId && p.connected && !p.isBot).map((p) => p.id);
+}
+
+function combatAllReady(room) {
+  const c = room.combat;
+  if (!c) return false;
+  return combatReadyRequired(room).every((id) => (c.ready || {})[id]);
+}
+
+// Der Bereit-Status verfällt, sobald sich am Kampf irgendetwas ändert -
+// sonst bestätigen alle, jemand spielt danach noch "Uralt +10", und der
+// Kampf löst mit veralteter Zustimmung aus.
+//
+// Bewusst über eine Signatur statt über einen Reset-Aufruf in jedem
+// einzelnen Handler: so kann keine künftig ergänzte Karte den Reset
+// vergessen. Die Signatur enthält die fertigen Summen, also wirkt auch
+// Ausrüsten mitten im Kampf.
+function combatSignature(room) {
+  const c = room.combat;
+  if (!c) return null;
+  const t = combatTotals(room);
+  return JSON.stringify([c.monsterIds, c.helperId, c.actorModifier, c.monsterModifier,
+    t.playerStrength, t.monsterStrength, c.mustFlee]);
+}
+
+function refreshCombatReady(room) {
+  const c = room.combat;
+  if (!c) return;
+  const sig = combatSignature(room);
+  if (c.readySignature !== sig) {
+    c.ready = {};
+    c.readySignature = sig;
+  }
+}
+
+function handleSetCombatReady(room, playerId, ready) {
+  const c = room.combat;
+  if (!c) return;
+  if (!combatReadyRequired(room).includes(playerId)) return;
+  c.ready = c.ready || {};
+  if (ready) c.ready[playerId] = true; else delete c.ready[playerId];
+  const p = findPlayer(room, playerId);
+  log(room, `${p.name} ist ${ready ? 'bereit' : 'doch noch nicht bereit'} für die Auswertung.`);
   touchRoom(room);
 }
 
@@ -1486,10 +1889,19 @@ function combatTotals(room) {
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   const monsters = c.monsterIds.map(card);
   const monsterLevel = monsters.reduce((sum, m) => sum + (m.level || 0), 0);
-  const actorCond = conditionalItemBonusSum(actor, monsters);
-  const helperCond = helper ? conditionalItemBonusSum(helper, monsters) : 0;
-  const playerStrength = baseStrength(actor) + actorCond + (helper ? baseStrength(helper) + helperCond : 0) + c.actorModifier;
-  const monsterStrength = monsterLevel + c.monsterModifier;
+  const sides = [actor, helper].filter(Boolean);
+  const ignoreLevel = combatHasMonster(room, MONSTER_IGNORES_LEVEL);
+  const ignoreBonuses = combatHasMonster(room, MONSTER_IGNORES_BONUSES);
+  let playerStrength;
+  if (ignoreBonuses) {
+    // GEMEINE GHOULE: nur die Charakterstufe(n) - keine Ausrüstung, keine
+    // ausgespielten Karten. Monster-Verstärker bleiben davon unberührt.
+    playerStrength = sides.reduce((sum, p) => sum + p.level, 0);
+  } else {
+    playerStrength = sides.reduce((sum, p) => sum + baseStrength(p) + conditionalItemBonusSum(p, monsters) -
+      (ignoreLevel ? p.level : 0), 0) + c.actorModifier;
+  }
+  const monsterStrength = monsterLevel + c.monsterModifier + monsterTraitBonusSum(room);
   return { playerStrength, monsterStrength, monsterLevel };
 }
 
@@ -1501,9 +1913,22 @@ function combatConditionalBonusFields(room) {
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   const monsters = c.monsterIds.map(card);
+  const totals = combatTotals(room);
   return {
     actorConditionalBonus: conditionalItemBonusSum(actor, monsters),
     helperConditionalBonus: helper ? conditionalItemBonusSum(helper, monsters) : 0,
+    // Fertig gerechnete Summen: der Client hat sie früher selbst
+    // nachgerechnet und würde die Monsterboni gegen Rassen/Klassen und die
+    // Sonderregeln sonst nicht kennen - zwei Rechenwege, die auseinander-
+    // laufen können. Jetzt zeigt er genau das an, was der Server wertet.
+    playerStrength: totals.playerStrength,
+    monsterStrength: totals.monsterStrength,
+    readyRequired: combatReadyRequired(room),
+    allReady: combatAllReady(room),
+    monsterTraitBonus: monsterTraitBonusSum(room),
+    ignoresLevel: combatHasMonster(room, MONSTER_IGNORES_LEVEL),
+    ignoresBonuses: combatHasMonster(room, MONSTER_IGNORES_BONUSES),
+    forbidsHelp: combatHasMonster(room, MONSTER_FORBIDS_HELP),
   };
 }
 
@@ -1708,6 +2133,12 @@ function handleRequestHelp(room, playerId, targetId) {
   if (c.actorId !== playerId || c.helperId) return;
   const target = findPlayer(room, targetId);
   if (!target || targetId === c.actorId) return;
+  // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
+  if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
+    log(room, 'Gegen dieses Monster darf niemand helfen.');
+    touchRoom(room);
+    return;
+  }
   c.helperPending = { targetId };
   log(room, `${findPlayer(room, playerId).name} bittet ${target.name} um Hilfe.`);
   touchRoom(room);
@@ -1751,7 +2182,18 @@ function handleEvaluateCombat(room, playerId) {
   if (!room.combat) return;
   const c = room.combat;
   if (c.actorId !== playerId) return;
+  // Erst auswerten, wenn niemand mehr eingreifen will.
+  if (!combatAllReady(room)) return;
   const { playerStrength, monsterStrength } = combatTotals(room);
+  // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Greift vor der
+  // ALUFOLIE-Notlösung, damit die Karte nicht unnötig verbraucht wird.
+  const warrior = playerStrength === monsterStrength
+    ? combatParticipants(room).find((p) => hasClass(p, 'KRIEGER')) : null;
+  if (warrior) {
+    log(room, `Gleichstand (${playerStrength} vs. ${monsterStrength}) - ${warrior.name} ist Krieger und gewinnt ihn.`);
+    resolveCombatWin(room);
+    return;
+  }
   const tie = playerStrength === monsterStrength ? findTieBreaker(room) : null;
   if (tie) {
     removeFromHand(tie.player, tie.cardId);
@@ -1772,20 +2214,41 @@ function resolveCombatWin(room) {
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   const monsters = c.monsterIds.map(card);
-  const levelsGained = monsters.length; // 1 pro besiegtem Monster (Sonderfälle "steigt 2 Stufen" -> manuell nachjustieren)
+  // 1 Stufe pro besiegtem Monster, dazu die kartenspezifischen Bonusstufen
+  // und -schätze (Bossmonster, PIKOTZU ohne Hilfe, Feuer gegen das Huhn,
+  // Elfen gegen die Topfpflanze) - siehe monsterVictoryExtras.
+  const extras = monsterVictoryExtras(room, actor, helper, monsters);
+  const levelsGained = monsters.length + extras.levels;
   setLevel(actor, actor.level + levelsGained);
-  const treasureCount = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0);
+  const treasureCount = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0) + extras.treasures;
   const drawn = [];
   for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache
   // (README) etwas zugesagt - hier immer erst alles an die/den Angreifer:in,
   // Weitergabe von Schätzen kann jederzeit frei "gehandelt" werden.
   drawn.forEach((id) => actor.hand.push(id));
+  actor.lastReward = {
+    seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
+    cardIds: drawn,
+    levelsGained,
+    monsterNames: monsters.map((m) => m.name),
+  };
   c.monsterIds.forEach((id) => room.doorDiscard.push(id));
   log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${treasureCount} Schatzkarte(n) gezogen.`, c.monsterIds);
+  if (extras.levels) log(room, `Kartenbonus: +${extras.levels} zusätzliche Stufe(n).`);
+  if (extras.treasures) log(room, `Kartenbonus: +${extras.treasures} zusätzliche(r) Schatz.`);
   if (helper) log(room, `(${helper.name} hat geholfen.)`);
+  // ELF: "Für jedes Monster, das du jemandem anderen hilfst zu töten,
+  // steigst du 1 Stufe auf."
+  if (helper && hasRace(helper, 'ELF')) {
+    setLevel(helper, helper.level + monsters.length);
+    log(room, `${helper.name} ist Elf und steigt fürs Helfen ${monsters.length} Stufe(n) auf -> jetzt Stufe ${helper.level}.`);
+  }
   room.combat = null;
-  const won = checkWin(room, actor);
+  // Auch die Helfer:in kann so Stufe 10 erreichen - die Stufe kommt aus einem
+  // besiegten Monster, damit zählt sie als Sieg.
+  let won = checkWin(room, actor);
+  if (!won && helper) won = checkWin(room, helper);
   if (!won) room.turnPhase = 'gabe';
   touchRoom(room);
 }
@@ -1796,15 +2259,45 @@ function handleAttemptFlee(room, playerId, modifier) {
   if (c.actorId !== playerId) return;
   const actor = findPlayer(room, c.actorId);
   const roll = rollDie();
-  // Machtgruppe Assassine der Roten Mantis, "Heimlichkeit": +1 auf Weglaufen.
-  // Kommt nach der Begrenzung dazu, weil `modifier` aus dem Client stammt und
-  // dieser Bonus serverseitig feststeht.
-  const stealth = hasPowerGroup(actor, 'ASSASSINE DER ROTEN MANTIS') ? 1 : 0;
-  const mod = Math.max(-9, Math.min(9, Math.round(Number(modifier) || 0))) + stealth;
+  // `modifier` kommt aus dem Client und ist damit ungeprüfte Fremdeingabe
+  // (manuell eingetragene Karteneffekte). Alles, was fest auf Karten steht -
+  // Elfenbonus, Weglaufstiefel, Tuba, Monster wie die Schnecken auf Speed -
+  // rechnet der Server selbst dazu, statt sich darauf zu verlassen, dass es
+  // jemand von Hand einträgt.
+  const manual = Math.max(-9, Math.min(9, Math.round(Number(modifier) || 0)));
+  const parts = fleeModifierParts(room, actor);
+  const mod = manual + parts.reduce((sum, x) => sum + x.amount, 0);
   const total = roll + mod;
-  const success = total >= 5;
-  log(room, `${actor.name} würfelt ${roll} (${mod >= 0 ? '+' : ''}${mod} = ${total}) zum Weglaufen: ${success ? 'geschafft!' : 'gescheitert!'}`);
+  const impossible = combatHasMonster(room, FLEE_IMPOSSIBLE);
+  const automatic = combatHasMonster(room, FLEE_AUTOMATIC);
+  const success = impossible ? false : (automatic ? true : total >= 5);
+  let note = parts.length ? parts.map((x) => `${x.label} ${x.amount >= 0 ? '+' : ''}${x.amount}`).join(', ') : '';
+  if (impossible) note = 'Vor diesem Monster gibt es kein Entkommen.';
+  else if (automatic) note = 'Automatische Flucht.';
+  log(room, `${actor.name} würfelt ${roll} (${mod >= 0 ? '+' : ''}${mod} = ${total}) zum Weglaufen: ${success ? 'geschafft!' : 'gescheitert!'}${note ? ` [${note}]` : ''}`);
+  // Eigenes seq-Feld fuer die Wuerfel-Animation: room.combat wird gleich auf
+  // null gesetzt, die Animation darf davon nicht abhaengen.
+  room.dieRoll = {
+    seq: (room.dieRoll ? room.dieRoll.seq : 0) + 1,
+    roll, mod, total, success, note, playerId: actor.id, playerName: actor.name,
+  };
   if (success) {
+    // Stufenverlust trotz gelungener Flucht (MR. BONES, KÖNIG TUT, GRUFTIGE
+    // GEBRÜDER) und der Tuba-Schatz auf dem Weg nach draußen.
+    let penalty = 0;
+    c.monsterIds.forEach((id) => {
+      const m = card(id);
+      const fn = m && FLEE_PENALTY[m.name];
+      if (fn) penalty += fn(actor);
+    });
+    if (penalty) {
+      setLevel(actor, actor.level - penalty);
+      log(room, `Trotz Flucht: ${actor.name} verliert ${penalty} Stufe(n) -> jetzt Stufe ${actor.level}.`);
+    }
+    if (equippedItemIds(actor).some((id) => FLEE_TREASURE_ITEMS.has((card(id) || {}).name))) {
+      const t = drawTreasure(room);
+      if (t) { actor.hand.push(t); log(room, `${actor.name} nimmt auf dem Weg nach draußen noch 1 verdeckte Schatzkarte mit.`); }
+    }
     c.monsterIds.forEach((id) => room.doorDiscard.push(id));
     room.combat = null;
     room.turnPhase = 'gabe';
@@ -1824,17 +2317,33 @@ function handleAttemptFlee(room, playerId, modifier) {
 // werden muss (mustFlee) und nur für die kämpfende Person selbst (Hilfe für
 // eine zweite Person ist in diesem Server ohnehin nicht separat vom
 // Kampf-Ausgang der Hauptperson abhängig, siehe handleAttemptFlee).
-const GUARANTEED_FLEE_CARDS = new Set(['FERTIGMAUER', 'BABY-ÖL', 'DER ANDERE RING']);
+const GUARANTEED_FLEE_CARDS = new Set(['FERTIGMAUER', 'BABY-ÖL', 'DER ANDERE RING', 'RATTE AM SPIESS']);
+// RATTE AM SPIESS: "Du kannst diesen Gegenstand ablegen, um automatisch einem
+// beliebigen Monster der Stufe 8 oder niedriger zu entkommen - sogar dann,
+// wenn du die Ratte am Spieß lediglich im Rucksack mit dir trägst."
+// Daher: Stufengrenze, und nutzbar sowohl von der Hand als auch angelegt.
+const GUARANTEED_FLEE_MAX_MONSTER_LEVEL = { 'RATTE AM SPIESS': 8 };
 
 function handleUseGuaranteedFlee(room, playerId, cardId) {
   if (!room.combat || !room.combat.mustFlee) return;
   const c = room.combat;
   if (c.actorId !== playerId) return;
   const player = findPlayer(room, playerId);
-  if (!player || !player.hand.includes(cardId)) return;
+  if (!player) return;
+  const inHand = player.hand.includes(cardId);
+  const equipped = equippedItemIds(player).includes(cardId);
+  if (!inHand && !equipped) return;
   const cardData = card(cardId);
   if (!cardData || !GUARANTEED_FLEE_CARDS.has(cardData.name)) return;
-  removeFromHand(player, cardId);
+  // Karten mit Stufengrenze (RATTE AM SPIESS: "Stufe 8 oder niedriger")
+  // wirken nur gegen entsprechend schwache Monster.
+  const maxLevel = GUARANTEED_FLEE_MAX_MONSTER_LEVEL[cardData.name];
+  if (typeof maxLevel === 'number' && c.monsterIds.some((id) => ((card(id) || {}).level || 0) > maxLevel)) {
+    log(room, `"${cardData.name}" wirkt nur gegen Monster bis Stufe ${maxLevel}.`);
+    touchRoom(room);
+    return;
+  }
+  if (inHand) removeFromHand(player, cardId); else unequipSlotCard(player, cardId);
   discardCard(room, cardId);
   c.monsterIds.forEach((id) => room.doorDiscard.push(id));
   room.combat = null;
@@ -1985,7 +2494,7 @@ function handleEndTurnAction(room, playerId) {
   const player = currentPlayer(room);
   if (!player || player.id !== playerId) return;
   if (room.turnPhase !== 'gabe') return;
-  if (player.hand.length > HAND_LIMIT) return;
+  if (player.hand.length > handLimit(player)) return;
   endTurn(room);
   touchRoom(room);
 }
@@ -2107,6 +2616,11 @@ function scheduleBotActionsIfNeeded(room) {
       return;
     }
     if (actor.isBot) {
+      // Solange noch jemand bestätigen muss, gar nicht erst einplanen -
+      // handleEvaluateCombat würde nur wirkungslos abprallen und der Bot
+      // liefe im Sekundentakt dagegen. Das nächste "Bereit" löst ohnehin
+      // einen Broadcast und damit eine neue Planung aus.
+      if (!c.mustFlee && !combatAllReady(room)) return;
       const snapshotCombat = c;
       room.botTimer = setTimeout(() => {
         room.botTimer = null;
@@ -2127,14 +2641,15 @@ function scheduleBotActionsIfNeeded(room) {
     if (!rooms.has(room.code) || room.phase !== 'playing') return;
     if (currentPlayer(room) !== actor || room.turnPhase !== snapshotPhase) return;
     if (room.turnPhase === 'tuer') {
-      handleDrawDoor(room, actor.id);
+      if (room.revealedDoorCard) handleTakeRevealedDoor(room, actor.id);
+      else handleDrawDoor(room, actor.id);
     } else if (room.turnPhase === 'aerger') {
       // Bot spielt nie freiwillig ein Monster aus der Hand (Vereinfachung).
       handleSkipToLoot(room, actor.id);
     } else if (room.turnPhase === 'pluendern') {
       handleLootRoom(room, actor.id);
     } else if (room.turnPhase === 'gabe') {
-      while (actor.hand.length > HAND_LIMIT) {
+      while (actor.hand.length > handLimit(actor)) {
         handleDiscardFromHand(room, actor.id, actor.hand[actor.hand.length - 1]);
       }
       handleEndTurnAction(room, actor.id);
@@ -2302,6 +2817,7 @@ io.on('connection', (socket) => {
 
   // --- Spielzüge ---
   onSafe(socket, 'drawDoor', () => act(socket, (room, pid) => handleDrawDoor(room, pid)));
+  onSafe(socket, 'takeRevealedDoor', () => act(socket, (room, pid) => handleTakeRevealedDoor(room, pid)));
   onSafe(socket, 'ackConsequence', () => act(socket, (room, pid) => handleAckConsequence(room, pid)));
   onSafe(socket, 'applyConsequenceAction', (action) => act(socket, (room, pid) => handleApplyConsequenceAction(room, pid, action)));
   onSafe(socket, 'resolveConsequenceChoice', ({ optionId }) => act(socket, (room, pid) => handleResolveConsequenceChoice(room, pid, optionId)));
@@ -2315,11 +2831,13 @@ io.on('connection', (socket) => {
   onSafe(socket, 'lootRoom', () => act(socket, (room, pid) => handleLootRoom(room, pid)));
   onSafe(socket, 'setCombatModifier', ({ who, value }) => act(socket, (room, pid) => handleSetCombatModifier(room, pid, who, value)));
   onSafe(socket, 'playCombatCard', ({ cardId }) => act(socket, (room, pid) => handlePlayCombatCard(room, pid, cardId)));
+  onSafe(socket, 'useClassCombatDiscard', ({ cardId }) => act(socket, (room, pid) => handleUseClassCombatDiscard(room, pid, cardId)));
   onSafe(socket, 'proposeTrade', ({ toId, offerCardIds }) => act(socket, (room, pid) => handleProposeTrade(room, pid, toId, offerCardIds)));
   onSafe(socket, 'cancelTrade', ({ tradeId }) => act(socket, (room, pid) => handleCancelTrade(room, pid, tradeId)));
   onSafe(socket, 'respondTrade', ({ tradeId, accept, counterCardIds }) => act(socket, (room, pid) => handleRespondTrade(room, pid, tradeId, accept, counterCardIds)));
   onSafe(socket, 'requestHelp', ({ targetId }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId)));
   onSafe(socket, 'respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
+  onSafe(socket, 'setCombatReady', ({ ready }) => act(socket, (room, pid) => handleSetCombatReady(room, pid, ready !== false)));
   onSafe(socket, 'evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
   onSafe(socket, 'attemptFlee', ({ modifier }) => act(socket, (room, pid) => handleAttemptFlee(room, pid, modifier)));
   onSafe(socket, 'equipItem', ({ cardId }) => act(socket, (room, pid) => handleEquipItem(room, pid, cardId)));
@@ -2362,6 +2880,15 @@ module.exports = {
   DOOR_OTHER_AS_CURSE, isInstantLevelUpCard, TREASURE_POWER_OVERRIDES,
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
   POWER_GROUP_NAMES, GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
-  handleDrawDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
-  handleApplyConsequenceAction,
+  handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
+  handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee,
+  CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
+  MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
+  FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
+  MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
+  combatTotals, handLimit, hasRace, hasClass,
+  CLASS_COMBAT_DISCARD, CLASS_FLEE_DISCARD, UNDEAD_MONSTERS,
+  handleUseClassCombatDiscard, classCombatPowerInfo,
+  handleSetCombatReady, combatReadyRequired, combatAllReady, refreshCombatReady,
+  handleSetCombatModifier,
 };

@@ -13,7 +13,14 @@ hunderten individuellen Karten-Sonderregeln (die laut ursprünglichem
 Server-Design bewusst "Trust-Prinzip"-manuell blieben) tatsächlich im Server
 nachgebildet werden - inklusive eines komplett neuen dritten Charakter-Merkmals
 ("Machtgruppe", Pathfinder-Set). Das ist über mehrere Runden passiert; diese
-Datei ist der Stand nach der Runde vom **2026-09-10**: Verifikation des
+Datei ist der Stand nach der Runde vom **2026-09-11**.
+
+**Wer hier neu anfängt, liest zuerst Abschnitt 7.** Dort steht die
+Kartenauswertung der letzten Runde (Dauerwirkungen von Karten) - sie deckt
+bisher **nur das Basis-Set** ab, und Abschnitt 7 sagt genau, was für die
+übrigen Sets noch fehlt und in welcher Reihenfolge man es angeht.
+
+Stand der vorherigen Runde (2026-09-10): Verifikation des
 Basis-Set-Fluch-Nachtrags, ALUFOLIE-Gleichstand behoben, die passiven
 Machtgruppen-Kräfte (Höllenritter, Assassine) ergänzt.
 
@@ -288,6 +295,11 @@ Dauerwirkung), markiert mit einem `ponytail:`-Kommentar.
 
 ## 5. Empfohlene nächste Schritte für eine neue Session
 
+> **Veraltet - die aktuelle Arbeitsliste steht in Abschnitt 7.7.** Dieser
+> Abschnitt stammt aus der Runde vom 2026-09-10 und bleibt nur als
+> Verlaufsprotokoll stehen. Punkt 1 (Sichtprüfung im Browser) ist weiterhin
+> offen, die übrigen sind von Abschnitt 7 überholt.
+
 Die drei Punkte, die hier vorher standen, sind erledigt (siehe 3., 4.3, 4.6).
 Was sinnvollerweise als Nächstes kommt:
 
@@ -383,3 +395,274 @@ jetzt mit aufgeräumt.
 - Raumcodes sind 4 Zeichen aus 32 (~1 Mio) und werden ebenfalls über
   `Math.random()` erzeugt. Beitreten ist aber nur in der Lobby möglich, und
   mehr als "in eine fremde Lobby stolpern" geht damit nicht.
+
+## 7. Kartenauswertung: Dauerwirkungen (Runde vom 2026-09-11) - **nur Basis-Set**
+
+**Das ist der Abschnitt, an dem eine neue Session weitermacht.** Was hier
+entstand, deckt ausschließlich das **Basis-Set** ab. Die Muster und die
+Mechanik darunter sind fertig und getestet; für die Erweiterungs-Sets fehlen
+im Wesentlichen nur die Tabelleneinträge - mit einer großen Ausnahme, siehe
+7.4.
+
+### 7.1 Worum es geht
+
+Bis zu dieser Runde wertete der Server nur Kartentexte aus, die jemand **aktiv
+ausspielt** (`CONSEQUENCE_OVERRIDES`, `TREASURE_POWER_OVERRIDES`,
+Kampf-Tränke) oder die als Konsequenz auflaufen. Kartentexte, die **ohne Zutun
+dauerhaft gelten**, gab es im Code überhaupt nicht als Konzept.
+
+Aufgefallen ist das am Bericht des Nutzers: "ich hatte Schutzsandalen im
+Schuh-Slot, die sollten mich vor Flüchen schützen, ich habe den Fluch
+trotzdem abbekommen". Die Karte sagt wörtlich: *"Flüche, die du ziehst,
+nachdem du eine Tür eintrittst, haben keine Wirkung."* Der Server hat den Text
+nie gelesen. Die anschließende Durchsicht des Basis-Sets fand knapp 40 weitere
+Karten derselben Art - darunter 12 Monster mit "+N gegen Elfen/Zwerge/..."
+und 6 Bossmonster, die niedrigstufige Charaktere gar nicht angreifen dürfen.
+
+### 7.2 Der Mechanismus (fertig, gilt für alle Sets)
+
+Neuer Abschnitt in `server.js` ab **Zeile ~1523**, Überschrift
+*"Dauerwirkungen von Karten (Basis-Set)"*. Aufbau exakt wie die bereits
+etablierten Override-Tabellen (siehe Abschnitt 1): kuratierte, per exaktem
+Kartennamen indizierte Tabellen, jeder Eintrag mit dem Original-Kartentext im
+Kommentar.
+
+**Bewusst kuratiert statt Regex.** Das wurde beim Bauen geprüft und
+verworfen: Die Formulierungen sind zu uneinheitlich (*"Elfen haben -4!"*
+gegenüber *"+6 gegen Elfen"* - dasselbe Spielresultat, völlig anderer Text),
+und ein Regex fängt Karten mit ein, bei denen dieselbe Formel eine **aktiv
+auszuspielende** Kraft beschreibt. Konkreter Fehlalarm: Der ZAUBERER hat *"+1
+Bonus auf Weglaufen"* - aber nur pro abgelegter Handkarte. Ein Textscan hätte
+ihm einen permanenten Bonus gegeben.
+
+| Tabelle | Zeile | Deckt ab |
+|---|---|---|
+| `CURSE_PROOF_ITEMS` | 1562 | Getragene Gegenstände, die gezogene Flüche neutralisieren |
+| `MONSTER_REFUSES` | 1573 | "Greift niemanden mit Stufe X oder niedriger an" + ANWALT/Dieb |
+| `MONSTER_TRAIT_BONUS` | 1596 | "+N gegen Elfen/Zwerge/Krieger/..." |
+| `MONSTER_IGNORES_LEVEL` | 1625 | "Deine Stufe zählt nicht im Kampf" |
+| `MONSTER_IGNORES_BONUSES` | 1628 | "Kämpfe nur mit deiner Charakterstufe" |
+| `MONSTER_FORBIDS_HELP` | 1630 | "Niemand kann dir helfen" |
+| `FLEE_ITEM_BONUS` | 1639 | Getragene Gegenstände mit festem Weglaufen-Bonus |
+| `FLEE_MONSTER_MOD` | 1643 | "Du hast ±N auf Weglaufen" (Monsterkarte) |
+| `FLEE_IMPOSSIBLE` | 1651 | "Denen kannst du nicht entkommen" |
+| `FLEE_AUTOMATIC` | 1653 | "Automatische Flucht" |
+| `FLEE_PENALTY` | 1655 | Stufenverlust **trotz** gelungener Flucht |
+| `FLEE_TREASURE_ITEMS` | 1662 | Schatz beim erfolgreichen Entkommen |
+| `MONSTER_EXTRA_LEVEL` | 1690 | "Zusätzliche Stufe, wenn du es besiegst" |
+| `FIRE_ITEMS` | 1696 | Was als "Feuer oder Flammen" zählt |
+| `CLASS_COMBAT_DISCARD` | 1723 | Klassenkräfte, die Handkarten kosten |
+| `UNDEAD_MONSTERS` | 1732 | Was als "untot" gilt |
+| `CLASS_FLEE_DISCARD` | 1739 | Dasselbe, aber auf den Weglaufwurf |
+| `GUARANTEED_FLEE_MAX_MONSTER_LEVEL` | 2325 | Stufengrenze garantierter Fluchtkarten |
+
+Dazu die auswertenden Funktionen: `monsterTraitBonusSum`,
+`fleeModifierParts` (1666), `monsterVictoryExtras` (1698), `handLimit` (1796),
+`classDiscardPower`. Alle hängen bereits in `combatTotals`,
+`handleDrawDoor`, `handleAttemptFlee`, `resolveCombatWin` und
+`handleEvaluateCombat` - **wer nur Tabelleneinträge ergänzt, muss an keinem
+Handler etwas ändern.**
+
+Zwei Nebenwirkungen, die man kennen muss:
+
+- **`combatConditionalBonusFields` liefert jetzt fertige Summen**
+  (`playerStrength`/`monsterStrength`) an den Client. Der hat sie früher
+  selbst nachgerechnet und kannte die neuen Monsterboni nicht - zwei
+  Rechenwege, die auseinanderlaufen. Neue Regeln, die die Kampfstärke
+  verändern, brauchen daher **nichts** am Client; sie erscheinen automatisch.
+- **Bereit-Check vor der Auswertung** (`combatSignature`, Zeile 1857): Der
+  Bereit-Status aller Mitspielenden verfällt, sobald sich an den Kampfwerten
+  etwas ändert. Die Signatur enthält die fertigen Summen - eine neue
+  Tabellenzeile, die die Stärke beeinflusst, setzt den Bereit-Status also von
+  allein korrekt zurück. Nicht kaputtmachen, indem man Werte an der Signatur
+  vorbeirechnet.
+
+### 7.3 Abdeckung je Set - die eigentliche offene Arbeit
+
+Gemessen am 2026-09-11 durch Textscan über `data/cards.json`. "Offen" heißt:
+Der Kartentext passt auf ein Muster, für das eine Tabelle existiert, aber die
+Karte steht nicht drin.
+
+| Muster | base | Unnatural Axe | Clerical Errors | Pathfinder |
+|---|---|---|---|---|
+| `MONSTER_TRAIT_BONUS` | 12 ✅ | **10 offen** | **13 offen** | 27 offen, s. 7.4/7.5 |
+| `MONSTER_REFUSES` | 7 ✅ (+AMAZONE, s. 7.6) | **4 offen** | **1 offen** | s. 7.4 |
+| `FLEE_MONSTER_MOD` | 4 ✅ | - | **1 offen** | s. 7.4 |
+| `FLEE_ITEM_BONUS` | 2 ✅ | **1 offen** | - | s. 7.4 |
+| `FLEE_PENALTY` / `FLEE_IMPOSSIBLE` / `FLEE_AUTOMATIC` | 5 ✅ | - | - | - |
+| `MONSTER_IGNORES_*` / `FORBIDS_HELP` | 3 ✅ | - | - | - |
+| `CURSE_PROOF_ITEMS` | 1 ✅ | - | - | - |
+
+Die konkreten offenen Karten:
+
+**Unnatural Axe** - `MONSTER_TRAIT_BONUS`: RIESENKAKERLAKE, JABBERWOCK,
+JUDGE FREDD, M.T.-ANZUG, MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT,
+WEIHNACHTSMANN, FÜRCHTERLICHE CLOWNS, ROTZ-ELEMENTAR, TENTAKELDÄMON, DING MIT
+EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST.
+`MONSTER_REFUSES`: FEUERLÖSCHER, JABBERWOCK, PSYCHO-EICHHÖRNCHEN,
+TENTAKELDÄMON. `FLEE_ITEM_BONUS`: BELAGERUNGSMASCHINE.
+
+**Clerical Errors** - `MONSTER_TRAIT_BONUS`: STRICHMÄNNCHEN, FÜRST YAHOO,
+AFFENBANDE, KAMIKAZE-KOBOLDE, DIE TROLLE VOM TOTEN MEER, REDNECK-BAUM,
+ÜBERBÄR, GIFTEFEU KUDZU-FLIEGENFALLE, FEDERFEIND, SIEBENJÄHRIGER LICH, TANTE
+PALADIN, MEDUSA, KALI. `MONSTER_REFUSES`: SIEBENJÄHRIGER LICH.
+`FLEE_MONSTER_MOD`: DIE TROLLE VOM TOTEN MEER.
+
+**Zwei Karten brauchen mehr als eine Zeile:** JABBERWOCK und FEDERFEIND haben
+je **zwei** Trait-Boni ("+3 gegen Zwerge" *und* "+6 gegen Zwerge" bzw. "+5
+gegen Priester" und "+3 gegen Zauberer"). `MONSTER_TRAIT_BONUS` kennt pro
+Karte nur **einen** Eintrag `{races|classes, bonus}`. Für diese beiden entweder
+den Wert auf eine Liste von Regeln erweitern oder - lazy - den jeweils
+höheren Eintrag nehmen und das im Kommentar festhalten.
+
+Ebenfalls prüfen: MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT (+4 Zwerge,
+**-3** Zauberer) und WEIHNACHTSMANN (**-5** Elfen) haben *negative* Boni. Die
+Tabelle kann das (die Zahl wird nur addiert), aber `monsterTraitBonusSum`
+wurde nur mit positiven Werten getestet.
+
+**UNDEAD_MONSTERS** (1732) ist eine reine Einschätzung, keine Datenlage -
+`cards.json` kennt kein Untot-Merkmal, im Basis-Set steht das Wort auf keiner
+einzigen Monsterkarte. Aktuell eingetragen: MR. BONES, UNTOTES PFERD, KÖNIG
+TUT, GRUFTIGE GEBRÜDER. **Vor dem Erweitern gegen die echten Karten
+abgleichen** - davon hängt ab, wann der Priester "Vertreiben" (+3 pro Karte)
+einsetzen darf. In Clerical Errors ist mindestens SIEBENJÄHRIGER LICH ein
+Kandidat.
+
+### 7.4 Blocker: Pathfinder hat überhaupt keine auswertbaren Kartendaten
+
+**Das ist die größte offene Baustelle und keine Fleißarbeit.**
+
+Alle **145** Pathfinder-Karten in `data/cards.json` haben nur die Kategorien
+`door_other` (74) oder `treasure_other` (71). Gemessen:
+
+- `level`: **0 von 145** Karten haben einen Wert
+- `treasureCount`: **0 von 145**
+- `bonus`: **0 von 145**
+- `slotKind`: **0 von 145**
+
+Gleichzeitig haben **37** dieser `door_other`-Karten ein `badstuff`-Feld, sind
+also eindeutig **Monster** (TENGU, RUNENRIESE, GEB, LINDNORM, MOBOGO,
+GOBLINSCHLANGE, ...). Zum Vergleich: Bei Unnatural Axe und Clerical Errors
+haben *alle* 27 bzw. 27 Monster sowohl `level` als auch `treasureCount`.
+
+**Praktische Folge:** Pathfinder ist in `settings.sets` standardmäßig **aktiv**
+(siehe Raum-Initialisierung). Zieht jemand TENGU, behandelt `handleDrawDoor`
+die Karte als harmlose "sonstige Türkarte" und legt sie auf die Hand. Es
+entsteht kein Kampf, kein Schatz, keine Stufe - die 37 Pathfinder-Monster sind
+im Spiel schlicht wirkungslose Sammelkarten. Das ist unabhängig von dieser
+Runde schon länger so und fällt nur nicht auf, weil niemand die Karte
+vermisst.
+
+Ohne `level` **kann** keine Kampfregel greifen, egal wie viele Tabellenzeilen
+man schreibt. Reihenfolge für eine neue Session:
+
+1. Entscheiden, woher Stufe und Schatzanzahl kommen. Entweder die Datenquelle
+   nachbessern, aus der `cards.json` erzeugt wurde, oder eine kuratierte
+   Korrekturtabelle im Stil von `DOOR_OTHER_AS_CURSE` anlegen
+   (`PATHFINDER_MONSTER_STATS: name -> {level, treasureCount}`, 37 Einträge).
+2. Erst danach `MONSTER_TRAIT_BONUS` und die Weglaufen-Tabellen für
+   Pathfinder füllen.
+3. Alternative, falls das zu viel ist: Pathfinder in den Voreinstellungen
+   **abwählen** und im Lobby-Hinweis kennzeichnen. Ehrlicher als 37 kaputte
+   Karten im Stapel.
+
+Nebenbei fehlen Pathfinder auch Rassen-, Klassen- und Gegenstandskarten als
+solche - `race`/`class`/`item` kommen im Set nicht vor. Ob das an den echten
+Karten liegt oder ebenfalls an den Daten, wurde nicht geprüft.
+
+### 7.5 `MONSTER_TRAIT_BONUS` kennt noch keine Machtgruppen
+
+Pathfinder nutzt statt Rassen/Klassen die **Machtgruppen** (`POWER_GROUP_NAMES`,
+8 Stück: Kundschafter, Nekromant, Hexe, Höllenritter, Adlerritter, Paktmagier,
+Alchemist, Assassine der Roten Mantis). Der Textscan findet **27 Boni gegen
+Machtgruppen** auf Pathfinder-Karten, zum Beispiel:
+
+```
+TENGU        +3 gegen Kundschafter
+GEB          -4 gegen Adlerritter
+MOBOGO       +4 gegen Paktmagier, -4 gegen Hexen
+HEMOGOBLIN   -3 gegen Kundschafter, +4 gegen Assassinen
+```
+
+`MONSTER_TRAIT_BONUS` unterstützt bisher nur `races` und `classes`. Die
+Erweiterung ist klein und lokal: ein drittes Feld `powerGroups` im
+Tabelleneintrag und eine zusätzliche `.some()`-Bedingung in
+`monsterTraitBonusSum` (Zeile ~1612) - `hasPowerGroup` existiert bereits.
+Beachten: Die Machtgruppen-Adjektive im Kartentext stehen im Plural
+("Kundschafter", "Nekromanten", "Hexen", "Assassinen") und weichen von den
+Kartennamen ab, genau wie `RACE_ADJECTIVE_DE`/`CLASS_ADJECTIVE_DE` das für
+Rassen/Klassen abbilden. **Sinnvoll erst nach 7.4**, weil ohne Monsterstufe
+kein Kampf stattfindet, in dem der Bonus zählen könnte.
+
+Ebenfalls offen, aber kleiner: `ADLERRITTER` hat mit *"Im Kampf darfst du bis
+zu 3 Karten aus deiner Hand ablegen"* exakt die Form von
+`CLASS_COMBAT_DISCARD` (1723). Da `classDiscardPower` derzeit nur über
+`hasClass` sucht, bräuchte es dort einen Zweig für Machtgruppen.
+
+### 7.6 Bewusst manuell geblieben (nicht nachtragen ohne Anlass)
+
+Alles, was eine **echte Entscheidung** verlangt oder auf Daten beruht, die
+dieser Server nicht führt. Für all das gibt es weiterhin das manuelle
+Bonus-Zahlenfeld im Kampf und das Ablege-Dropdown:
+
+- **DIEB "In den Rücken fallen"** (-2 für eine *andere* Person). Kräfte gegen
+  Mitspielende sind im ganzen Projekt manuell, siehe Kommentar am Dateianfang.
+- **HALBLING**: Weglaufwurf wiederholen, doppelter Verkaufspreis.
+- **ZWERG**: "beliebig viele Große Gegenstände" - es gibt kein Groß-Flag in
+  den Daten, also gibt es auch keine Beschränkung, die die Ausnahme bräuchte.
+- **AMAZONE** ("greift keine Spielerinnen an") - Geschlecht wird nicht
+  erfasst, siehe 4.1.
+- **BEKIFFTER GOLEM, LAUFENDE NASE (Bestechung), MÖCHTEGERN-VAMPIR, PIT
+  BULL, ANWALT** (die Dieb-Tauschoption): Wahlmöglichkeiten, keine
+  Dauerwirkungen.
+- **ZAUBERER "Flugzauber"** ist umgesetzt, weicht aber bewusst vom Text ab:
+  Die Karte sagt "*nachdem* du deinen Weglaufwurf gemacht hast", der Server
+  bietet den Abwurf **vor** dem Wurf an. Grund: `handleAttemptFlee` löst den
+  Wurf sofort auf, eine Zwischenphase "gewürfelt, aber noch nicht
+  entschieden" gibt es nirgends im Projekt. Wer das wortgetreu will, baut
+  genau diese Phase - dann lohnt sich auch der HALBLING-Wiederholungswurf, der
+  dieselbe Phase braucht.
+- **PIKOTZU** und **GROSSES WUTENDES HUHN** stehen bewusst *nicht* in
+  `MONSTER_EXTRA_LEVEL`, sondern als Sonderfälle in `monsterVictoryExtras`
+  (1698) - sie haben Bedingungen ("ohne Hilfe und Boni", "mit Feuer"). Ein
+  Textscan meldet sie als "offen"; sie sind es nicht.
+
+### 7.7 Nächste Schritte, in dieser Reihenfolge
+
+1. **Unnatural Axe und Clerical Errors nachtragen** (~30 Tabellenzeilen, keine
+   Logikänderung). Das ist die gesamte Arbeit für diese beiden Sets. Die
+   Kartenlisten in 7.3 sind vollständig; Kartentexte mit
+   `node -e` aus `data/cards.json` holen und jeweils als Kommentar mitnehmen,
+   so wie es die bestehenden Einträge tun.
+2. **`UNDEAD_MONSTERS` gegen die echten Karten prüfen** und für die beiden
+   Sets erweitern.
+3. **JABBERWOCK/FEDERFEIND**: entscheiden, ob `MONSTER_TRAIT_BONUS` mehrere
+   Regeln pro Karte können soll.
+4. **Pathfinder-Datenlage klären** (7.4). Bis dahin nichts weiter für
+   Pathfinder bauen - es wäre toter Code.
+5. **Machtgruppen in `MONSTER_TRAIT_BONUS`** (7.5), erst nach Schritt 4.
+
+### 7.8 Verifikation
+
+`npm test` - fünf Dateien, laufen einzeln in eigenen Kindprozessen.
+
+- **`tests/card-passives.test.js`** ist in dieser Runde neu und der relevante
+  für alles aus Abschnitt 7. Er prüft **Verhalten**, nicht Tabelleninhalt:
+  jeder Fall baut ein echtes Raum-Objekt und ruft den vollständigen Handler.
+  Eine Tabelle, die nirgends ausgewertet wird, bestünde einen reinen
+  Tabellentest - dieser Test nicht.
+- **`tests/card-abilities.test.js`** enthält einen
+  Namens-Abdeckungscheck (`nameSources`): Jeder Schlüssel jeder kuratierten
+  Tabelle muss zu einer Karte in `cards.json` passen. **Neue Tabellen dort
+  eintragen**, sonst fällt ein Tippfehler im Kartennamen nie auf - der Eintrag
+  wäre einfach still wirkungslos.
+- **`tests/basic-game-flow.test.js`** spielt mit echten Sockets gegen Bots.
+  Er hat beim Bereit-Check korrekt zugeschlagen: Der Testclient bestätigte
+  nicht, ein Kampf unter Bot-Führung stand für immer. Wer Spielfluss ändert,
+  schaut hier zuerst.
+
+Das Scan-Skript, das die Zahlen in 7.3 erzeugt hat, liegt bewusst nicht im
+Repo (Einmalwerkzeug). Kurzform zum Nachbauen: `data/cards.json` laden,
+`server.js` requiren, Kartentexte normalisieren
+(`\n`, `<br>`, `<i>` entfernen), pro Muster-Regex über alle Karten laufen und
+gegen die jeweilige Tabelle prüfen.
