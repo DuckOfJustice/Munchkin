@@ -421,14 +421,26 @@
     }
   }
 
+  // Eine Zeile pro belegtem Platz; Sammelplaetze (multi) zeigen jede Karte
+  // einzeln und bleiben mit einer leeren Zeile sichtbar.
+  function specialSlotRows(p) {
+    const cfg = state.specialSlots || {};
+    return Object.keys(cfg).flatMap((key) => {
+      const label = cfg[key].label || key;
+      const v = p.equipped[key];
+      const ids = Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
+      if (!ids.length) return [[key, label, null]];
+      return ids.map((id, i) => [`${key}${i}`, ids.length > 1 ? `${label} ${i + 1}` : label, id]);
+    });
+  }
+
   function renderPlayerList() {
     const box = $('playerList');
     box.innerHTML = '<h3>Spieler:innen</h3>';
     state.players.forEach((p) => {
       const row = document.createElement('div');
       row.className = 'prow clickable' + (p.id === state.turnPlayerId ? ' active-turn' : '');
-      const equip = [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands]
-        .filter(Boolean).length;
+      const equip = equippedIdsOf(p).length;
       row.innerHTML = `<span>${escapeHtml(p.name)}${p.isBot ? ' 🤖' : ''}</span>` +
         `<span>` +
         (p.id === state.turnPlayerId ? '<span class="tag turn">Zug</span> ' : '') +
@@ -473,6 +485,7 @@
     const slotDefs = [
       ['Kopf', p.equipped.head], ['Rüstung', p.equipped.armor], ['Schuhe', p.equipped.feet],
       ['Hand 1', p.equipped.hands[0]], ['Hand 2', p.equipped.hands[1]],
+      ...specialSlotRows(p).map(([, label, cardId]) => [label, cardId]),
     ];
     slotDefs.forEach(([label, cardId]) => {
       const el = document.createElement('div');
@@ -505,7 +518,7 @@
   function myEquippedIds() {
     const me = state && state.players.find((p) => p.id === myInfo.playerId);
     if (!me) return [];
-    return [...new Set([me.equipped.head, me.equipped.armor, me.equipped.feet, ...me.equipped.hands].filter(Boolean))];
+    return [...new Set(equippedIdsOf(me))];
   }
   function myTradableIds() {
     return [...new Set([...(myInfo.hand || []), ...myEquippedIds()])];
@@ -977,9 +990,19 @@
     box.appendChild(div);
   }
 
+  // Spezialplaetze ("Spezialausruestung", "Beine") kommen als Konfiguration
+  // vom Server (state.specialSlots / state.specialSlotItems) - hier wird
+  // bewusst keine zweite Kartenliste gepflegt.
+  function specialSlotIds(p) {
+    return Object.keys(state.specialSlots || {}).flatMap((k) => {
+      const v = p.equipped[k];
+      return Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
+    });
+  }
+
   function equippedIdsOf(p) {
     if (!p) return [];
-    return [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands].filter(Boolean);
+    return [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands, ...specialSlotIds(p)].filter(Boolean);
   }
 
   function renderPhaseActions() {
@@ -1039,6 +1062,7 @@
       ['feet', 'Schuhe', p.equipped.feet],
       ['hand1', 'Hand 1', p.equipped.hands[0]],
       ['hand2', 'Hand 2', p.equipped.hands[1]],
+      ...specialSlotRows(p),
     ];
     slotDefs.forEach(([key, label, cardId]) => {
       const el = document.createElement('div');
@@ -1098,8 +1122,12 @@
 
     const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence && !state.pendingCardAction;
 
-    if (c.category === 'item' && myTurn) {
-      const btn = mkBtn('Anlegen', () => socket.emit('equipItem', { cardId: id }));
+    const specialRule = (state.specialSlotItems || {})[c.name];
+    if ((c.category === 'item' || specialRule) && myTurn) {
+      const label = specialRule
+        ? `Anlegen (${(state.specialSlots[specialRule.slot] || {}).label || specialRule.slot}${specialRule.races ? `, nur ${specialRule.races.join('/')}` : ''})`
+        : 'Anlegen';
+      const btn = mkBtn(label, () => socket.emit('equipItem', { cardId: id }));
       wrap.appendChild(btn);
     }
     if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger') {

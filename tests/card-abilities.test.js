@@ -17,6 +17,8 @@ const {
   FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
   MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
   combatTotals, handLimit, handlePlayCombatCard,
+  handleEquipItem, handleUnequipItem, equippedItemIds, newEquipped,
+  SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
 } = require('../server.js');
 
 function makePlayer(overrides) {
@@ -339,6 +341,72 @@ function run() {
   armbandCheck.room.combat.monsterIds = [lootMonster.id];
   armbandCheck.room.players[0].hand = [armbandCheck.potionId, armbandPay[0]];
   assert.strictEqual(armbandSpec(), null, 'ohne 3 ablegbare Karten nicht einsetzbar');
+
+  // -------------------------------------------------------------------
+  // Spezialausrüstung: Schatzkarten mit Kampfbonus, die auf keinen der
+  // klassischen Plätze gehören (Kopf/Rüstung/Schuhe/Hände). Vorher waren
+  // sie gar nicht anlegbar und ihr Bonus damit wirkungslos.
+  // -------------------------------------------------------------------
+  const HALBLING_ID = findCard('HALBLING', 'race').id;
+  const schwert = findCard('SINGENDES & TANZENDES SCHWERT');
+  const strumpfhose = findCard('STRUMPFHOSE DER RIESENSTÄRK');
+  const sandwich = findCard('LIMBURGER UND SARDELLEN-SANDWICH');
+  const knie = findCard('SPIESSIGE KNIE');
+
+  function equipRoom(handIds, playerOverrides) {
+    const actor = makePlayer(Object.assign({ id: 'p1', name: 'A', level: 1, hand: handIds.slice(), equipped: newEquipped() }, playerOverrides || {}));
+    return {
+      code: 'TEST', players: [actor, makePlayer({ id: 'p2', name: 'B', equipped: newEquipped() })],
+      turnIndex: 0, turnPhase: 'tuer', doorDeck: [], doorDiscard: [], treasureDeck: [], treasureDiscard: [],
+      revealedDoorCard: null, combat: null, pendingConsequence: null, pendingCardAction: null,
+      winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null, settings: { sets: {} },
+    };
+  }
+
+  const eqRoom = equipRoom([schwert.id, strumpfhose.id, knie.id]);
+  [schwert.id, strumpfhose.id, knie.id].forEach((id) => handleEquipItem(eqRoom, 'p1', id));
+  if (eqRoom.cleanupTimer) clearTimeout(eqRoom.cleanupTimer);
+  const eqActor = eqRoom.players[0];
+  assert.deepStrictEqual(eqActor.equipped.special, [schwert.id, strumpfhose.id],
+    'Spezialausrüstung ist ein Sammelplatz - beide Karten liegen gleichzeitig an');
+  assert.strictEqual(eqActor.equipped.legs, knie.id, 'Spießige Knie belegen den eigenen Beine-Platz');
+  assert.strictEqual(eqActor.equipped.armor, null, 'und eben NICHT den Rüstungsplatz');
+  assert.strictEqual(eqActor.hand.length, 0, 'angelegte Karten sind von der Hand weg');
+  assert.strictEqual(baseStrength(eqActor), 1 + schwert.bonus + strumpfhose.bonus + knie.bonus,
+    'die Boni der Spezialausrüstung zählen in der Kampfstärke');
+  [schwert.id, strumpfhose.id, knie.id].forEach((id) => assert.ok(equippedItemIds(eqActor).includes(id),
+    'Spezialplätze müssen in equippedItemIds auftauchen (Verkauf, Handel, Tod, Flüche)'));
+
+  // Wieder ablegen räumt den Sammelplatz korrekt auf.
+  handleUnequipItem(eqRoom, 'p1', schwert.id);
+  if (eqRoom.cleanupTimer) clearTimeout(eqRoom.cleanupTimer);
+  assert.deepStrictEqual(eqActor.equipped.special, [strumpfhose.id], 'abgelegte Karte verschwindet aus dem Sammelplatz');
+  assert.ok(eqActor.hand.includes(schwert.id), 'und liegt wieder auf der Hand');
+  assert.strictEqual(baseStrength(eqActor), 1 + strumpfhose.bonus + knie.bonus, 'der Bonus fällt mit weg');
+
+  // "aber nur für Halblinge"
+  const sandwichNein = equipRoom([sandwich.id]);
+  handleEquipItem(sandwichNein, 'p1', sandwich.id);
+  if (sandwichNein.cleanupTimer) clearTimeout(sandwichNein.cleanupTimer);
+  assert.ok(sandwichNein.players[0].hand.includes(sandwich.id), 'ohne Halbling bleibt das Sandwich auf der Hand');
+  assert.deepStrictEqual(sandwichNein.players[0].equipped.special, [], 'und liegt nicht an');
+
+  const sandwichJa = equipRoom([sandwich.id], { races: [HALBLING_ID] });
+  handleEquipItem(sandwichJa, 'p1', sandwich.id);
+  if (sandwichJa.cleanupTimer) clearTimeout(sandwichJa.cleanupTimer);
+  assert.deepStrictEqual(sandwichJa.players[0].equipped.special, [sandwich.id], 'Halblinge dürfen das Sandwich anlegen');
+
+  // Jede Karte in der Tabelle muss es auch wirklich geben und einen Bonus
+  // haben - sonst wäre der Platz sinnlos.
+  Object.keys(SPECIAL_SLOT_ITEMS).forEach((name) => {
+    const c = findCard(name);
+    assert.ok(typeof c.bonus === 'number' && c.bonus !== 0, `${name}: Spezialausrüstung ohne Kampfbonus`);
+    assert.ok(SPECIAL_SLOTS[SPECIAL_SLOT_ITEMS[name].slot], `${name}: verweist auf einen unbekannten Platz`);
+  });
+
+  // MIETLING wurde aus dem Spiel genommen.
+  assert.strictEqual(ALL_CARDS.filter((c) => c.name === 'MIETLING').length, 0,
+    'die Mietling-Karte darf in keinem Set mehr auftauchen');
 
   // -------------------------------------------------------------------
   // Monster-Verstärker verändern auch die Beute: "Wird das Monster besiegt,

@@ -35,6 +35,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ---------------------------------------------------------------------------
 
 const ALL_CARDS = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'cards.json'), 'utf8'));
+// Zwei Kartennamen tragen ein <BR> aus der Vorlage mit sich herum ("SINGENDES
+// &<BR>TANZENDES SCHWERT") - einmal hier begradigt, dann stimmt es in Logs,
+// Kartenkacheln und Ausruestungsplaetzen gleichzeitig.
+ALL_CARDS.forEach((c) => { c.name = String(c.name).replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim(); });
 const CARDS_BY_ID = new Map(ALL_CARDS.map((c) => [c.id, c]));
 const SET_KEYS = ['base', 'clericalerrors', 'pixelsandpaperpromos', 'unnaturalaxe', 'pathfinder'];
 const SET_LABELS = {
@@ -141,7 +145,7 @@ function newPlayer(name, socketId, isBot) {
     classCapCard: null, // SUPER MUNCHKIN, falls gehalten -> Klassen-Obergrenze 2 statt 1
     powerGroupCapCard: null, // DOPPELLEBEN, falls gehalten -> Machtgruppen-Obergrenze 2 statt 1
     hand: [], // card ids, privat
-    equipped: { head: null, armor: null, feet: null, hands: [null, null] },
+    equipped: newEquipped(),
   };
 }
 
@@ -235,8 +239,46 @@ function drawTreasure(room) {
 // Ausrüstung / Stufen / Kampfstärke
 // ---------------------------------------------------------------------------
 
+// Karten, die angelegt werden, aber auf keinen der klassischen Plaetze
+// gehoeren: Kartenname -> Platz in player.equipped (plus optionale
+// Rassenbedingung). Ein weiterer Platz ist eine Zeile hier, die Labels gehen
+// ueber publicState an den Client - kein Namensspiegel im Frontend.
+const SPECIAL_SLOT_ITEMS = {
+  'SINGENDES & TANZENDES SCHWERT': { slot: 'special' },
+  'STRUMPFHOSE DER RIESENSTÄRK': { slot: 'special' },
+  'WIRKLICH BEEINDRUCKENDER TITEL': { slot: 'special' },
+  'VERDUNKELUNGSUMHANG': { slot: 'special' },
+  // "aber nur fuer Halblinge"
+  'LIMBURGER UND SARDELLEN-SANDWICH': { slot: 'special', races: ['HALBLING'] },
+  // Ruestungsteil fuer die Beine - eigener Platz, nicht der Ruestungsplatz.
+  'SPIESSIGE KNIE': { slot: 'legs' },
+};
+// 'special' ist ein Sammelplatz (mehrere Karten nebeneinander), 'legs' ein
+// Koerperplatz wie Kopf/Ruestung (genau eine Karte).
+const SPECIAL_SLOTS = {
+  special: { multi: true, label: 'Spezialausrüstung' },
+  legs: { multi: false, label: 'Beine' },
+};
+const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
+
+function newEquipped() {
+  const eq = { head: null, armor: null, feet: null, hands: [null, null] };
+  SPECIAL_SLOT_KEYS.forEach((k) => { eq[k] = SPECIAL_SLOTS[k].multi ? [] : null; });
+  return eq;
+}
+
+function specialSlotCards(player, key) {
+  const v = player.equipped[key];
+  return Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
+}
+
+function specialSlotRule(c) {
+  return (c && SPECIAL_SLOT_ITEMS[c.name]) || null;
+}
+
 function equippedItemIds(player) {
-  return [player.equipped.head, player.equipped.armor, player.equipped.feet, ...player.equipped.hands].filter(Boolean);
+  return [player.equipped.head, player.equipped.armor, player.equipped.feet, ...player.equipped.hands,
+    ...SPECIAL_SLOT_KEYS.flatMap((k) => specialSlotCards(player, k))].filter(Boolean);
 }
 
 function equippedBonusSum(player) {
@@ -299,6 +341,10 @@ function removeFromHand(player, cardId) {
 }
 
 function unequipSlotCard(player, cardId) {
+  SPECIAL_SLOT_KEYS.forEach((k) => {
+    if (Array.isArray(player.equipped[k])) player.equipped[k] = player.equipped[k].filter((id) => id !== cardId);
+    else if (player.equipped[k] === cardId) player.equipped[k] = null;
+  });
   if (player.equipped.head === cardId) player.equipped.head = null;
   if (player.equipped.armor === cardId) player.equipped.armor = null;
   if (player.equipped.feet === cardId) player.equipped.feet = null;
@@ -341,6 +387,10 @@ function publicState(room) {
     settings: room.settings,
     setLabels: SET_LABELS,
     setKeys: SET_KEYS,
+    // Statische Konfiguration der Spezialplaetze - so braucht der Client
+    // keine zweite Kartenliste (er zeigt nur Knopf und Platz an).
+    specialSlots: SPECIAL_SLOTS,
+    specialSlotItems: SPECIAL_SLOT_ITEMS,
     turnIndex: room.turnIndex,
     turnPlayerId: room.players[room.turnIndex] ? room.players[room.turnIndex].id : null,
     turnPhase: room.turnPhase,
@@ -428,7 +478,7 @@ function startGame(room) {
     p.races = [];
     p.classes = [];
     p.hand = [];
-    p.equipped = { head: null, armor: null, feet: null, hands: [null, null] };
+    p.equipped = newEquipped();
     for (let i = 0; i < 4; i++) {
       const d = drawDoor(room); if (d) p.hand.push(d);
       const t = drawTreasure(room); if (t) p.hand.push(t);
@@ -2548,7 +2598,26 @@ function handleEquipItem(room, playerId, cardId) {
   const player = findPlayer(room, playerId);
   if (!player || !player.hand.includes(cardId)) return;
   const c = card(cardId);
-  if (!c || c.category !== 'item') return;
+  if (!c) return;
+  // Spezialausruestung zuerst: diese Karten sind keine 'item'-Karten und
+  // haben keinen slotKind, gehoeren aber trotzdem angelegt.
+  const special = specialSlotRule(c);
+  if (special) {
+    const multi = SPECIAL_SLOTS[special.slot].multi;
+    if (multi ? specialSlotCards(player, special.slot).includes(cardId) : player.equipped[special.slot]) return; // Platz belegt
+    if (special.races && !special.races.some((r) => hasRace(player, r))) {
+      log(room, `${player.name} kann "${c.name}" nicht anlegen - nur für ${special.races.join('/')}.`);
+      touchRoom(room);
+      return;
+    }
+    removeFromHand(player, cardId);
+    if (multi) player.equipped[special.slot] = [...specialSlotCards(player, special.slot), cardId];
+    else player.equipped[special.slot] = cardId;
+    log(room, `${player.name} legt "${c.name}" an (${SPECIAL_SLOTS[special.slot].label}).`, [cardId]);
+    touchRoom(room);
+    return;
+  }
+  if (c.category !== 'item') return;
   if (c.slotKind === 'head') { if (player.equipped.head) return; removeFromHand(player, cardId); player.equipped.head = cardId; }
   else if (c.slotKind === 'armor') { if (player.equipped.armor) return; removeFromHand(player, cardId); player.equipped.armor = cardId; }
   else if (c.slotKind === 'feet') { if (player.equipped.feet) return; removeFromHand(player, cardId); player.equipped.feet = cardId; }
@@ -3147,6 +3216,7 @@ module.exports = {
   handleFleeReroll, handleSellItems, endTurn,
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee,
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
+  SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS, newEquipped, handleEquipItem, handleUnequipItem, equippedItemIds,
   MONSTER_AUTO_KILL_BY_RACE, MONSTER_PASS_OPTION, handleResolveCardChoice,
   MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
   FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
