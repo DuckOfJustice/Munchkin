@@ -52,6 +52,13 @@ async function main() {
         return;
       }
       if (s.combat) {
+        // Ausgewertet wird erst, wenn alle anderen bestätigt haben, dass sie
+        // nicht mehr eingreifen wollen - ohne dieses Signal steht ein Kampf
+        // unter Bot-Führung für immer.
+        if ((s.combat.readyRequired || []).includes(myId) && !(s.combat.ready || {})[myId]) {
+          socket.emit('setCombatReady', { ready: true });
+          return;
+        }
         if (s.combat.actorId === myId) {
           if (s.combat.mustFlee) socket.emit('attemptFlee', { modifier: 0 });
           else socket.emit('evaluateCombat');
@@ -61,7 +68,7 @@ async function main() {
         return;
       }
       if (s.turnPlayerId !== myId) return;
-      if (s.turnPhase === 'tuer' && !s.revealedDoorCard) socket.emit('drawDoor');
+      if (s.turnPhase === 'tuer') socket.emit(s.revealedDoorCard ? 'takeRevealedDoor' : 'drawDoor');
       else if (s.turnPhase === 'aerger') socket.emit('skipToLoot');
       else if (s.turnPhase === 'pluendern') socket.emit('lootRoom');
       else if (s.turnPhase === 'gabe') {

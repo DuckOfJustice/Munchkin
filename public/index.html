@@ -105,14 +105,26 @@
   <div id="hand-bar" class="hand-bar">
     <div class="hand-bar-top">
       <div class="hand-bar-label">Deine Hand</div>
+      <label class="switch" id="handSortToggle">
+        <span class="switch-text">Nach Typ sortieren</span>
+        <input type="checkbox" id="handSortInput">
+        <span class="switch-track"><span class="switch-knob"></span></span>
+      </label>
+    </div>
+    <div id="myHand" class="hand-list"></div>
+    <div class="hand-bar-bottom">
       <div class="row gap" id="sellBar">
         <span id="sellSum">Ausgewählt: 0 Goldstücke</span>
         <button id="btnSell" class="small" disabled>Verkaufen (je 1000 = 1 Stufe)</button>
       </div>
     </div>
-    <div id="myHand" class="hand-list"></div>
   </div>
 </div>
+
+<div id="revealAnim" class="reveal-anim hidden" aria-hidden="true"></div>
+<div id="dieAnim" class="die-anim hidden" aria-hidden="true"></div>
+
+<div id="rewardAnim" class="reward-anim hidden" aria-hidden="true"></div>
 
 <div id="cardModal" class="modal hidden">
   <div class="modalbox">

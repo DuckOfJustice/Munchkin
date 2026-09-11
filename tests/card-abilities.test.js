@@ -10,8 +10,13 @@ const {
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
   DOOR_OTHER_AS_CURSE, resolveConsequenceSpec, POWER_GROUP_NAMES,
   GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS, CONSEQUENCE_OVERRIDES,
-  handleDrawDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
-  handleApplyConsequenceAction,
+  handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
+  handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee,
+  CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
+  MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
+  FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
+  MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
+  combatTotals, handLimit,
 } = require('../server.js');
 
 function makePlayer(overrides) {
@@ -143,11 +148,22 @@ function run() {
   });
 
   // Eine normale Türkarte muss weiterhin auf der Hand landen (Gegenprobe,
-  // damit der Check oben nicht trivial durch "alles ist ein Fluch" besteht).
+  // damit der Check oben nicht trivial durch "alles ist ein Fluch" besteht) -
+  // seit der Aufdeck-Animation aber erst NACH dem Bestätigen: sie liegt
+  // zuerst offen aus, die Phase darf solange nicht weiterspringen.
   const plainDoor = ALL_CARDS.find((c) => c.category === 'door_other' && !DOOR_OTHER_AS_CURSE.has(c.name));
   const plainRoom = drawRoomWith(plainDoor.id);
   assert.strictEqual(plainRoom.pendingConsequence, null, `"${plainDoor.name}" ist kein Fluch und darf keine Konsequenz auslösen`);
-  assert.ok(plainRoom.players[0].hand.includes(plainDoor.id), `"${plainDoor.name}" muss auf der Hand landen`);
+  assert.strictEqual(plainRoom.revealedDoorCard, plainDoor.id, `"${plainDoor.name}" muss offen ausliegen, bevor sie genommen wird`);
+  assert.ok(!plainRoom.players[0].hand.includes(plainDoor.id), `"${plainDoor.name}" darf nicht ungefragt auf der Hand landen`);
+  assert.strictEqual(plainRoom.turnPhase, 'tuer', 'solange die Karte offen ausliegt, bleibt Phase 1 aktiv');
+  assert.ok(plainRoom.doorReveal && plainRoom.doorReveal.cardId === plainDoor.id, 'doorReveal muss die Animation im Client auslösen können');
+  handleTakeRevealedDoor(plainRoom, 'p2'); // nicht am Zug -> darf nichts tun
+  assert.strictEqual(plainRoom.revealedDoorCard, plainDoor.id, 'nur die aktive Spielerin darf die offene Karte nehmen');
+  handleTakeRevealedDoor(plainRoom, 'p1');
+  assert.ok(plainRoom.players[0].hand.includes(plainDoor.id), `"${plainDoor.name}" muss nach dem Nehmen auf der Hand landen`);
+  assert.strictEqual(plainRoom.revealedDoorCard, null, 'genommene Karte darf nicht offen liegen bleiben');
+  assert.strictEqual(plainRoom.turnPhase, 'aerger', 'nach dem Nehmen geht es in Phase 2');
 
   // -------------------------------------------------------------------
   // Kein Override-Eintrag darf ins Leere zeigen: ein Tippfehler im
@@ -162,6 +178,21 @@ function run() {
     DOOR_OTHER_AS_CURSE: [...DOOR_OTHER_AS_CURSE],
     POWER_GROUP_NAMES: [...POWER_GROUP_NAMES],
     GUARANTEED_FLEE_CARDS: [...GUARANTEED_FLEE_CARDS],
+    CURSE_PROOF_ITEMS: [...CURSE_PROOF_ITEMS],
+    MONSTER_REFUSES: Object.keys(MONSTER_REFUSES),
+    MONSTER_TRAIT_BONUS: Object.keys(MONSTER_TRAIT_BONUS),
+    MONSTER_IGNORES_LEVEL: [...MONSTER_IGNORES_LEVEL],
+    MONSTER_IGNORES_BONUSES: [...MONSTER_IGNORES_BONUSES],
+    MONSTER_FORBIDS_HELP: [...MONSTER_FORBIDS_HELP],
+    FLEE_ITEM_BONUS: Object.keys(FLEE_ITEM_BONUS),
+    FLEE_MONSTER_MOD: Object.keys(FLEE_MONSTER_MOD),
+    FLEE_IMPOSSIBLE: [...FLEE_IMPOSSIBLE],
+    FLEE_AUTOMATIC: [...FLEE_AUTOMATIC],
+    FLEE_PENALTY: Object.keys(FLEE_PENALTY),
+    FLEE_TREASURE_ITEMS: [...FLEE_TREASURE_ITEMS],
+    MONSTER_EXTRA_LEVEL: [...MONSTER_EXTRA_LEVEL],
+    FIRE_ITEMS: [...FIRE_ITEMS],
+    GUARANTEED_FLEE_MAX_MONSTER_LEVEL: Object.keys(GUARANTEED_FLEE_MAX_MONSTER_LEVEL),
   };
   Object.entries(nameSources).forEach(([label, keys]) => {
     keys.forEach((k) => assert.ok(cardNames.has(k), `${label}: "${k}" passt zu keiner Karte in cards.json`));
@@ -201,6 +232,16 @@ function run() {
   assert.strictEqual(tieWithCard.players[0].level, monster.level + 1, 'Sieg per ALUFOLIE bringt die Stufe fürs Monster');
   assert.ok(!tieWithCard.players[0].hand.includes(alufolie.id), 'ALUFOLIE wird beim Einsatz verbraucht');
   assert.ok(tieWithCard.treasureDiscard.includes(alufolie.id), 'verbrauchte ALUFOLIE landet auf dem Schatzablagestapel');
+
+  // Beute-Animation: der Sieg muss die gezogenen Schaetze fuer die Anzeige
+  // festhalten - und zwar am Spieler (privat), nicht am Raum, denn gezogene
+  // Schatzkarten sind Handkarten und damit geheim.
+  const reward = tieWithCard.players[0].lastReward;
+  assert.ok(reward, 'nach einem Kampfsieg muss lastReward fuer die Beute-Animation gesetzt sein');
+  assert.strictEqual(reward.levelsGained, 1, 'ein besiegtes Monster = 1 Stufe');
+  assert.strictEqual(reward.cardIds.length, monster.treasureCount || 0, 'Beute muss genau die Schaetze des Monsters enthalten');
+  reward.cardIds.forEach((id) => assert.ok(tieWithCard.players[0].hand.includes(id), 'jede angezeigte Beutekarte muss auch wirklich auf der Hand liegen'));
+  assert.deepStrictEqual(reward.monsterNames, [monster.name], 'Beute-Animation nennt das besiegte Monster');
 
   // Gegenprobe: ALUFOLIE darf einen echten Rückstand nicht in einen Sieg drehen.
   const behind = combatRoomTie([alufolie.id]);
@@ -269,6 +310,13 @@ function run() {
     handleAttemptFlee(room, 'p1', 0);
     if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
     const entry = room.logs.find((l) => l.text.includes('zum Weglaufen'));
+    // Feld fuer die Wuerfel-Animation muss gesetzt sein - auch wenn das
+    // Test-Room-Objekt es vorher gar nicht kannte (defensives seq-Lesen).
+    assert.ok(room.dieRoll, 'handleAttemptFlee muss room.dieRoll fuer die Wuerfel-Animation setzen');
+    assert.ok(room.dieRoll.roll >= 1 && room.dieRoll.roll <= 6, 'gewuerfelte Augenzahl muss zwischen 1 und 6 liegen');
+    assert.strictEqual(room.dieRoll.seq, 1, 'erster Wurf in diesem Raum bekommt seq 1');
+    assert.strictEqual(room.dieRoll.total, room.dieRoll.roll + room.dieRoll.mod, 'total = roll + mod');
+    assert.strictEqual(room.dieRoll.success, room.dieRoll.total >= 5, 'Weglaufen gelingt ab 5');
     return entry.text.match(/\(([+-]\d+) =/)[1];
   }
   assert.strictEqual(fleeMod([]), '+0', 'ohne Machtgruppe kein Weglaufen-Bonus');
@@ -283,8 +331,8 @@ function run() {
   // -------------------------------------------------------------------
   // Garantierte Flucht
   // -------------------------------------------------------------------
-  assert.strictEqual(GUARANTEED_FLEE_CARDS.size, 3);
-  ['FERTIGMAUER', 'BABY-ÖL', 'DER ANDERE RING'].forEach((n) => assert.ok(GUARANTEED_FLEE_CARDS.has(n)));
+  assert.strictEqual(GUARANTEED_FLEE_CARDS.size, 4);
+  ['FERTIGMAUER', 'BABY-ÖL', 'DER ANDERE RING', 'RATTE AM SPIESS'].forEach((n) => assert.ok(GUARANTEED_FLEE_CARDS.has(n)));
 
   // -------------------------------------------------------------------
   // Bedingte Item-Kampfboni
