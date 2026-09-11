@@ -408,6 +408,16 @@ select { background: var(--bg-alt); color: var(--text); border: 1px solid var(--
 .reward-cards .cardtile { cursor: default; }
 
 .reward-anim.play { animation: rewardFade 3.4s ease-out forwards; }
+/* Beute fliegt in die Hand: Rahmen und Texte verblassen, die Karten ziehen
+   per Inline-transform (siehe flyRewardCardsToHand) zur Handleiste. */
+.reward-anim.fly { animation-duration: 2.4s; }
+.reward-anim.fly .reward-box {
+  background: transparent; border-color: transparent; box-shadow: none;
+  transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+}
+.reward-anim.fly .reward-head, .reward-anim.fly .reward-level, .reward-anim.fly .reward-label {
+  opacity: 0; transition: opacity 0.35s ease;
+}
 .reward-anim.play .reward-level { animation: rewardPop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) backwards; }
 .reward-anim.play .cardtile { animation: rewardCardIn 0.5s ease-out backwards; }
 

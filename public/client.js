@@ -303,6 +303,23 @@
   // deshalb haengt sie an myInfo (privates yourInfo-Event), nicht am State.
   let lastRewardSeq = null;
   let rewardAnimTimer = null;
+  let rewardFlyTimer = null;
+
+  // Zum Schluss fliegen die Beutekarten in die eigene Handleiste, damit
+  // sichtbar ist, wo der Schatz landet. FLIP-Prinzip: einmal die Zielposition
+  // messen, dann pro Karte genau ein transform - kein Reflow pro Frame.
+  function flyRewardCardsToHand(box) {
+    const target = $('myHand').getBoundingClientRect();
+    if (!target.width) return; // Handleiste nicht sichtbar - dann nur ausblenden
+    box.querySelectorAll('.cardtile').forEach((tile, i) => {
+      const r = tile.getBoundingClientRect();
+      tile.style.animation = 'none'; // Einflug-Keyframes abschalten, sonst kaempfen sie mit dem transform
+      tile.style.transition = `transform 0.6s cubic-bezier(0.4, 0, 0.7, 1) ${i * 0.07}s, opacity 0.6s ease-in ${i * 0.07}s`;
+      void tile.offsetWidth;
+      tile.style.transform = `translate(${target.left + target.width / 2 - (r.left + r.width / 2)}px, ${target.top + target.height / 2 - (r.top + r.height / 2)}px) scale(0.25)`;
+      tile.style.opacity = '0';
+    });
+  }
   function playReward() {
     const r = myInfo.lastReward;
     if (!r || r.seq === lastRewardSeq) return;
@@ -315,11 +332,18 @@
     wrap.className = 'reward-box';
     const head = document.createElement('div');
     head.className = 'reward-head';
-    head.textContent = `⚔️ ${r.monsterNames.join(' + ')} besiegt!`;
-    const lvl = document.createElement('div');
-    lvl.className = 'reward-level';
-    lvl.textContent = `+${r.levelsGained} Stufe${r.levelsGained === 1 ? '' : 'n'}`;
-    wrap.append(head, lvl);
+    // Ohne Stufengewinn wurde das Monster nicht besiegt, sondern hat seinen
+    // Schatz zurueckgelassen (Polly-Trank & Co.) - dann passt "besiegt" nicht.
+    head.textContent = r.levelsGained
+      ? `⚔️ ${r.monsterNames.join(' + ')} besiegt!`
+      : `🪙 ${r.monsterNames.join(' + ')} liess den Schatz zurueck!`;
+    wrap.appendChild(head);
+    if (r.levelsGained) {
+      const lvl = document.createElement('div');
+      lvl.className = 'reward-level';
+      lvl.textContent = `+${r.levelsGained} Stufe${r.levelsGained === 1 ? '' : 'n'}`;
+      wrap.appendChild(lvl);
+    }
     if (r.cardIds.length) {
       const label = document.createElement('div');
       label.className = 'reward-label';
@@ -337,11 +361,20 @@
       wrap.appendChild(textNode('Dieses Monster liess keinen Schatz zurueck.'));
     }
     box.appendChild(wrap);
-    box.classList.remove('hidden', 'play');
+    box.classList.remove('hidden', 'play', 'fly');
     void box.offsetWidth; // Reflow erzwingen, sonst startet die Animation bei schneller Folge nicht neu
     box.classList.add('play');
     clearTimeout(rewardAnimTimer);
-    rewardAnimTimer = setTimeout(() => { box.classList.add('hidden'); box.innerHTML = ''; }, 3400);
+    clearTimeout(rewardFlyTimer);
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduced) {
+      rewardFlyTimer = setTimeout(() => { box.classList.add('fly'); flyRewardCardsToHand(box); }, 1400);
+    }
+    rewardAnimTimer = setTimeout(() => {
+      box.classList.add('hidden');
+      box.classList.remove('play', 'fly');
+      box.innerHTML = '';
+    }, reduced ? 3400 : 2400);
   }
 
   function renderGame() {
