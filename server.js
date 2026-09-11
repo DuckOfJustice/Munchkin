@@ -497,6 +497,23 @@ function handleDrawDoor(room, playerId) {
       room.doorDiscard.push(id);
       room.turnPhase = 'aerger';
       log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter. Phase 2: Auf Ärger aus sein.`, [id]);
+    } else if (monsterPassOption(id, player)) {
+      // "Kaempfen oder vorbeigehen und winken" - Halblinge bekommen die Wahl
+      // gar nicht angeboten (monsterPassOption), die muessen kaempfen.
+      const fightAction = { type: 'startRevealedCombat', cardId: id };
+      const passAction = { type: 'passMonster', cardId: id };
+      if (player.isBot) {
+        // Ein Wahldialog wuerde auf einen Bot ewig warten: er kaempft, wenn
+        // seine Staerke reicht, und geht sonst vorbei.
+        const desc = applyPrimitiveAction(room, player, baseStrength(player) > (c.level || 0) ? fightAction : passAction);
+        log(room, `${player.name} (Bot) trifft die Wahl bei "${c.name}": ${desc}.`, [id]);
+      } else {
+        openCardChoice(room, player, c.name, [
+          { id: 'fight', label: 'Kaempfen', action: fightAction },
+          { id: 'pass', label: 'Vorbeigehen und winken (kein Kampf, kein Schatz)', action: passAction },
+        ]);
+        log(room, `"${c.name}": ${player.name} darf kaempfen oder einfach vorbeigehen.`, [id]);
+      }
     } else {
       startCombat(room, player.id, [id], { fromHand: false });
     }
@@ -650,6 +667,14 @@ function slotLabelDe(slot) {
 // zurück.
 function applyPrimitiveAction(room, player, action) {
   switch (action.type) {
+    // Entscheidung bei Monstern mit Vorbeigeh-Option (BEKIFFTER GOLEM).
+    case 'startRevealedCombat':
+      startCombat(room, player.id, [action.cardId], { fromHand: false });
+      return 'stellt sich dem Monster';
+    case 'passMonster':
+      room.doorDiscard.push(action.cardId);
+      room.turnPhase = 'aerger';
+      return `geht vorbei und winkt - "${card(action.cardId).name}" behaelt seinen Schatz`;
     case 'death':
       applyDeathConsequence(room, player);
       return 'Tod';
@@ -1598,6 +1623,34 @@ function monsterRefusesTarget(cardId, player) {
   return !!rule && rule(player);
 }
 
+// --- Monster, die eine Rasse automatisch totstampft ----------------------
+// "Halblinge koennen sie einstampfen und automatisch toeten." Umgesetzt als
+// Staerke 0 in der Kampfrechnung: besiegt wird das Monster dann ueber die
+// normale Auswertung, Stufe und Schatz gibt es also trotzdem.
+const MONSTER_AUTO_KILL_BY_RACE = {
+  'GEWALTIGER BAZILLUS': 'HALBLING',
+};
+function monsterAutoKilled(m, sides) {
+  const race = m && MONSTER_AUTO_KILL_BY_RACE[m.name];
+  return !!race && sides.some((p) => hasRace(p, race));
+}
+
+// --- Monster, an denen man auch einfach vorbeigehen darf -----------------
+// "Waehle aus: kaempfen oder einfach vorbeigehen und winken und ihm seinen
+// Schatz lassen. (Ausnahme: Halblinge schauen lecker aus und muessen
+// kaempfen.)" Gilt nur fuer aufgedeckte Monster - ein aus der Hand
+// gespieltes Monster hat sich die kaempfende Person selbst eingeladen.
+const MONSTER_PASS_OPTION = {
+  'BEKIFFTER GOLEM': { forcedFightRaces: ['HALBLING'] },
+};
+function monsterPassOption(cardId, player) {
+  const c = card(cardId);
+  const rule = c && MONSTER_PASS_OPTION[c.name];
+  if (!rule) return null;
+  if ((rule.forcedFightRaces || []).some((r) => hasRace(player, r))) return null;
+  return rule;
+}
+
 // --- Monsterboni gegen Rassen/Klassen --------------------------------------
 // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
 // die Rasse/Klasse hat (Angreifer:in oder Helfer:in) - nicht einmal pro
@@ -1905,8 +1958,10 @@ function combatTotals(room) {
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   const monsters = c.monsterIds.map(card);
-  const monsterLevel = monsters.reduce((sum, m) => sum + (m.level || 0), 0);
   const sides = [actor, helper].filter(Boolean);
+  // Eingestampfte Monster (siehe MONSTER_AUTO_KILL_BY_RACE) bringen keine
+  // Stufe in die Rechnung ein.
+  const monsterLevel = monsters.reduce((sum, m) => sum + (monsterAutoKilled(m, sides) ? 0 : (m.level || 0)), 0);
   const ignoreLevel = combatHasMonster(room, MONSTER_IGNORES_LEVEL);
   const ignoreBonuses = combatHasMonster(room, MONSTER_IGNORES_BONUSES);
   let playerStrength;
@@ -1946,6 +2001,7 @@ function combatConditionalBonusFields(room) {
     ignoresLevel: combatHasMonster(room, MONSTER_IGNORES_LEVEL),
     ignoresBonuses: combatHasMonster(room, MONSTER_IGNORES_BONUSES),
     forbidsHelp: combatHasMonster(room, MONSTER_FORBIDS_HELP),
+    autoKilledMonsters: monsters.filter((m) => monsterAutoKilled(m, [actor, helper].filter(Boolean))).map((m) => m.name),
   };
 }
 
@@ -3074,6 +3130,7 @@ module.exports = {
   handleFleeReroll, handleSellItems, endTurn,
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee,
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
+  MONSTER_AUTO_KILL_BY_RACE, MONSTER_PASS_OPTION, handleResolveCardChoice,
   MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
   FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
   MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,

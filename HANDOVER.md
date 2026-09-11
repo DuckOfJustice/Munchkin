@@ -607,14 +607,12 @@ Bonus-Zahlenfeld im Kampf und das Ablege-Dropdown:
 
 - **DIEB "In den Rücken fallen"** (-2 für eine *andere* Person). Kräfte gegen
   Mitspielende sind im ganzen Projekt manuell, siehe Kommentar am Dateianfang.
-- **HALBLING**: Weglaufwurf wiederholen, doppelter Verkaufspreis.
 - **ZWERG**: "beliebig viele Große Gegenstände" - es gibt kein Groß-Flag in
   den Daten, also gibt es auch keine Beschränkung, die die Ausnahme bräuchte.
 - **AMAZONE** ("greift keine Spielerinnen an") - Geschlecht wird nicht
   erfasst, siehe 4.1.
-- **BEKIFFTER GOLEM, LAUFENDE NASE (Bestechung), MÖCHTEGERN-VAMPIR, PIT
-  BULL, ANWALT** (die Dieb-Tauschoption): Wahlmöglichkeiten, keine
-  Dauerwirkungen.
+- **LAUFENDE NASE (Bestechung), MÖCHTEGERN-VAMPIR, PIT BULL, ANWALT** (die
+  Dieb-Tauschoption): Wahlmöglichkeiten, keine Dauerwirkungen.
 - **ZAUBERER "Flugzauber"** ist umgesetzt, weicht aber bewusst vom Text ab:
   Die Karte sagt "*nachdem* du deinen Weglaufwurf gemacht hast", der Server
   bietet den Abwurf **vor** dem Wurf an. Grund: `handleAttemptFlee` löst den
@@ -626,6 +624,27 @@ Bonus-Zahlenfeld im Kampf und das Ablege-Dropdown:
   `MONSTER_EXTRA_LEVEL`, sondern als Sonderfälle in `monsterVictoryExtras`
   (1698) - sie haben Bedingungen ("ohne Hilfe und Boni", "mit Feuer"). Ein
   Textscan meldet sie als "offen"; sie sind es nicht.
+
+### 7.6b Inzwischen doch umgesetzt (HALBLING & Co.)
+
+Diese vier standen in 7.6 als "bewusst manuell" und sind es nicht mehr - wer
+hier etwas ändert, findet die Regel jeweils an der genannten Stelle:
+
+- **HALBLING, doppelter Verkaufspreis**: `handleSellItems` verdoppelt den
+  teuersten der verkauften Gegenstände, `player.halblingSaleUsed` wird in
+  `endTurn` zurückgesetzt.
+- **HALBLING, Weglaufwurf wiederholen**: die in 7.6 vermisste Phase
+  "gewürfelt, aber noch nicht entschieden" gibt es jetzt -
+  `combat.fleeRerollOffer` plus `handleFleeReroll`. Der Zauberer-Flugzauber
+  könnte darauf aufsetzen, wenn er wortgetreu werden soll.
+- **GEWALTIGER BAZILLUS** ("Halblinge können sie einstampfen"):
+  `MONSTER_AUTO_KILL_BY_RACE` - das Monster zählt in `combatTotals` mit
+  Stärke 0, Stufe und Schatz kommen aus der normalen Auswertung.
+- **BEKIFFTER GOLEM** ("kämpfen oder vorbeigehen", Halblinge müssen
+  kämpfen): `MONSTER_PASS_OPTION` in `handleDrawDoor`, umgesetzt als
+  `openCardChoice` mit den Aktionen `startRevealedCombat`/`passMonster`.
+  Bots entscheiden selbst (Staerkevergleich), sonst würde die Partie auf
+  einen Wahldialog warten.
 
 ### 7.7 Nächste Schritte, in dieser Reihenfolge
 

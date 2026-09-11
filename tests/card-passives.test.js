@@ -15,6 +15,7 @@ const {
   DOOR_OTHER_AS_CURSE, handleUseClassCombatDiscard, classCombatPowerInfo,
   UNDEAD_MONSTERS, handleSetCombatReady, combatReadyRequired, combatAllReady,
   refreshCombatReady, handleSetCombatModifier, handleFleeReroll, handleSellItems, endTurn,
+  handleResolveCardChoice,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -322,6 +323,51 @@ function run() {
   done(halbFremd.room);
   assert.ok(halbFremd.room.combat && halbFremd.room.combat.fleeRerollOffer,
     'fremde Karten-IDs und fremde Spieler:innen duerfen das Angebot nicht ausloesen');
+
+  // "Halblinge koennen sie einstampfen und automatisch toeten."
+  const bazillus = findCard('GEWALTIGER BAZILLUS', 'monster');
+  const stampf = combatRoom('GEWALTIGER BAZILLUS', { level: 1, races: [HALBLING] });
+  assert.strictEqual(combatTotals(stampf.room).monsterStrength, 0,
+    'gegen Halblinge bringt der Gewaltige Bazillus keine Staerke mehr ein');
+  const handVorStampf = stampf.room.players[0].hand.length;
+  handleEvaluateCombat(stampf.room, 'p1');
+  done(stampf.room);
+  assert.strictEqual(stampf.room.combat, null, 'der eingestampfte Bazillus beendet den Kampf sofort');
+  assert.strictEqual(stampf.room.players[0].level, 2, 'das automatisch getoetete Monster bringt trotzdem eine Stufe');
+  assert.strictEqual(stampf.room.players[0].hand.length, handVorStampf + bazillus.treasureCount,
+    'und auch seinen Schatz');
+
+  const ohneHalbling = combatRoom('GEWALTIGER BAZILLUS', { level: 1 });
+  assert.strictEqual(combatTotals(ohneHalbling.room).monsterStrength, bazillus.level,
+    'ohne Halbling zaehlt der Bazillus normal');
+  handleEvaluateCombat(ohneHalbling.room, 'p1');
+  done(ohneHalbling.room);
+  assert.ok(ohneHalbling.room.combat && ohneHalbling.room.combat.mustFlee,
+    'ohne Halbling ist der Kampf auf Stufe 1 verloren');
+
+  // BEKIFFTER GOLEM: "kaempfen oder einfach vorbeigehen und winken ...
+  // (Ausnahme: Halblinge ... muessen kaempfen.)"
+  const golem = findCard('BEKIFFTER GOLEM', 'monster');
+  const golemHalbling = drawRoom(golem.id, { races: [HALBLING] });
+  assert.strictEqual(golemHalbling.pendingCardAction, null, 'Halblinge bekommen die Wahl nicht angeboten');
+  assert.ok(golemHalbling.combat && golemHalbling.combat.monsterIds.includes(golem.id),
+    'Halblinge muessen gegen den Bekifften Golem kaempfen');
+
+  const golemWahl = drawRoom(golem.id, {});
+  assert.ok(golemWahl.pendingCardAction && golemWahl.pendingCardAction.options.length === 2,
+    'alle anderen duerfen waehlen: kaempfen oder vorbeigehen');
+  assert.strictEqual(golemWahl.combat, null, 'solange die Wahl offen ist, laeuft kein Kampf');
+  handleResolveCardChoice(golemWahl, 'p1', 'pass');
+  done(golemWahl);
+  assert.strictEqual(golemWahl.combat, null, 'wer vorbeigeht, kaempft nicht');
+  assert.ok(golemWahl.doorDiscard.includes(golem.id), 'der Golem landet auf dem Tuer-Ablagestapel');
+  assert.strictEqual(golemWahl.turnPhase, 'aerger', 'danach laeuft der Zug mit Phase 2 weiter');
+
+  const golemKampf = drawRoom(golem.id, {});
+  handleResolveCardChoice(golemKampf, 'p1', 'fight');
+  done(golemKampf);
+  assert.ok(golemKampf.combat && golemKampf.combat.monsterIds.includes(golem.id),
+    'wer sich entscheidet zu kaempfen, kaempft auch');
 
   // "Du darfst 1 Gegenstand pro Runde zum doppelten Preis verkaufen."
   // 600 Goldstuecke reichen normal nicht fuer eine Stufe, verdoppelt schon.

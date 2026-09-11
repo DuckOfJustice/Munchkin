@@ -737,6 +737,10 @@
     if (c.ignoresBonuses) notes.push('Gegen dieses Monster zählt nur eure Charakterstufe - keine Gegenstände, keine Boni.');
     if (c.ignoresLevel) notes.push('Gegen dieses Monster zählt eure Stufe nicht - nur eure Boni.');
     if (c.forbidsHelp) notes.push('Gegen dieses Monster darf niemand helfen.');
+    // Ohne Hinweis sähe die Monsterstärke 0 wie ein Anzeigefehler aus.
+    (c.autoKilledMonsters || []).forEach((name) => {
+      notes.push(`${name}: von Halblingen einfach eingestampft - zählt mit Stärke 0, Stufe und Schatz gibt es trotzdem.`);
+    });
     const power = myInfo.classCombatPower;
     if (power && power.remaining > 0) {
       notes.push(`Deine Klassenkraft "${power.label}": bis zu ${power.remaining} weitere Handkarte(n) ablegen für je +${power.bonus} ` +
