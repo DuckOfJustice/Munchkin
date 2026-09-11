@@ -15,7 +15,7 @@ const {
   DOOR_OTHER_AS_CURSE, handleUseClassCombatDiscard, classCombatPowerInfo,
   UNDEAD_MONSTERS, handleSetCombatReady, combatReadyRequired, combatAllReady,
   refreshCombatReady, handleSetCombatModifier, handleFleeReroll, handleSellItems, endTurn,
-  handleResolveCardChoice,
+  handleResolveCardChoice, handleFleeEscape,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -391,6 +391,45 @@ function run() {
   // Nach dem Zugwechsel geht es wieder.
   endTurn(halbVerkauf);
   assert.strictEqual(halbVerkauf.players[0].halblingSaleUsed, false, 'der Zugwechsel setzt den Doppelverkauf zurueck');
+
+  // -------------------------------------------------------------------
+  // UNSICHTBARKEITSTRANK: "Ablegen, wenn der Weglaufen-Wurf misslingt. Du
+  // entkommst automatisch." Anders als die garantierten Fluchtkarten wirkt er
+  // NACH dem Wurf - das Entscheidungsfenster dafuer gibt es seit dem
+  // Halbling-Wiederholungswurf. Die Schnecken (-2) lassen den Wurf garantiert
+  // scheitern, der Test braucht also kein Glueck.
+  // -------------------------------------------------------------------
+  const trank = findCard('UNSICHTSBARKEITSTRANK', 'treasure_other');
+  const unsichtbar = combatRoom('SCHNECKEN AUF SPEED', { hand: [trank.id] }, { mustFlee: true });
+  handleAttemptFlee(unsichtbar.room, 'p1', 0);
+  assert.strictEqual(unsichtbar.room.dieRoll.success, false, 'Testvoraussetzung: der Wurf scheitert');
+  assert.ok(unsichtbar.room.combat && unsichtbar.room.combat.fleeRerollOffer,
+    'mit Rettungskarte auf der Hand bleibt der Kampf fuer die Entscheidung stehen');
+  assert.ok(!unsichtbar.room.combat.canReroll, 'ohne Halbling gibt es keinen Wiederholungswurf');
+  assert.strictEqual(unsichtbar.room.pendingConsequence, null, 'das Miese Zeug wartet noch');
+
+  // Ein Wiederholungswurf steht hier nicht zu - auch nicht mit Handkarte.
+  handleFleeReroll(unsichtbar.room, 'p1', trank.id);
+  assert.ok(unsichtbar.room.combat && unsichtbar.room.combat.fleeRerollOffer,
+    'ohne Halbling darf die Karte keinen zweiten Wurf kaufen');
+  assert.ok(unsichtbar.room.players[0].hand.includes(trank.id), 'und die Karte bleibt liegen');
+
+  handleFleeEscape(unsichtbar.room, 'p1', trank.id);
+  done(unsichtbar.room);
+  assert.strictEqual(unsichtbar.room.combat, null, 'mit dem Trank ist der Kampf vorbei');
+  assert.strictEqual(unsichtbar.room.pendingConsequence, null, 'und das Miese Zeug trifft nicht mehr');
+  assert.strictEqual(unsichtbar.room.turnPhase, 'gabe', 'nach der Flucht geht es mit Phase 4 weiter');
+  assert.ok(!unsichtbar.room.players[0].hand.includes(trank.id), 'der Trank ist verbraucht');
+  assert.ok(unsichtbar.room.treasureDiscard.includes(trank.id), 'und liegt auf dem Schatz-Ablagestapel');
+
+  // Fremdeingabe: eine Karte, die nicht auf der Hand liegt, rettet nicht.
+  const fremdeRettung = combatRoom('SCHNECKEN AUF SPEED', { hand: [trank.id] }, { mustFlee: true });
+  handleAttemptFlee(fremdeRettung.room, 'p1', 0);
+  handleFleeEscape(fremdeRettung.room, 'p1', 'gibt-es-nicht');
+  handleFleeEscape(fremdeRettung.room, 'p2', trank.id);
+  done(fremdeRettung.room);
+  assert.ok(fremdeRettung.room.combat && fremdeRettung.room.combat.fleeRerollOffer,
+    'falsche Karten-ID und fremde Spieler:innen aendern nichts');
 
   // -------------------------------------------------------------------
   // RATTE AM SPIESS: garantierte Flucht nur bis Monsterstufe 8

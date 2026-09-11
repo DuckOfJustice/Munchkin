@@ -19,6 +19,8 @@ const {
   combatTotals, handLimit, handlePlayCombatCard,
   handleEquipItem, handleUnequipItem, equippedItemIds, newEquipped,
   SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
+  handleEnchantMonster, enchantInfo, handleFleeEscape, handleFleeReroll,
+  DOOR_COMBAT_CARDS, POST_FLEE_ESCAPE_CARDS,
 } = require('../server.js');
 
 function makePlayer(overrides) {
@@ -341,6 +343,111 @@ function run() {
   armbandCheck.room.combat.monsterIds = [lootMonster.id];
   armbandCheck.room.players[0].hand = [armbandCheck.potionId, armbandPay[0]];
   assert.strictEqual(armbandSpec(), null, 'ohne 3 ablegbare Karten nicht einsetzbar');
+
+  // Kartennamen in den Sonderfall-Tabellen muessen es wirklich geben - ein
+  // Tippfehler (die Karte heisst "UNSICHTSBARKEITSTRANK", mit S) macht den
+  // Eintrag sonst stillschweigend wirkungslos.
+  [
+    ['POST_FLEE_ESCAPE_CARDS', [...POST_FLEE_ESCAPE_CARDS]],
+    ['DOOR_COMBAT_CARDS', Object.keys(DOOR_COMBAT_CARDS)],
+    ['COMBAT_POTION_OVERRIDES', Object.keys(COMBAT_POTION_OVERRIDES)],
+    ['SPECIAL_SLOT_ITEMS', Object.keys(SPECIAL_SLOT_ITEMS)],
+  ].forEach(([tabelle, namen]) => {
+    namen.forEach((name) => {
+      assert.ok(ALL_CARDS.some((c) => c.name === name), `${tabelle}: "${name}" ist kein Kartenname`);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // ZAUBERER "Verzauberung": ganze Hand (mind. 3 Karten) gegen Monster und
+  // seinen Schatz, aber keine Stufe. Mechanisch dasselbe wie das
+  // VERZAUBERARMBAND - hier zaehlt vor allem die Bedingungspruefung.
+  // -------------------------------------------------------------------
+  const ZAUBERER = findCard('ZAUBERER', 'class').id;
+  // Eigener Nachziehstapel: filler (10 Karten) steckt hier in der Hand, der
+  // Stapel muss davon unabhaengig genug Schaetze fuer den Monsterschatz haben.
+  const enchantDeck = ALL_CARDS.filter((c) => c.type === 'treasure').slice(20, 40).map((c) => c.id);
+  function enchantRoom(handSize, playerOverrides, monsterIds) {
+    const hand = filler.slice(0, handSize);
+    const actor = makePlayer(Object.assign({
+      id: 'p1', name: 'A', level: 3, hand, classes: [ZAUBERER], equipped: newEquipped(),
+    }, playerOverrides || {}));
+    return {
+      code: 'TEST', players: [actor, makePlayer({ id: 'p2', name: 'B', equipped: newEquipped() })],
+      turnIndex: 0, turnPhase: 'kampf', combatHappenedThisTurn: true,
+      doorDeck: [], doorDiscard: [], treasureDeck: enchantDeck.slice(), treasureDiscard: [],
+      revealedDoorCard: null, pendingConsequence: null, pendingCardAction: null,
+      winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+      settings: { sets: {} },
+      combat: {
+        actorId: 'p1', helperId: null, monsterIds: monsterIds || [lootMonster.id],
+        actorModifier: 0, monsterModifier: 0, mustFlee: false,
+      },
+    };
+  }
+
+  const zaubern = enchantRoom(4);
+  const zaubernActor = zaubern.players[0];
+  assert.ok(enchantInfo(zaubern, zaubernActor), 'Zauberer mit 4 Handkarten gegen ein Monster darf verzaubern');
+  handleEnchantMonster(zaubern, 'p1');
+  if (zaubern.cleanupTimer) clearTimeout(zaubern.cleanupTimer);
+  assert.strictEqual(zaubern.combat, null, 'die Verzauberung beendet den Kampf');
+  assert.strictEqual(zaubernActor.level, 3, '"erhalte aber keine Stufe"');
+  assert.strictEqual(zaubernActor.hand.length, lootMonster.treasureCount,
+    'die ganze Hand ist weg, dafuer liegt der Schatz des Monsters da');
+  assert.strictEqual(zaubernActor.lastReward.levelsGained, 0, 'Beute-Animation ohne Stufe');
+  assert.ok(zaubern.doorDiscard.includes(lootMonster.id), 'das verzauberte Monster liegt im Tuer-Ablagestapel');
+
+  assert.strictEqual(enchantInfo(enchantRoom(2), makePlayer({ id: 'p1', classes: [ZAUBERER], hand: ['a', 'b'] })), null,
+    'unter 3 Handkarten keine Verzauberung');
+  const zweiMonster = enchantRoom(4, null, [lootMonster.id, monster.id]);
+  assert.strictEqual(enchantInfo(zweiMonster, zweiMonster.players[0]), null,
+    'bei mehreren Monstern muss normal gekaempft werden');
+  const keinZauberer = enchantRoom(4, { classes: [] });
+  assert.strictEqual(enchantInfo(keinZauberer, keinZauberer.players[0]), null, 'nur Zauberer duerfen verzaubern');
+  const zauberFlucht = enchantRoom(4);
+  zauberFlucht.combat.mustFlee = true;
+  assert.strictEqual(enchantInfo(zauberFlucht, zauberFlucht.players[0]), null,
+    'wer schon fliehen muss, verzaubert nicht mehr');
+  handleEnchantMonster(zauberFlucht, 'p1');
+  if (zauberFlucht.cleanupTimer) clearTimeout(zauberFlucht.cleanupTimer);
+  assert.ok(zauberFlucht.combat, 'und der Aufruf prallt dann wirkungslos ab');
+
+  // -------------------------------------------------------------------
+  // MAHLZEIT!: "Der kaempfende Spieler legt alle ihn angreifenden Monster ab
+  // und zieht sofort 2 Schaetze." - feste 2 Schaetze, keine Stufe, und jede:r
+  // am Tisch darf die Karte spielen.
+  // -------------------------------------------------------------------
+  const mahlzeit = findCard('MAHLZEIT!', 'door_other');
+  assert.ok(DOOR_COMBAT_CARDS[mahlzeit.name], 'MAHLZEIT! muss als Kampf-Tuerkarte bekannt sein');
+  const mzRoom = enchantRoom(0, { classes: [] });
+  mzRoom.players[1].hand = [mahlzeit.id]; // nicht die kaempfende Person
+  handlePlayCombatCard(mzRoom, 'p2', mahlzeit.id);
+  if (mzRoom.cleanupTimer) clearTimeout(mzRoom.cleanupTimer);
+  assert.strictEqual(mzRoom.combat, null, 'MAHLZEIT! beendet den Kampf');
+  assert.strictEqual(mzRoom.players[0].hand.length, 2,
+    'die kaempfende Person zieht genau 2 Schaetze - nicht den treasureCount des Monsters');
+  assert.strictEqual(mzRoom.players[0].level, 3, 'kein Monster besiegt, also keine Stufe');
+  assert.strictEqual(mzRoom.players[1].hand.length, 0, 'die gespielte Karte ist verbraucht');
+  assert.ok(mzRoom.doorDiscard.includes(mahlzeit.id), 'MAHLZEIT! ist eine Tuerkarte und gehoert auf deren Ablagestapel');
+
+  // -------------------------------------------------------------------
+  // DOPPELGAENGER: "Verdopple deine Kampfstaerke" - nur allein im Kampf.
+  // -------------------------------------------------------------------
+  const doppel = potionRoom('DOPPELGÄNGER');
+  const vorher = combatTotals(doppel.room).playerStrength;
+  handlePlayCombatCard(doppel.room, 'p1', doppel.potionId);
+  if (doppel.room.cleanupTimer) clearTimeout(doppel.room.cleanupTimer);
+  assert.strictEqual(doppel.room.combat.doubleActor, true, 'der Doppelgaenger merkt sich die Verdopplung');
+  assert.strictEqual(combatTotals(doppel.room).playerStrength, vorher * 2, 'die Kampfstaerke zaehlt doppelt');
+
+  const doppelHelfer = potionRoom('DOPPELGÄNGER');
+  doppelHelfer.room.combat.helperId = 'p2';
+  handlePlayCombatCard(doppelHelfer.room, 'p1', doppelHelfer.potionId);
+  if (doppelHelfer.room.cleanupTimer) clearTimeout(doppelHelfer.room.cleanupTimer);
+  assert.ok(!doppelHelfer.room.combat.doubleActor, 'mit Helfer:in im Kampf wirkt der Doppelgaenger nicht');
+  assert.ok(doppelHelfer.room.players[0].hand.includes(doppelHelfer.potionId),
+    'und die Karte bleibt dann auf der Hand');
 
   // -------------------------------------------------------------------
   // Spezialausrüstung: Schatzkarten mit Kampfbonus, die auf keinen der

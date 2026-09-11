@@ -646,6 +646,33 @@ hier etwas ändert, findet die Regel jeweils an der genannten Stelle:
   Bots entscheiden selbst (Staerkevergleich), sonst würde die Partie auf
   einen Wahldialog warten.
 
+### 7.6c Nach dem Basis-Set-Audit nachgezogen
+
+- **Monster-Verstärker-Beute** (BABY, INTELLIGENT, WUTEND, GIGANTISCH,
+  URALT): `combat.treasureDelta`, ausgezahlt in `resolveCombatWin`, Untergrenze
+  1 wegen BABY ("mindestens 1").
+- **ZAUBERER "Verzauberung"**: `enchantInfo` / `handleEnchantMonster` - ganze
+  Hand (min. 3 Karten) gegen Monster + Schatz, keine Stufe. Nutzt denselben
+  Pfad wie das VERZAUBERARMBAND (`endCombatNoLevel` + `leavesTreasure`).
+- **UNSICHTSBARKEITSTRANK** (Kartenname mit S!): `POST_FLEE_ESCAPE_CARDS` +
+  `handleFleeEscape`. Wirkt NACH dem verpatzten Wurf und nutzt dafür das
+  Entscheidungsfenster, das für den Halbling-Wiederholungswurf entstand
+  (`combat.fleeRerollOffer`, `combat.canReroll`). Die `GUARANTEED_FLEE_CARDS`
+  wirken dagegen weiter VOR dem Wurf.
+- **MAHLZEIT!**: `DOOR_COMBAT_CARDS` - Türkarten mit eigener Kampfwirkung,
+  die keine Monster-Verstärker sind. Feste 2 Schätze über `fixedTreasures`.
+- **DOPPELGÄNGER**: `COMBAT_POTION_OVERRIDES` + Aktion `doubleStrength` ->
+  `combat.doubleActor`, verdoppelt in `combatTotals` die Munchkin-Summe; nur
+  ohne Helfer:in spielbar.
+
+Weiter bewusst offen (jeweils ein eigener Mechanismus, kein Tabelleneintrag):
+WUNSCHRING und FLUCH! EINKOMMENSSTEUER (brauchen einen Tracker für *aktive*
+Flüche), ILLUSION (Monster im Kampf gegen ein Handmonster tauschen),
+KLEBERFLÄSCHCHEN, GEZINKTER WÜRFEL, MAGISCHE LAMPE, KNIESCHÜTZER DER
+VERLOCKUNG, ÜBERFALLTRANK, SCHUMMELN!, HILF MIR, GÖTTLICHE INTERVENTION,
+KUMPEL, WANDERNDES MONSTER, PRIESTER "Auferstehung", DIEB (beide Kräfte
+richten sich gegen Mitspielende, siehe 7.6).
+
 ### 7.7 Nächste Schritte, in dieser Reihenfolge
 
 1. **Unnatural Axe und Clerical Errors nachtragen** (~30 Tabellenzeilen, keine

@@ -750,6 +750,7 @@
     if (c.ignoresBonuses) notes.push('Gegen dieses Monster zählt nur eure Charakterstufe - keine Gegenstände, keine Boni.');
     if (c.ignoresLevel) notes.push('Gegen dieses Monster zählt eure Stufe nicht - nur eure Boni.');
     if (c.forbidsHelp) notes.push('Gegen dieses Monster darf niemand helfen.');
+    if (c.doubleActor) notes.push('Doppelgänger: eure Kampfstärke zählt doppelt.');
     // Ohne Hinweis sähe die Monsterstärke 0 wie ein Anzeigefehler aus.
     (c.autoKilledMonsters || []).forEach((name) => {
       notes.push(`${name}: von Halblingen einfach eingestampft - zählt mit Stärke 0, Stufe und Schatz gibt es trotzdem.`);
@@ -858,8 +859,26 @@
     // HALBLING: nach dem verpatzten ersten Wurf noch eine Entscheidung -
     // 1 Handkarte ablegen und nochmal würfeln (Knopf an der Karte) oder das
     // Miese Zeug hinnehmen. Solange das offen ist, kein neuer Wurf.
+    // ZAUBERER "Verzauberung": ganze Hand gegen Monster+Schatz, keine Stufe.
+    const enchant = myInfo.classEnchant;
+    if (enchant && !c.mustFlee) {
+      const btn = mkBtn(`✨ Verzauberung: ganze Hand ablegen (${enchant.handCount} Karten) und "${enchant.monsterName}" verzaubern - Schatz ja, Stufe nein`,
+        () => socket.emit('enchantMonster', {}));
+      btn.className = 'primary';
+      div.appendChild(btn);
+    }
+
     if (iAmActor && c.fleeRerollOffer) {
-      div.appendChild(textNode('Halbling: Lege 1 Handkarte ab (Knopf unter der Karte), um noch einmal weglaufen zu würfeln - oder stell dich dem Miesen Zeug.'));
+      const escapeIds = myInfo.fleeEscapeCardIds || [];
+      const wege = [];
+      if (c.canReroll) wege.push('als Halbling 1 Handkarte ablegen (Knopf unter der Karte) und noch einmal würfeln');
+      if (escapeIds.length) wege.push('eine Rettungskarte ablegen und automatisch entkommen');
+      div.appendChild(textNode(`Der Wurf ist misslungen - du kannst noch ${wege.join(' oder ')}. Oder du stellst dich dem Miesen Zeug.`));
+      escapeIds.forEach((escId) => {
+        const btn = mkBtn(`🫥 "${card(escId).name}" ablegen und automatisch entkommen`, () => socket.emit('fleeEscape', { cardId: escId }));
+        btn.className = 'primary';
+        div.appendChild(btn);
+      });
       const acceptBtn = mkBtn('Miesem Zeug stellen', () => socket.emit('fleeReroll', { cardId: null }));
       div.appendChild(acceptBtn);
     } else if (iAmActor && c.mustFlee) {
@@ -1181,6 +1200,12 @@
       const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
       wrap.appendChild(btn);
     }
+    // Türkarten mit eigener Kampfwirkung (MAHLZEIT!) - welche das sind, sagt
+    // der Server (state.doorCombatCards), damit hier keine Namensliste liegt.
+    if (state.combat && !state.combat.mustFlee && (state.doorCombatCards || []).includes(c.name)) {
+      const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
+      wrap.appendChild(btn);
+    }
     // Klassenkräfte, die Handkarten kosten (Krieger "Berserken", Priester
     // "Vertreiben", Zauberer "Flugzauber"). Welche gerade nutzbar ist und wie
     // viele Karten noch gehen, rechnet der Server - hier steht bewusst keine
@@ -1194,7 +1219,7 @@
     }
     // HALBLING-Wiederholungswurf: jede Handkarte kann die Karte sein, die
     // dafür abgelegt wird.
-    if (state.combat && state.combat.fleeRerollOffer && state.combat.actorId === myInfo.playerId) {
+    if (state.combat && state.combat.fleeRerollOffer && state.combat.canReroll && state.combat.actorId === myInfo.playerId) {
       const btn = mkBtn('🎲 Halbling: ablegen und nochmal weglaufen', () => socket.emit('fleeReroll', { cardId: id }));
       btn.className = 'primary';
       wrap.appendChild(btn);
