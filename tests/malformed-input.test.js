@@ -34,6 +34,7 @@ const PAYLOADS = [
   { cardId: null }, { cardId: 42 }, { cardIds: 5 }, { cardIds: 'abc' },
   { botId: {} }, { optionId: [] }, { targetId: 0 }, { modifier: 'viel' },
   { who: 'monster', value: 'NaN' }, { accept: 'ja' }, { tradeId: null },
+  { tradeId: 'gibtsnicht', accept: true, counterCardIds: 'alles' },
   { toId: null, offerCardIds: 'keine' }, { name: 123 }, { code: [] }, { type: 'levelDelta' },
 ];
 

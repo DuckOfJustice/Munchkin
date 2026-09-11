@@ -43,8 +43,8 @@
 
   // -- Handel (Trading) --
   let tradeComposeTargetId = null; // gerade ein neues Angebot an diese Person zusammenstellen
-  let tradeComposeSelection = new Set(); // eigene Handkarten, die dabei angeboten werden
-  let tradeCounterForId = null; // gerade ein Gegenangebot für dieses eingehende Angebot zusammenstellen
+  let tradeComposeSelection = new Set(); // eigene Karten/angelegte Gegenstände, die dabei angeboten werden
+  let tradeCounterForId = null; // gerade die eigene Gegenleistung für dieses eingehende Angebot zusammenstellen
   let tradeCounterSelection = new Set();
 
   function startTradeCompose(targetId) {
@@ -500,7 +500,22 @@
   // Handel (Trading) - jederzeit möglich, nicht an den eigenen Zug gebunden.
   // ---------------------------------------------------------------------
 
+  // Handelbar sind eigene Handkarten UND eigene angelegte Gegenstände
+  // (letztere sind öffentlich sichtbar und stehen im state).
+  function myEquippedIds() {
+    const me = state && state.players.find((p) => p.id === myInfo.playerId);
+    if (!me) return [];
+    return [...new Set([me.equipped.head, me.equipped.armor, me.equipped.feet, ...me.equipped.hands].filter(Boolean))];
+  }
+  function myTradableIds() {
+    return [...new Set([...(myInfo.hand || []), ...myEquippedIds()])];
+  }
+  function goldSum(ids) {
+    return (ids || []).reduce((sum, id) => sum + (typeof card(id).gold === 'number' ? card(id).gold : 0), 0);
+  }
+
   function tradePickGrid(ids, selection) {
+    const equipped = myEquippedIds();
     const grid = document.createElement('div');
     grid.className = 'row gap wrap tradegrid';
     ids.forEach((id) => {
@@ -514,11 +529,36 @@
         renderTradeArea();
       };
       label.appendChild(cb);
-      label.appendChild(document.createTextNode(` ${c.name}${typeof c.gold === 'number' ? ` (${c.gold} GS)` : ''}`));
+      label.appendChild(document.createTextNode(
+        ` ${c.name}${typeof c.gold === 'number' ? ` (${c.gold} GS)` : ''}${equipped.includes(id) ? ' • angelegt' : ''}`
+      ));
       grid.appendChild(label);
     });
-    if (!ids.length) grid.appendChild(textNode('Keine Karten auf der Hand.'));
+    if (!ids.length) grid.appendChild(textNode('Nichts Tauschbares vorhanden.'));
     return grid;
+  }
+
+  // Anklickbare Kartenverweise (wie im Verlauf) für eine Handelshälfte.
+  function tradeChips(ids) {
+    const row = document.createElement('div');
+    row.className = 'row gap wrap';
+    (ids || []).forEach((id) => {
+      const c = card(id);
+      const chip = document.createElement('a');
+      chip.href = '#'; chip.className = 'logcardlink';
+      chip.textContent = `[${c.name}${typeof c.gold === 'number' ? ` ${c.gold} GS` : ''}]`;
+      chip.onclick = (e) => { e.preventDefault(); openCardModal(id); };
+      row.appendChild(chip);
+    });
+    if (!(ids || []).length) row.appendChild(textNode('(nichts)'));
+    return row;
+  }
+
+  // "300 vs. 400 Goldstücke" - Wert gegen Wert abwägen. Gold ist im Spiel
+  // keine Währung, sondern nur der Verkaufswert der Karten (Verkauf ab 1.000
+  // Goldstücken über handleSellItems) - hier also reine Entscheidungshilfe.
+  function tradeVsLine(giveIds, getIds) {
+    return textNode(`Du gibst ${goldSum(giveIds)} GS  vs.  du bekommst ${goldSum(getIds)} GS`);
   }
 
   function renderTradeArea() {
@@ -527,6 +567,7 @@
     box.innerHTML = '';
     if (!state || state.phase !== 'playing') return;
 
+    // 1. Eigenes Angebot zusammenstellen
     if (tradeComposeTargetId) {
       const target = state.players.find((p) => p.id === tradeComposeTargetId);
       if (!target || !target.connected) {
@@ -535,8 +576,11 @@
         const panel = document.createElement('div');
         panel.className = 'tradebox';
         panel.innerHTML = `<h3>🤝 Handel anbieten an ${escapeHtml(target.name)}</h3>` +
-          `<p class="hint">Wähle Karten aus deiner Hand, die du anbietest (Gold- oder andere Karten). ${target.name} entscheidet dann, was sie/er im Gegenzug gibt.</p>`;
-        panel.appendChild(tradePickGrid(myInfo.hand, tradeComposeSelection));
+          `<p class="hint">Wähle, was du hergeben willst - Handkarten oder angelegte Gegenstände. ` +
+          `${escapeHtml(target.name)} legt dann die Gegenleistung fest, die du anschließend bestätigen musst.</p>`;
+        panel.appendChild(tradePickGrid(myTradableIds(), tradeComposeSelection));
+        const selected = Array.from(tradeComposeSelection);
+        panel.appendChild(textNode(`Dein Angebot: ${selected.length} Karte(n), ${goldSum(selected)} Goldstücke`));
         const actions = document.createElement('div');
         actions.className = 'row gap'; actions.style.marginTop = '10px';
         const sendBtn = mkBtn('Angebot senden', () => {
@@ -554,50 +598,71 @@
       }
     }
 
+    // 2. Angebote an mich - ich lege meine Hälfte fest
     (myInfo.incomingTrades || []).forEach((t) => {
       const panel = document.createElement('div');
       panel.className = 'tradebox';
-      panel.innerHTML = `<h3>🤝 Handelsangebot von ${escapeHtml(t.fromName)}</h3><p>Bietet an:</p>`;
-      const preview = document.createElement('div');
-      preview.className = 'row gap wrap';
-      t.offerCardIds.forEach((id) => {
-        const chip = document.createElement('a');
-        chip.href = '#'; chip.className = 'logcardlink';
-        chip.textContent = `[${card(id).name}]`;
-        chip.onclick = (e) => { e.preventDefault(); openCardModal(id); };
-        preview.appendChild(chip);
-      });
-      panel.appendChild(preview);
+      panel.innerHTML = `<h3>🤝 Handelsangebot von ${escapeHtml(t.fromName)}</h3><p>Bietet dir an:</p>`;
+      panel.appendChild(tradeChips(t.offerCardIds));
+
+      if (t.status === 'countered') {
+        panel.appendChild(textNode('Du verlangst dafür:'));
+        panel.appendChild(tradeChips(t.counterCardIds));
+        panel.appendChild(tradeVsLine(t.counterCardIds, t.offerCardIds));
+        panel.appendChild(textNode(`Wartet auf Bestätigung von ${t.fromName}...`));
+        box.appendChild(panel);
+        return;
+      }
 
       const actions = document.createElement('div');
       actions.className = 'row gap wrap'; actions.style.marginTop = '10px';
-      const acceptBtn = mkBtn('Annehmen', () => socket.emit('respondTrade', { tradeId: t.id, accept: true, counterCardIds: [] }));
-      acceptBtn.className = 'primary';
-      const counterBtn = mkBtn('Annehmen + selbst etwas geben...', () => { tradeCounterForId = t.id; tradeCounterSelection = new Set(); renderTradeArea(); });
+      const counterBtn = mkBtn('Gegenleistung festlegen...', () => { tradeCounterForId = t.id; tradeCounterSelection = new Set(); renderTradeArea(); });
+      counterBtn.className = 'primary';
+      const giftBtn = mkBtn('Annehmen, ohne etwas zu geben', () => socket.emit('respondTrade', { tradeId: t.id, accept: true, counterCardIds: [] }));
       const declineBtn = mkBtn('Ablehnen', () => socket.emit('respondTrade', { tradeId: t.id, accept: false }));
       declineBtn.className = 'danger';
-      actions.appendChild(acceptBtn); actions.appendChild(counterBtn); actions.appendChild(declineBtn);
+      actions.appendChild(counterBtn); actions.appendChild(giftBtn); actions.appendChild(declineBtn);
       panel.appendChild(actions);
 
       if (tradeCounterForId === t.id) {
-        panel.appendChild(tradePickGrid(myInfo.hand, tradeCounterSelection));
-        const confirmBtn = mkBtn('Gegenangebot bestätigen & annehmen', () => {
+        panel.appendChild(tradePickGrid(myTradableIds(), tradeCounterSelection));
+        const mine = Array.from(tradeCounterSelection);
+        panel.appendChild(tradeVsLine(mine, t.offerCardIds));
+        const confirmBtn = mkBtn('Gegenleistung verlangen', () => {
+          if (!tradeCounterSelection.size) return;
           socket.emit('respondTrade', { tradeId: t.id, accept: true, counterCardIds: Array.from(tradeCounterSelection) });
           tradeCounterForId = null; tradeCounterSelection = new Set();
         });
         confirmBtn.className = 'primary'; confirmBtn.style.marginTop = '6px';
+        confirmBtn.disabled = !tradeCounterSelection.size;
         panel.appendChild(confirmBtn);
       }
       box.appendChild(panel);
     });
 
+    // 3. Meine eigenen Angebote - warten bzw. Gegenleistung bestätigen
     (myInfo.outgoingTrades || []).forEach((t) => {
       const panel = document.createElement('div');
       panel.className = 'tradebox';
-      const names = t.offerCardIds.map((id) => card(id).name).join(', ');
-      panel.innerHTML = `<h3>🤝 Dein Angebot an ${escapeHtml(t.toName)}</h3><p>Du bietest an: <b>${escapeHtml(names)}</b> - wartet auf Antwort...</p>`;
-      const cancelBtn = mkBtn('Zurückziehen', () => socket.emit('cancelTrade', { tradeId: t.id }));
-      panel.appendChild(cancelBtn);
+      panel.innerHTML = `<h3>🤝 Dein Angebot an ${escapeHtml(t.toName)}</h3><p>Du bietest:</p>`;
+      panel.appendChild(tradeChips(t.offerCardIds));
+
+      const actions = document.createElement('div');
+      actions.className = 'row gap wrap'; actions.style.marginTop = '10px';
+      if (t.status === 'countered') {
+        panel.appendChild(textNode(`${t.toName} verlangt dafür:`));
+        panel.appendChild(tradeChips(t.counterCardIds));
+        panel.appendChild(tradeVsLine(t.offerCardIds, t.counterCardIds));
+        const okBtn = mkBtn('Tausch bestätigen', () => socket.emit('respondTrade', { tradeId: t.id, accept: true }));
+        okBtn.className = 'primary';
+        const noBtn = mkBtn('Gegenleistung ablehnen', () => socket.emit('respondTrade', { tradeId: t.id, accept: false }));
+        noBtn.className = 'danger';
+        actions.appendChild(okBtn); actions.appendChild(noBtn);
+      } else {
+        panel.appendChild(textNode(`Wert: ${goldSum(t.offerCardIds)} Goldstücke - wartet auf Antwort von ${t.toName}...`));
+        actions.appendChild(mkBtn('Zurückziehen', () => socket.emit('cancelTrade', { tradeId: t.id })));
+      }
+      panel.appendChild(actions);
       box.appendChild(panel);
     });
   }
