@@ -284,6 +284,13 @@ function run() {
     polly.room.logs.some((l) => l.text.includes('Schatzkarte(n)') && l.text.includes('keine Stufe')),
     'der Verlauf muss Schatz ohne Stufe nennen'
   );
+  // Auch der verbrauchte Trank muss auf dem Stapel seines eigenen Typs landen:
+  // Kampf-Tränke sind Schatzkarten und wurden beim Neumischen des Türstapels
+  // sonst zu Türkarten (siehe Tod-Test weiter unten).
+  assert.ok(polly.room.treasureDiscard.includes(polly.potionId), 'der verbrauchte Kampf-Trank ist eine Schatzkarte und gehört auf den Schatz-Ablagestapel');
+  assert.ok(!polly.room.doorDiscard.includes(polly.potionId), 'der verbrauchte Kampf-Trank darf nicht auf dem Tür-Ablagestapel landen');
+  polly.room.doorDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'door', 'auf dem Tür-Ablagestapel darf nur type=door liegen'));
+  polly.room.treasureDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'treasure', 'auf dem Schatz-Ablagestapel darf nur type=treasure liegen'));
 
   const irrelevanz = potionRoom('TRANK DER IRRELEVANZ');
   handlePlayCombatCard(irrelevanz.room, 'p1', irrelevanz.potionId);

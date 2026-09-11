@@ -2156,7 +2156,9 @@ function handlePlayCombatCard(room, playerId, cardId) {
     return;
   }
   removeFromHand(player, cardId);
-  room.doorDiscard.push(cardId); // treasure_other-Karten landen mechanisch wie alle "Nur einmal einsetzbar"-Karten im Ablagestapel
+  // Über discardCard(), weil Kampf-Tränke type 'treasure' sind: auf dem
+  // Tür-Ablagestapel würden sie beim Neumischen (drawDoor) zu Türkarten.
+  discardCard(room, cardId);
   if (spec.type === 'modifier' && spec.side === 'either') {
     openCardChoice(room, player, c.name, [
       { id: 'munchkins', label: `+${spec.amount} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount: spec.amount } },
