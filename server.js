@@ -360,12 +360,19 @@ function sendInfoTo(room, player) {
   if (!player.socketId) return;
   const trades = room.trades || [];
   // Handelsangebote sind privat, bis sie angenommen wurden (sie verraten
-  // Handkarten) - jede:r sieht nur die eigenen offenen Angebote, nicht die
+  // Handkarten) - jede:r sieht nur die eigenen offenen Angebote (inklusive
+  // der Gegenleistung, die nur die beiden Beteiligten betrifft), nicht die
   // aller anderen. Nach Annahme landet das Ergebnis öffentlich im Verlauf.
-  const incomingTrades = trades.filter((t) => t.status === 'pending' && t.toId === player.id)
-    .map((t) => ({ id: t.id, fromId: t.fromId, fromName: (findPlayer(room, t.fromId) || {}).name || '?', offerCardIds: t.offerCardIds }));
-  const outgoingTrades = trades.filter((t) => t.status === 'pending' && t.fromId === player.id)
-    .map((t) => ({ id: t.id, toId: t.toId, toName: (findPlayer(room, t.toId) || {}).name || '?', offerCardIds: t.offerCardIds }));
+  const mapTrade = (t) => ({
+    id: t.id,
+    status: t.status,
+    fromId: t.fromId, fromName: (findPlayer(room, t.fromId) || {}).name || '?',
+    toId: t.toId, toName: (findPlayer(room, t.toId) || {}).name || '?',
+    offerCardIds: t.offerCardIds,
+    counterCardIds: t.counterCardIds || [],
+  });
+  const incomingTrades = trades.filter((t) => t.toId === player.id).map(mapTrade);
+  const outgoingTrades = trades.filter((t) => t.fromId === player.id).map(mapTrade);
   io.to(player.socketId).emit('yourInfo', {
     playerId: player.id,
     hand: player.hand,
@@ -1991,59 +1998,122 @@ function handleEndTurnAction(room, playerId) {
 }
 
 // ---------------------------------------------------------------------------
-// Handel zwischen Spielenden (Gold- und andere Karten) - jederzeit möglich,
-// nicht an Zug/Phase gebunden, ganz wie am echten Tisch. Da Handkarten privat
-// sind, kann man nur die eigenen Karten anbieten; die Gegenseite wählt beim
-// Annehmen selbst, was sie (falls überhaupt) zurückgibt - so muss nie auf
-// fremde Handkarten Bezug genommen werden, die man gar nicht kennt.
+// Handel zwischen Spielenden - jederzeit möglich, nicht an Zug/Phase
+// gebunden, ganz wie am echten Tisch. Tauschbar sind Handkarten UND angelegte
+// Gegenstände; beim Empfänger landet alles auf der Hand (Anlegen bleibt eine
+// eigene Aktion, damit Größen-/Slot-Regeln weiter gelten).
+//
+// Echter Tausch - beide Seiten müssen zustimmen:
+//   1. proposeTrade: Angebot an eine Person (Status "pending").
+//   2. respondTrade der Gegenseite: ablehnen, ohne Gegenleistung annehmen
+//      (dann sofort fertig - Geschenk) oder eine Gegenleistung festlegen
+//      (Status "countered").
+//   3. respondTrade des/der Anbietenden: sieht die Gegenleistung und
+//      bestätigt oder lehnt ab. cancelTrade zieht das Angebot zurück.
+// Ein offener Handel pro Richtung; Angebote stehen nur im privaten yourInfo
+// der beiden Beteiligten, im öffentlichen Verlauf nur Anzahlen bzw. das
+// Ergebnis.
 // ---------------------------------------------------------------------------
+
+// Handelbar ist alles, was man wirklich besitzt: Handkarten und angelegte
+// Gegenstände (Zweihandwaffen stehen in zwei Slots -> dedupliziert).
+function tradableCardIds(player) {
+  return [...new Set([...player.hand, ...equippedItemIds(player)])];
+}
+
+// Fremde IDs auf das reduzieren, was diese Person gerade wirklich besitzt.
+function ownTradeIds(player, ids) {
+  const own = tradableCardIds(player);
+  return [...new Set(Array.isArray(ids) ? ids : [])].filter((id) => own.includes(id));
+}
+
+// Karte aus Hand oder Slot lösen (Slot-Variante wie beim Verkaufen).
+function takeTradedCard(player, cardId) {
+  if (player.hand.includes(cardId)) removeFromHand(player, cardId);
+  else unequipSlotCard(player, cardId);
+}
+
+function tradeGoldSum(ids) {
+  return ids.reduce((sum, id) => { const c = card(id); return sum + (c && typeof c.gold === 'number' ? c.gold : 0); }, 0);
+}
 
 function handleProposeTrade(room, playerId, toId, offerCardIds) {
   const from = findPlayer(room, playerId);
   const to = findPlayer(room, toId);
   if (!from || !to || from.id === to.id || !to.connected) return;
-  const ids = [...new Set(offerCardIds || [])].filter((id) => from.hand.includes(id));
+  const ids = ownTradeIds(from, offerCardIds);
   if (!ids.length) return;
   if (!room.trades) room.trades = [];
-  // Nur ein offenes Angebot pro Richtung gleichzeitig - ein neues ersetzt ein altes.
-  room.trades = room.trades.filter((t) => !(t.fromId === from.id && t.toId === to.id && t.status === 'pending'));
-  room.trades.push({ id: makeId(), fromId: from.id, toId: to.id, offerCardIds: ids, status: 'pending', at: Date.now() });
+  // Nur ein offener Handel pro Richtung gleichzeitig - ein neues Angebot ersetzt ein altes.
+  room.trades = room.trades.filter((t) => !(t.fromId === from.id && t.toId === to.id));
+  room.trades.push({ id: makeId(), fromId: from.id, toId: to.id, offerCardIds: ids, counterCardIds: [], status: 'pending', at: Date.now() });
   log(room, `${from.name} bietet ${to.name} einen Handel an (${ids.length} Karte(n)).`);
   touchRoom(room);
 }
 
 function handleCancelTrade(room, playerId, tradeId) {
   if (!room.trades) return;
-  const trade = room.trades.find((t) => t.id === tradeId && t.status === 'pending' && t.fromId === playerId);
+  const trade = room.trades.find((t) => t.id === tradeId && t.fromId === playerId);
   if (!trade) return;
-  room.trades = room.trades.filter((t) => t.id !== tradeId);
+  room.trades = room.trades.filter((t) => t.id !== trade.id);
   const from = findPlayer(room, playerId);
   log(room, `${from.name} zieht ein Handelsangebot zurück.`);
   touchRoom(room);
 }
 
+// Antwort auf einen Handel - je nach Status und Rolle Schritt 2 oder 3.
 function handleRespondTrade(room, playerId, tradeId, accept, counterCardIds) {
   if (!room.trades) return;
-  const trade = room.trades.find((t) => t.id === tradeId && t.status === 'pending' && t.toId === playerId);
+  const trade = room.trades.find((t) => t.id === tradeId);
   if (!trade) return;
   const from = findPlayer(room, trade.fromId);
   const to = findPlayer(room, trade.toId);
-  room.trades = room.trades.filter((t) => t.id !== tradeId);
-  if (!from || !to) return;
-  if (!accept) {
-    log(room, `${to.name} lehnt den Handel von ${from.name} ab.`);
+  if (!from || !to) { room.trades = room.trades.filter((t) => t.id !== trade.id); return; }
+
+  // Schritt 2: die angefragte Seite antwortet auf das Angebot.
+  if (trade.status === 'pending' && playerId === to.id) {
+    if (!accept) {
+      room.trades = room.trades.filter((t) => t.id !== trade.id);
+      log(room, `${to.name} lehnt den Handel von ${from.name} ab.`);
+      touchRoom(room);
+      return;
+    }
+    const counterIds = ownTradeIds(to, counterCardIds);
+    // Ohne Gegenleistung ist es ein Geschenk - dafür braucht es keine zweite
+    // Bestätigung, das Angebot stand ja genau so da.
+    if (!counterIds.length) { finishTrade(room, trade, from, to, []); return; }
+    trade.counterCardIds = counterIds;
+    trade.status = 'countered';
+    log(room, `${to.name} will für den Handel mit ${from.name} eine Gegenleistung (${counterIds.length} Karte(n)) - ${from.name} muss noch bestätigen.`);
     touchRoom(room);
     return;
   }
-  // Erneut gegen die aktuelle Hand prüfen - die Karten könnten seither
-  // anderweitig verwendet worden sein (abgelegt, angelegt, verkauft, ...).
-  const offerIds = trade.offerCardIds.filter((id) => from.hand.includes(id));
-  const counterIds = [...new Set(counterCardIds || [])].filter((id) => to.hand.includes(id));
-  offerIds.forEach((id) => { removeFromHand(from, id); to.hand.push(id); });
-  counterIds.forEach((id) => { removeFromHand(to, id); from.hand.push(id); });
-  const offerNames = offerIds.map((id) => card(id).name).join(', ') || '(nichts mehr davon verfügbar)';
-  const counterNames = counterIds.length ? counterIds.map((id) => card(id).name).join(', ') : '(nichts zurück)';
-  log(room, `Handel: ${from.name} gibt [${offerNames}] an ${to.name}, erhält dafür [${counterNames}].`, [...offerIds, ...counterIds]);
+
+  // Schritt 3: der/die Anbietende sieht die Gegenleistung und entscheidet.
+  if (trade.status === 'countered' && playerId === from.id) {
+    if (!accept) {
+      room.trades = room.trades.filter((t) => t.id !== trade.id);
+      log(room, `${from.name} lehnt die Gegenleistung von ${to.name} ab.`);
+      touchRoom(room);
+      return;
+    }
+    finishTrade(room, trade, from, to, trade.counterCardIds);
+  }
+}
+
+function finishTrade(room, trade, from, to, counterCardIds) {
+  room.trades = room.trades.filter((t) => t.id !== trade.id);
+  // Erneut gegen den aktuellen Zustand prüfen - die Karten könnten seither
+  // abgelegt, verkauft oder angelegt worden sein. Was weg ist, wird
+  // übersprungen; der Rest wird getauscht.
+  const offerIds = ownTradeIds(from, trade.offerCardIds);
+  const counterIds = ownTradeIds(to, counterCardIds);
+  offerIds.forEach((id) => { takeTradedCard(from, id); to.hand.push(id); });
+  counterIds.forEach((id) => { takeTradedCard(to, id); from.hand.push(id); });
+  const names = (ids) => ids.map((id) => { const c = card(id); return c ? c.name : id; }).join(', ');
+  const offerText = offerIds.length ? `${names(offerIds)} - ${tradeGoldSum(offerIds)} GS` : '(nichts mehr davon verfügbar)';
+  const counterText = counterIds.length ? `${names(counterIds)} - ${tradeGoldSum(counterIds)} GS` : '(nichts zurück)';
+  log(room, `Handel: ${from.name} gibt [${offerText}] an ${to.name}, erhält dafür [${counterText}].`, [...offerIds, ...counterIds]);
   touchRoom(room);
 }
 
@@ -2364,4 +2434,5 @@ module.exports = {
   POWER_GROUP_NAMES, GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
   handleDrawDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
   handleApplyConsequenceAction,
+  handleProposeTrade, handleCancelTrade, handleRespondTrade, tradableCardIds,
 };
