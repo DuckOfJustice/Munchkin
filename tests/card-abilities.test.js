@@ -53,7 +53,7 @@ function run() {
   const sinnierenLong = TREASURE_POWER_OVERRIDES['SINNIEREN'](makePlayer({ hand: ['a', 'b', 'c'] }));
   assert.strictEqual(sinnierenLong.options.length, 2, 'SINNIEREN bietet bei >=3 Handkarten beide Optionen an');
 
-  assert.strictEqual(TREASURE_POWER_OVERRIDES['TÖTE DEN MIETLING'](), null, 'TÖTE DEN MIETLING bleibt bewusst manuell (Mietling-in-Spiel wird nicht getrackt)');
+  assert.strictEqual(TREASURE_POWER_OVERRIDES['ENTE DER VIELEN SACHEN'](), null, 'ENTE DER VIELEN SACHEN bleibt bewusst manuell ("nach einem beliebigen Kampf" ist keine gepruefte Zeitbedingung)');
 
   // -------------------------------------------------------------------
   // Kampf-Tränke
@@ -405,8 +405,12 @@ function run() {
   });
 
   // MIETLING wurde aus dem Spiel genommen.
-  assert.strictEqual(ALL_CARDS.filter((c) => c.name === 'MIETLING').length, 0,
-    'die Mietling-Karte darf in keinem Set mehr auftauchen');
+  ['MIETLING', 'TÖTE DEN MIETLING'].forEach((name) => {
+    assert.strictEqual(ALL_CARDS.filter((c) => c.name === name).length, 0,
+      `${name} wurde aus dem Spiel genommen und darf in keinem Set mehr auftauchen`);
+  });
+  assert.strictEqual(TREASURE_POWER_OVERRIDES['TÖTE DEN MIETLING'], undefined,
+    'und auch keinen Eintrag mehr in den Schatzkraft-Sonderfaellen haben');
 
   // -------------------------------------------------------------------
   // Monster-Verstärker verändern auch die Beute: "Wird das Monster besiegt,

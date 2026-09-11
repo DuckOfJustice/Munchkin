@@ -1394,23 +1394,6 @@
     "treasureCount": null
   },
   {
-    "id": "22f8ccc0-072b-4c86-ab72-0d12bec6fe01",
-    "set": "base",
-    "setLabel": "Base (Grundspiel)",
-    "type": "treasure",
-    "category": "treasure_other",
-    "name": "TÖTE DEN MIETLING",
-    "text": "Steige eine Stufe auf<br>Du kannst diese Karte nur benutzen, wenn Mietling im Spiel ist (egal, wer ihn besitzt). Lege Mietling ab.",
-    "badstuff": "",
-    "gold": null,
-    "bonus": null,
-    "slotLabel": null,
-    "slotKind": null,
-    "handsCost": 0,
-    "level": null,
-    "treasureCount": null
-  },
-  {
     "id": "11a0ccea-b9ac-4a91-a00e-a6a227da377c",
     "set": "base",
     "setLabel": "Base (Grundspiel)",

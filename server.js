@@ -248,6 +248,7 @@ const SPECIAL_SLOT_ITEMS = {
   'STRUMPFHOSE DER RIESENSTÄRK': { slot: 'special' },
   'WIRKLICH BEEINDRUCKENDER TITEL': { slot: 'special' },
   'VERDUNKELUNGSUMHANG': { slot: 'special' },
+  'TRITTLEITER': { slot: 'special' },
   // "aber nur fuer Halblinge"
   'LIMBURGER UND SARDELLEN-SANDWICH': { slot: 'special', races: ['HALBLING'] },
   // Ruestungsteil fuer die Beine - eigener Platz, nicht der Ruestungsplatz.
@@ -1374,7 +1375,6 @@ const TREASURE_POWER_OVERRIDES = {
   // nicht separat verfolgt (Mietling "im Spiel" ist keine eigene Zone;
   // "nach einem beliebigen Kampf" ist keine geprüfte Zeitbedingung; die
   // Mehrfach-Effekt-Kette betrifft mehrere Spieler in fester Reihenfolge). ---
-  'TÖTE DEN MIETLING': () => null,
   'ENTE DER VIELEN SACHEN': () => null,
 
   // --- Sonstige Einzelfälle ---
