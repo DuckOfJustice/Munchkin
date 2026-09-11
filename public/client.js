@@ -1231,12 +1231,12 @@
     'ENTLASSUNGSGLOCKE', 'CYTILLESH-TRANK', 'TRANK DES MUNDGERUCHS',
     'YUPPIE-WASSER', 'FLÜSSIGKLINGE', 'VERZAUBERARMBAND',
   ]);
-  const COMBAT_PLAYABLE_RE = /Im Kampf (spielen|einsetzen)|Während\s+(eines\s+)?beliebige[nm]\s+Kampf(es)?\s+spielen/i;
+  const COMBAT_PLAYABLE_RE = /im\s+Kampf\b|Während\s+(eines\s+)?beliebige[nm]\s+Kampf(es)?\s+spielen/i;
 
   function combatPotionAmountFound(rawText) {
     const t = String(rawText || '').replace(/\\n/g, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<\/?[bi]>/gi, '');
     return /\+\d+\s+für\s+beide\s+Seiten/i.test(t) ||
-      /\+\d+\s+(?:für\s+eine\s+der\s+Parteien,\s+)?egal\s+(?:für\s+welche|welche)\s+Seite/i.test(t) ||
+      /\+\d+[,\s]+(?:für\s+)?(?:eine\s+der\s+Parteien,\s*)?egal[,\s]+(?:für\s+)?welche\s+Seite/i.test(t) ||
       /\+\d+\s+nur\s+für\s+Monster/i.test(t) ||
       /\+\d+\s+für\s+die\s+Munchkin-Seite/i.test(t);
   }

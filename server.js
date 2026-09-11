@@ -1885,6 +1885,7 @@ function startCombat(room, actorId, monsterIds, opts) {
     fromHand: !!opts.fromHand,
     classDiscards: {}, // "<playerId>:combat"/"<playerId>:flee" -> Anzahl bereits abgeworfener Karten
     fleeBonus: 0,      // Summe der Flugzauber-Karten
+    treasureDelta: 0,  // Schatzbonus/-malus gespielter Monster-Verstärker
     ready: {},         // playerId -> true, sobald jemand die Auswertung freigibt
     readySignature: null,
   };
@@ -2021,13 +2022,19 @@ function isMonsterEnhancerCard(c) {
 // eine Seite geben (anders als Monster-Verstärker steht die Zahl hier nur im
 // Fließtext, nicht in einem eigenen bonus-Feld). Deckt die weitaus häufigste
 // Formulierung ab; seltenere Sonderfälle stehen in COMBAT_POTION_OVERRIDES.
-const COMBAT_PLAYABLE_RE = /Im Kampf (spielen|einsetzen)|Während\s+(eines\s+)?beliebige[nm]\s+Kampf(es)?\s+spielen/i;
+// Das bloße "im Kampf" reicht als Spielbarkeits-Hinweis, weil
+// isCombatPotionCard zusätzlich einen geparsten +N-Bonus verlangt
+// ("Sorgen im Kampf für Ablenkung. +5, egal für welche Seite.").
+const COMBAT_PLAYABLE_RE = /im\s+Kampf\b|Während\s+(eines\s+)?beliebige[nm]\s+Kampf(es)?\s+spielen/i;
 
 function parseCombatPotion(rawText) {
   const t = normalizeCardText(rawText);
   let m = t.match(/\+(\d+)\s+für\s+beide\s+Seiten/i);
   if (m) return { side: 'both', amount: parseInt(m[1], 10) };
-  m = t.match(/\+(\d+)\s+(?:für\s+eine\s+der\s+Parteien,\s+)?egal\s+(?:für\s+welche|welche)\s+Seite/i);
+  // Alle Schreibweisen des Grundspiels: "+2 egal für welche Seite", "+5 für
+  // egal welche Seite", "+5, egal für welche Seite", "+3 für eine der
+  // Parteien, egal für welche Seite".
+  m = t.match(/\+(\d+)[,\s]+(?:für\s+)?(?:eine\s+der\s+Parteien,\s*)?egal[,\s]+(?:für\s+)?welche\s+Seite/i);
   if (m) return { side: 'either', amount: parseInt(m[1], 10) };
   m = t.match(/\+(\d+)\s+nur\s+für\s+Monster/i);
   if (m) return { side: 'monster', amount: parseInt(m[1], 10) };
@@ -2206,8 +2213,14 @@ function handlePlayCombatCard(room, playerId, cardId) {
   if (isMonsterEnhancerCard(c)) {
     removeFromHand(player, cardId);
     room.combat.monsterModifier += c.bonus;
+    // "Wird das Monster besiegt, ziehe 2 zusätzliche Schätze" (GIGANTISCH,
+    // URALT) bzw. "ziehe 1 Schatz weniger, mindestens 1" (BABY): der Wert
+    // steckt in treasureCount der Verstärkerkarte. Aufgesammelt hier,
+    // ausgezahlt in resolveCombatWin.
+    const delta = typeof c.treasureCount === 'number' ? c.treasureCount : 0;
+    if (delta) room.combat.treasureDelta = (room.combat.treasureDelta || 0) + delta;
     room.doorDiscard.push(cardId);
-    log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster).`, [cardId]);
+    log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
     touchRoom(room);
     return;
   }
@@ -2340,7 +2353,11 @@ function resolveCombatWin(room) {
   const extras = monsterVictoryExtras(room, actor, helper, monsters);
   const levelsGained = monsters.length + extras.levels;
   setLevel(actor, actor.level + levelsGained);
-  const treasureCount = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0) + extras.treasures;
+  const baseTreasures = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0) + extras.treasures;
+  // Monster-Verstärker aus dem Kampf zählen mit; BABY sagt ausdrücklich
+  // "mindestens 1", deshalb die Untergrenze - aber nur, wenn überhaupt ein
+  // Verstärker im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
+  const treasureCount = c.treasureDelta ? Math.max(1, baseTreasures + c.treasureDelta) : baseTreasures;
   const drawn = [];
   for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache

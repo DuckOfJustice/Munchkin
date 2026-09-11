@@ -340,6 +340,65 @@ function run() {
   armbandCheck.room.players[0].hand = [armbandCheck.potionId, armbandPay[0]];
   assert.strictEqual(armbandSpec(), null, 'ohne 3 ablegbare Karten nicht einsetzbar');
 
+  // -------------------------------------------------------------------
+  // Monster-Verstärker verändern auch die Beute: "Wird das Monster besiegt,
+  // ziehe 2 zusätzliche Schätze" (GIGANTISCH, URALT) bzw. "ziehe 1 Schatz
+  // weniger (mindestens 1)" (BABY). Der Wert steht in treasureCount der
+  // Verstärkerkarte und wurde vorher ignoriert - der Bonus/Malus auf die
+  // Kampfstärke wirkte, die Beute blieb unverändert.
+  // -------------------------------------------------------------------
+  const tc1Monster = ALL_CARDS.find((c) => c.category === 'monster' && c.treasureCount === 1);
+  function enhancerRoom(enhancerName, monsterId) {
+    const r = potionRoom('POLLYVERWANDLUNGSTRANK'); // gleicher Testraum, der Trank bleibt ungespielt
+    const enh = findCard(enhancerName, 'door_other');
+    r.room.players[0].hand = [enh.id];
+    r.room.players[0].level = 1;
+    r.room.combat.actorModifier = 40; // Sieg garantieren, ohne an der Stufe zu drehen
+    if (monsterId) r.room.combat.monsterIds = [monsterId];
+    return { room: r.room, enhancerId: enh.id, enh };
+  }
+
+  const gigantisch = enhancerRoom('GIGANTISCH');
+  handlePlayCombatCard(gigantisch.room, 'p1', gigantisch.enhancerId);
+  assert.strictEqual(gigantisch.room.combat.monsterModifier, gigantisch.enh.bonus,
+    'GIGANTISCH verstärkt das Monster wie bisher');
+  assert.strictEqual(gigantisch.room.combat.treasureDelta, gigantisch.enh.treasureCount,
+    'der Schatzbonus des Verstärkers wird für die Auswertung gemerkt');
+  handleEvaluateCombat(gigantisch.room, 'p1');
+  if (gigantisch.room.cleanupTimer) clearTimeout(gigantisch.room.cleanupTimer);
+  assert.strictEqual(gigantisch.room.players[0].hand.length, lootMonster.treasureCount + gigantisch.enh.treasureCount,
+    '"ziehe 2 zusätzliche Schätze" muss sich in der Beute niederschlagen');
+
+  // BABY: "ziehe 1 Schatz weniger (mindestens 1)" - an einem Monster mit nur
+  // einem Schatz greift ausdrücklich die Untergrenze.
+  const baby = enhancerRoom('BABY', tc1Monster.id);
+  handlePlayCombatCard(baby.room, 'p1', baby.enhancerId);
+  assert.strictEqual(baby.room.combat.treasureDelta, -1, 'BABY merkt sich den Schatzmalus');
+  handleEvaluateCombat(baby.room, 'p1');
+  if (baby.room.cleanupTimer) clearTimeout(baby.room.cleanupTimer);
+  assert.strictEqual(baby.room.players[0].hand.length, 1,
+    'BABY zieht einen Schatz ab, aber "mindestens 1" bleibt');
+
+  // -------------------------------------------------------------------
+  // Kampf-Tränke, die der Textparser vorher nicht erkannt hat: "+5 für egal
+  // welche Seite" (für VOR egal) und "+5, egal für welche Seite" (Komma),
+  // dazu ein Spielbarkeits-Satz ohne "spielen"/"einsetzen".
+  // -------------------------------------------------------------------
+  ['ELEKTRISCHRADIOAKTIVER SAURETRANK', 'MAGISCHES GESCHOSS', 'HÜBSCHE LUFTBALLONS'].forEach((name) => {
+    const c = findCard(name, 'treasure_other');
+    assert.deepStrictEqual(parseCombatPotion(c.text), { side: 'either', amount: 5 },
+      `${name}: +5 für eine frei wählbare Seite muss aus dem Text gelesen werden`);
+    assert.ok(isCombatPotionCard(c), `${name} muss als Kampf-Trank spielbar sein`);
+  });
+
+  const geschoss = potionRoom('MAGISCHES GESCHOSS');
+  handlePlayCombatCard(geschoss.room, 'p1', geschoss.potionId);
+  if (geschoss.room.cleanupTimer) clearTimeout(geschoss.room.cleanupTimer);
+  assert.ok(geschoss.room.pendingCardAction && geschoss.room.pendingCardAction.kind === 'choice',
+    'bei "egal für welche Seite" muss die Seite abgefragt werden');
+  assert.strictEqual(geschoss.room.pendingCardAction.options.length, 2,
+    'genau zwei Seiten zur Wahl: Munchkins oder Monster');
+
   // Gegenprobe: ALUFOLIE darf einen echten Rückstand nicht in einen Sieg drehen.
   const behind = combatRoomTie([alufolie.id]);
   behind.players[0].level = monster.level - 1;
