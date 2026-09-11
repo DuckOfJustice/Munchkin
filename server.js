@@ -1424,7 +1424,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoTreasure', 'removeHelper', 'killMonsterInCombat']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -1970,15 +1970,17 @@ function parseCombatPotion(rawText) {
 const COMBAT_POTION_OVERRIDES = {
   // "Lege alle Monster des Kampfes ab. Du erhältst keinen Schatz, aber du
   // darfst den Raum durchsuchen."
-  'FREUNDSCHAFTSTRANK': () => ({ type: 'endCombatNoTreasure', thenLoot: true }),
+  'FREUNDSCHAFTSTRANK': () => ({ type: 'endCombatNoLevel', thenLoot: true }),
   // "Verwandelt ein Monster in einen Papagei, der wegfliegt und seinen
-  // Schatz zurücklässt."
-  'POLLYVERWANDLUNGSTRANK': () => ({ type: 'endCombatNoTreasure' }),
+  // Schatz zurücklässt." -> Schatz gehört der kämpfenden Person.
+  'POLLYVERWANDLUNGSTRANK': () => ({ type: 'endCombatNoLevel', leavesTreasure: true }),
   // "Bringt ein Monster dazu, verwirrt wegzulaufen und seinen Schatz
-  // zurückzulassen."
-  'TRANK DER IRRELEVANZ': () => ({ type: 'endCombatNoTreasure' }),
-  // "Lege das Monster nach unten in den Türstapel zurück."
-  'ENTLASSUNGSGLOCKE': () => ({ type: 'endCombatNoTreasure', returnToDoorDeckBottom: true }),
+  // zurückzulassen." -> ebenfalls Schatz, aber keine Stufe.
+  'TRANK DER IRRELEVANZ': () => ({ type: 'endCombatNoLevel', leavesTreasure: true }),
+  // "Lege das Monster nach unten in den Türstapel zurück. Wenn es das
+  // einzige Monster im Kampf war, ist der Kampf vorbei und der aktuelle
+  // Spieler plündert den Raum." (kein Schatz - das Monster nimmt ihn mit)
+  'ENTLASSUNGSGLOCKE': () => ({ type: 'endCombatNoLevel', returnToDoorDeckBottom: true, thenLoot: true }),
   // "Der Helfer vergisst, dass er kämpft, geht und lässt den Hauptkämpfer
   // allein im Kampf zurück." (nur spielbar, wenn ein Helfer im Kampf ist)
   'CYTILLESH-TRANK': (player, room) => (room.combat.helperId ? { type: 'removeHelper' } : null),
@@ -2027,13 +2029,34 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.actorModifier += amount;
       return `+${amount} für die Munchkins`;
     }
-    case 'endCombatNoTreasure': {
-      const names = c.monsterIds.map((id) => card(id).name).join(' + ');
+    // Kampf endet, ohne dass ein Monster besiegt wurde: nie Stufen. Ob es
+    // Schatz gibt, sagt der Kartentext - "lässt seinen Schatz zurück"
+    // (leavesTreasure) gegen "du erhältst keinen Schatz".
+    case 'endCombatNoLevel': {
+      const monsters = c.monsterIds.map(card);
+      const names = monsters.map((m) => m.name).join(' + ');
       if (action.returnToDoorDeckBottom) c.monsterIds.forEach((id) => room.doorDeck.unshift(id));
       else c.monsterIds.forEach((id) => room.doorDiscard.push(id));
+      const drawn = [];
+      if (action.leavesTreasure) {
+        // Schatz wie beim Sieg: an die kämpfende Person, nicht an die, die
+        // den Trank gespielt hat (jede:r am Tisch darf ihn einwerfen).
+        const actor = findPlayer(room, c.actorId) || player;
+        const treasureCount = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0);
+        for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+        drawn.forEach((id) => actor.hand.push(id));
+        actor.lastReward = {
+          seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
+          cardIds: drawn,
+          levelsGained: 0,
+          monsterNames: monsters.map((m) => m.name),
+        };
+      }
       room.combat = null;
       room.turnPhase = action.thenLoot ? 'pluendern' : 'gabe';
-      return `Kampf gegen ${names} beendet, kein Schatz`;
+      return action.leavesTreasure
+        ? `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`
+        : `Kampf gegen ${names} beendet, kein Schatz`;
     }
     case 'removeHelper': {
       const helper = findPlayer(room, c.helperId);
@@ -2890,5 +2913,5 @@ module.exports = {
   CLASS_COMBAT_DISCARD, CLASS_FLEE_DISCARD, UNDEAD_MONSTERS,
   handleUseClassCombatDiscard, classCombatPowerInfo,
   handleSetCombatReady, combatReadyRequired, combatAllReady, refreshCombatReady,
-  handleSetCombatModifier,
+  handleSetCombatModifier, handlePlayCombatCard,
 };
