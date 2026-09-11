@@ -838,7 +838,14 @@
       div.appendChild(ask);
     }
 
-    if (iAmActor && c.mustFlee) {
+    // HALBLING: nach dem verpatzten ersten Wurf noch eine Entscheidung -
+    // 1 Handkarte ablegen und nochmal würfeln (Knopf an der Karte) oder das
+    // Miese Zeug hinnehmen. Solange das offen ist, kein neuer Wurf.
+    if (iAmActor && c.fleeRerollOffer) {
+      div.appendChild(textNode('Halbling: Lege 1 Handkarte ab (Knopf unter der Karte), um noch einmal weglaufen zu würfeln - oder stell dich dem Miesen Zeug.'));
+      const acceptBtn = mkBtn('Miesem Zeug stellen', () => socket.emit('fleeReroll', { cardId: null }));
+      div.appendChild(acceptBtn);
+    } else if (iAmActor && c.mustFlee) {
       div.appendChild(textNode('Ihr verliert diesen Kampf - jetzt fliehen (Würfelwurf ≥ 5 nötig)!'));
       const fleeRow = document.createElement('div');
       fleeRow.className = 'row gap';
@@ -1151,6 +1158,13 @@
       const suffix = power.kind === 'flee' ? 'auf Weglaufen' : 'im Kampf';
       const btn = mkBtn(`⚔️ ${power.label}: ablegen für +${power.bonus} ${suffix} (noch ${power.remaining})`,
         () => socket.emit('useClassCombatDiscard', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    // HALBLING-Wiederholungswurf: jede Handkarte kann die Karte sein, die
+    // dafür abgelegt wird.
+    if (state.combat && state.combat.fleeRerollOffer && state.combat.actorId === myInfo.playerId) {
+      const btn = mkBtn('🎲 Halbling: ablegen und nochmal weglaufen', () => socket.emit('fleeReroll', { cardId: id }));
+      btn.className = 'primary';
       wrap.appendChild(btn);
     }
     // Garantierte Flucht-Karten: nur die aktuell kämpfende Person, nur

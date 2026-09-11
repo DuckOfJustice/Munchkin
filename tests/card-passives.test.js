@@ -14,7 +14,7 @@ const {
   handleRequestHelp, handleUseGuaranteedFlee, combatTotals, handLimit,
   DOOR_OTHER_AS_CURSE, handleUseClassCombatDiscard, classCombatPowerInfo,
   UNDEAD_MONSTERS, handleSetCombatReady, combatReadyRequired, combatAllReady,
-  refreshCombatReady, handleSetCombatModifier,
+  refreshCombatReady, handleSetCombatModifier, handleFleeReroll, handleSellItems, endTurn,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -247,6 +247,104 @@ function run() {
   assert.strictEqual(tubaRoom.room.dieRoll.mod, 9 + 3 + 1, 'Tuba (+3) und Goblin (+1) kommen zum manuellen Wert dazu');
   assert.strictEqual(tubaRoom.room.players[0].hand.length, handVorher + 1,
     'nach gelungener Flucht bringt die Tuba eine verdeckte Schatzkarte');
+
+  // -------------------------------------------------------------------
+  // HALBLING - war komplett wirkungslos: beide Rassenkraefte fehlten, und
+  // die Monsterboni der Zusatz-Sets, die ausdruecklich Halblinge nennen,
+  // standen nicht in MONSTER_TRAIT_BONUS.
+  // -------------------------------------------------------------------
+  const HALBLING = findCard('HALBLING', 'race').id;
+
+  // "+2 gegen Halblinge." (Affenbande, Clerical Errors)
+  const affen = combatRoom('AFFENBANDE', { level: 1, races: [HALBLING] });
+  const affenTotals = combatTotals(affen.room);
+  done(affen.room);
+  const affenOhne = combatRoom('AFFENBANDE', { level: 1 });
+  const affenOhneTotals = combatTotals(affenOhne.room);
+  done(affenOhne.room);
+  assert.strictEqual(affenTotals.monsterStrength - affenOhneTotals.monsterStrength, 2,
+    'Affenbande: "+2 gegen Halblinge" muss automatisch zaehlen');
+
+  // "Falls du deinen ersten Weglaufwurf verpatzt, darfst du 1 Karte ablegen
+  // und es noch mal probieren." Die Schnecken geben -2, damit scheitert der
+  // Wurf garantiert (max. 6 - 2 = 4, noetig sind 5) - der Test braucht also
+  // kein Glueck.
+  const koeder = findCard('GEILER HELM', 'item').id;
+  const halbFlucht = combatRoom('SCHNECKEN AUF SPEED',
+    { races: [HALBLING], hand: [koeder] }, { mustFlee: true });
+  handleAttemptFlee(halbFlucht.room, 'p1', 0);
+  assert.strictEqual(halbFlucht.room.dieRoll.success, false, 'Testvoraussetzung: der erste Wurf scheitert');
+  assert.ok(halbFlucht.room.combat && halbFlucht.room.combat.fleeRerollOffer,
+    'nach dem verpatzten Wurf muss dem Halbling der zweite Versuch angeboten werden');
+  assert.strictEqual(halbFlucht.room.pendingConsequence, null,
+    'solange das Angebot offen ist, darf das Miese Zeug noch nicht zuschlagen');
+
+  // Ein zweiter Wurf ohne Karte wird nicht geschenkt.
+  handleAttemptFlee(halbFlucht.room, 'p1', 0);
+  assert.ok(halbFlucht.room.combat && halbFlucht.room.combat.fleeRerollOffer,
+    'ein offenes Angebot muss erst beantwortet werden, kein Gratis-Wurf');
+
+  // Karte ablegen -> neuer Wurf; er scheitert wieder (Schnecken), also greift
+  // jetzt das Miese Zeug, und ein drittes Angebot gibt es nicht.
+  handleFleeReroll(halbFlucht.room, 'p1', koeder);
+  done(halbFlucht.room);
+  assert.ok(!halbFlucht.room.players[0].hand.includes(koeder), 'die abgelegte Karte ist von der Hand weg');
+  assert.ok(halbFlucht.room.treasureDiscard.includes(koeder), 'die abgelegte Schatzkarte liegt auf dem Schatz-Ablagestapel');
+  assert.ok(halbFlucht.room.pendingConsequence, 'nach dem zweiten Fehlwurf schlagen die Schlimmen Dinge zu');
+  assert.strictEqual(halbFlucht.room.combat, null, 'nur EIN Wiederholungswurf - danach ist der Kampf vorbei');
+
+  // Ohne Handkarte gibt es nichts abzulegen - dann sofort das Miese Zeug.
+  const halbLeer = combatRoom('SCHNECKEN AUF SPEED', { races: [HALBLING], hand: [] }, { mustFlee: true });
+  handleAttemptFlee(halbLeer.room, 'p1', 0);
+  done(halbLeer.room);
+  assert.ok(halbLeer.room.pendingConsequence, 'ohne Handkarte kein Wiederholungswurf');
+
+  // Das Angebot ablehnen (cardId null) kostet keine Karte.
+  const halbNein = combatRoom('SCHNECKEN AUF SPEED', { races: [HALBLING], hand: [koeder] }, { mustFlee: true });
+  handleAttemptFlee(halbNein.room, 'p1', 0);
+  handleFleeReroll(halbNein.room, 'p1', null);
+  done(halbNein.room);
+  assert.ok(halbNein.room.players[0].hand.includes(koeder), 'wer ablehnt, behaelt seine Karte');
+  assert.ok(halbNein.room.pendingConsequence, 'wer ablehnt, bekommt das Miese Zeug');
+
+  // Vor den Filzlaeusen gibt es kein Entkommen - dann waere die Karte umsonst
+  // weg, also gar kein Angebot.
+  const halbLaeuse = combatRoom('FILZLAUSE', { races: [HALBLING], hand: [koeder] }, { mustFlee: true });
+  handleAttemptFlee(halbLaeuse.room, 'p1', 0);
+  done(halbLaeuse.room);
+  assert.ok(halbLaeuse.room.pendingConsequence, 'gegen ein unentkommbares Monster kein Wiederholungsangebot');
+
+  // Fremdeingabe: eine Karte, die nicht auf der Hand liegt, darf nichts tun.
+  const halbFremd = combatRoom('SCHNECKEN AUF SPEED', { races: [HALBLING], hand: [koeder] }, { mustFlee: true });
+  handleAttemptFlee(halbFremd.room, 'p1', 0);
+  handleFleeReroll(halbFremd.room, 'p1', 'gibt-es-nicht');
+  handleFleeReroll(halbFremd.room, 'p2', koeder);
+  done(halbFremd.room);
+  assert.ok(halbFremd.room.combat && halbFremd.room.combat.fleeRerollOffer,
+    'fremde Karten-IDs und fremde Spieler:innen duerfen das Angebot nicht ausloesen');
+
+  // "Du darfst 1 Gegenstand pro Runde zum doppelten Preis verkaufen."
+  // 600 Goldstuecke reichen normal nicht fuer eine Stufe, verdoppelt schon.
+  const helm = findCard('GEILER HELM', 'item');
+  function sellRoom(overrides) {
+    const room = makeRoom();
+    Object.assign(room.players[0], { level: 1, hand: [helm.id] }, overrides || {});
+    handleSellItems(room, 'p1', [helm.id]);
+    return done(room);
+  }
+  assert.strictEqual(sellRoom({}).players[0].level, 1, 'ohne Halbling bringen 600 Goldstuecke keine Stufe');
+  const halbVerkauf = sellRoom({ races: [HALBLING] });
+  assert.strictEqual(halbVerkauf.players[0].level, 2, 'Halbling: 600 verdoppelt = 1200 Goldstuecke = 1 Stufe');
+  assert.ok(halbVerkauf.players[0].halblingSaleUsed, 'der Doppelverkauf ist fuer diese Runde verbraucht');
+
+  // Zweiter Verkauf in derselben Runde: normaler Preis.
+  halbVerkauf.players[0].hand = [helm.id];
+  handleSellItems(halbVerkauf, 'p1', [helm.id]);
+  assert.strictEqual(halbVerkauf.players[0].level, 2, 'nur EIN Gegenstand pro Runde zum doppelten Preis');
+
+  // Nach dem Zugwechsel geht es wieder.
+  endTurn(halbVerkauf);
+  assert.strictEqual(halbVerkauf.players[0].halblingSaleUsed, false, 'der Zugwechsel setzt den Doppelverkauf zurueck');
 
   // -------------------------------------------------------------------
   // RATTE AM SPIESS: garantierte Flucht nur bis Monsterstufe 8

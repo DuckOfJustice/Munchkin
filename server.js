@@ -452,6 +452,8 @@ function endTurn(room) {
   if (room.pendingConsequence || room.combat) return;
   if (currentPlayer(room) && currentPlayer(room).hand.length > handLimit(currentPlayer(room))) return; // Milde Gabe erzwingen
   room.turnIndex = (room.turnIndex + 1) % room.players.length;
+  // Der HALBLING-Doppelverkauf gilt "pro Runde" - siehe handleSellItems.
+  room.players.forEach((p) => { p.halblingSaleUsed = false; });
   room.turnPhase = 'tuer';
   room.combatHappenedThisTurn = false;
   room.revealedDoorCard = null;
@@ -1614,6 +1616,14 @@ const MONSTER_TRAIT_BONUS = {
   'LEPRACHAUN': { races: ['ELF'], bonus: 5 },                                       // "+5 gegen Elfen."
   'SABBERNDER SCHLEIM': { races: ['ELF'], bonus: 4 },                               // "+4 gegen Elfen."
   'KRAKZILLA': { races: ['ELF'], bonus: 4 },                                        // "Elfen haben -4!" = +4 für das Monster
+  // Halbling-Boni aus Unnatural Axe und Clerical Errors - ohne die war die
+  // Rasse gegen genau die Monster wirkungslos, die sie ausdrücklich nennen.
+  'PTERODAKTYL': { races: ['HALBLING'], bonus: 5 },                                 // "+5 gegen zarte, leckere Halblinge."
+  'FÜRCHTERLICHE CLOWNS': { races: ['HALBLING'], bonus: 5 },                        // "+5 gegen Halblinge."
+  'STRICHMÄNNCHEN': { races: ['HALBLING'], bonus: 4 },                               // "+4 gegen Halblinge."
+  'AFFENBANDE': { races: ['HALBLING'], bonus: 2 },                                  // "+2 gegen Halblinge."
+  'ÜBERBÄR': { races: ['HALBLING', 'ZWERG'], bonus: 5 },                             // "+5 gegen Halblinge und Zwerge."
+  'FÜRST YAHOO': { races: ['ELF', 'HALBLING'], classes: ['BARDE'], bonus: 5 },       // "+5 gegen Elfen, Barden und Halblinge."
 };
 
 function monsterTraitBonusSum(room) {
@@ -2285,6 +2295,7 @@ function resolveCombatWin(room) {
 
 function handleAttemptFlee(room, playerId, modifier) {
   if (!room.combat || !room.combat.mustFlee) return;
+  if (room.combat.fleeRerollOffer) return; // erst das Halbling-Angebot beantworten
   const c = room.combat;
   if (c.actorId !== playerId) return;
   const actor = findPlayer(room, c.actorId);
@@ -2331,14 +2342,60 @@ function handleAttemptFlee(room, playerId, modifier) {
     c.monsterIds.forEach((id) => room.doorDiscard.push(id));
     room.combat = null;
     room.turnPhase = 'gabe';
+  } else if (halblingRerollPossible(room, actor)) {
+    // HALBLING: "Falls du deinen ersten Weglaufwurf verpatzt, darfst du 1
+    // Karte ablegen und es noch mal probieren." Der Kampf bleibt dafuer
+    // stehen, bis die Entscheidung da ist (siehe handleFleeReroll).
+    c.halblingRerollUsed = true;
+    c.fleeRerollOffer = true;
+    c.fleeManualModifier = manual;
+    log(room, `${actor.name} ist Halbling: 1 Karte ablegen und noch einmal weglaufen, oder das Miese Zeug hinnehmen.`);
   } else {
-    const monsters = c.monsterIds.map(card);
-    const badstuffText = monsters.map((m) => `${m.name}: ${m.badstuff || '(kein Text hinterlegt)'}`).join(' | ');
-    c.monsterIds.forEach((id) => room.doorDiscard.push(id));
-    room.combat = null;
-    room.pendingConsequence = { playerId: actor.id, kind: 'loss', cardId: null, text: badstuffText, autoApplied: null, choice: null };
-    autoApplyLossConsequence(room, actor, monsters.map((m) => ({ name: m.name, text: m.badstuff })));
+    applyFleeFailure(room, actor, c);
   }
+  touchRoom(room);
+}
+
+// Das Miese Zeug nach einem endgueltig gescheiterten Weglaufwurf. Steht
+// separat, weil beim HALBLING noch eine Entscheidung dazwischen liegt.
+function applyFleeFailure(room, actor, c) {
+  const monsters = c.monsterIds.map(card);
+  const badstuffText = monsters.map((m) => `${m.name}: ${m.badstuff || '(kein Text hinterlegt)'}`).join(' | ');
+  c.monsterIds.forEach((id) => room.doorDiscard.push(id));
+  room.combat = null;
+  room.pendingConsequence = { playerId: actor.id, kind: 'loss', cardId: null, text: badstuffText, autoApplied: null, choice: null };
+  autoApplyLossConsequence(room, actor, monsters.map((m) => ({ name: m.name, text: m.badstuff })));
+}
+
+// Nur beim ersten verpatzten Wurf, nur mit Karte auf der Hand - und nicht
+// gegen Monster, vor denen es ohnehin kein Entkommen gibt (der zweite Wurf
+// wuerde genauso scheitern und die Karte waere umsonst weg).
+function halblingRerollPossible(room, actor) {
+  const c = room.combat;
+  if (!c || c.halblingRerollUsed) return false;
+  if (combatHasMonster(room, FLEE_IMPOSSIBLE)) return false;
+  return hasRace(actor, 'HALBLING') && actor.hand.length > 0;
+}
+
+// Antwort auf das Halbling-Angebot: mit Karte nochmal wuerfeln, ohne Karte
+// (cardId null) das Miese Zeug hinnehmen.
+function handleFleeReroll(room, playerId, cardId) {
+  const c = room.combat;
+  if (!c || !c.fleeRerollOffer || c.actorId !== playerId) return;
+  const actor = findPlayer(room, playerId);
+  if (!actor) return;
+  if (cardId !== null && cardId !== undefined) {
+    if (!actor.hand.includes(cardId)) return; // Fremdeingabe: Angebot bleibt stehen
+    c.fleeRerollOffer = false;
+    removeFromHand(actor, cardId);
+    discardCard(room, cardId);
+    log(room, `${actor.name} (Halbling) legt "${card(cardId).name}" ab und laeuft noch einmal weg.`, [cardId]);
+    handleAttemptFlee(room, playerId, c.fleeManualModifier || 0);
+    return;
+  }
+  c.fleeRerollOffer = false;
+  log(room, `${actor.name} verzichtet auf den zweiten Weglaufversuch.`);
+  applyFleeFailure(room, actor, c);
   touchRoom(room);
 }
 
@@ -2429,22 +2486,34 @@ function handleSellItems(room, playerId, cardIds) {
   // Machtgruppe Alchemist, "Blei zu Gold": mindestens 300 Goldstücke pro
   // verkauftem Gegenstand, bevor andere Modifikatoren angewendet werden.
   const isAlchemist = hasPowerGroup(player, 'ALCHEMIST');
+  const values = [];
   ids.forEach((id) => {
     const inHand = player.hand.includes(id);
     const inEquip = equippedItemIds(player).includes(id);
     if (!inHand && !inEquip) return;
     const c = card(id);
     if (!c || typeof c.gold !== 'number') return;
-    total += isAlchemist ? Math.max(c.gold, 300) : c.gold;
+    const value = isAlchemist ? Math.max(c.gold, 300) : c.gold;
+    values.push(value);
+    total += value;
     removable.push(id);
   });
+  // HALBLING: "Du darfst 1 Gegenstand pro Runde zum doppelten Preis verkaufen
+  // (und weitere Gegenstände zum normalen Preis)." Verdoppelt wird automatisch
+  // der teuerste der verkauften Gegenstände - eine Auswahl wäre nur nötig, wenn
+  // jemand sich bewusst schlechter stellen wollte.
+  const halblingBonus = (hasRace(player, 'HALBLING') && !player.halblingSaleUsed && values.length)
+    ? Math.max.apply(null, values) : 0;
+  total += halblingBonus;
   if (total < 1000) return;
+  if (halblingBonus) player.halblingSaleUsed = true;
   const levels = Math.floor(total / 1000);
   removable.forEach((id) => {
     if (player.hand.includes(id)) removeFromHand(player, id); else unequipSlotCard(player, id);
     discardCard(room, id);
   });
   setLevel(player, player.level + levels);
+  if (halblingBonus) log(room, `${player.name} ist Halbling und verkauft den teuersten Gegenstand zum doppelten Preis (+${halblingBonus} Goldstücke, einmal pro Runde).`);
   log(room, `${player.name} legt Gegenstände im Wert von ${total} Goldstücken ab und steigt ${levels} Stufe(n) auf (jetzt Stufe ${player.level}).`);
   checkWin(room, player);
   touchRoom(room);
@@ -2718,7 +2787,10 @@ function scheduleBotActionsIfNeeded(room) {
       room.botTimer = setTimeout(() => {
         room.botTimer = null;
         if (!rooms.has(room.code) || room.combat !== snapshotCombat) return;
-        if (room.combat.mustFlee) handleAttemptFlee(room, actor.id, 0);
+        // Ein Bot-Halbling muss das Wiederholungsangebot selbst beantworten,
+        // sonst wartet die Partie ewig auf eine Entscheidung.
+        if (room.combat.fleeRerollOffer) handleFleeReroll(room, actor.id, actor.hand[0] || null);
+        else if (room.combat.mustFlee) handleAttemptFlee(room, actor.id, 0);
         else handleEvaluateCombat(room, actor.id);
         broadcastState(room);
       }, randomDelay());
@@ -2933,6 +3005,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'setCombatReady', ({ ready }) => act(socket, (room, pid) => handleSetCombatReady(room, pid, ready !== false)));
   onSafe(socket, 'evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
   onSafe(socket, 'attemptFlee', ({ modifier }) => act(socket, (room, pid) => handleAttemptFlee(room, pid, modifier)));
+  onSafe(socket, 'fleeReroll', ({ cardId }) => act(socket, (room, pid) => handleFleeReroll(room, pid, cardId === undefined ? null : cardId)));
   onSafe(socket, 'equipItem', ({ cardId }) => act(socket, (room, pid) => handleEquipItem(room, pid, cardId)));
   onSafe(socket, 'unequipItem', ({ cardId }) => act(socket, (room, pid) => handleUnequipItem(room, pid, cardId)));
   onSafe(socket, 'sellItems', ({ cardIds }) => act(socket, (room, pid) => handleSellItems(room, pid, cardIds)));
@@ -2974,6 +3047,7 @@ module.exports = {
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
   POWER_GROUP_NAMES, GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
+  handleFleeReroll, handleSellItems, endTurn,
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee,
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
   MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
