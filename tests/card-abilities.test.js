@@ -367,10 +367,10 @@ function run() {
   [schwert.id, strumpfhose.id, knie.id].forEach((id) => handleEquipItem(eqRoom, 'p1', id));
   if (eqRoom.cleanupTimer) clearTimeout(eqRoom.cleanupTimer);
   const eqActor = eqRoom.players[0];
-  assert.deepStrictEqual(eqActor.equipped.special, [schwert.id, strumpfhose.id],
-    'Spezialausrüstung ist ein Sammelplatz - beide Karten liegen gleichzeitig an');
-  assert.strictEqual(eqActor.equipped.legs, knie.id, 'Spießige Knie belegen den eigenen Beine-Platz');
-  assert.strictEqual(eqActor.equipped.armor, null, 'und eben NICHT den Rüstungsplatz');
+  assert.deepStrictEqual(eqActor.equipped.special, [schwert.id, strumpfhose.id, knie.id],
+    'Spezialausrüstung ist ein Sammelplatz - alle drei Karten liegen gleichzeitig an');
+  assert.strictEqual(eqActor.equipped.armor, null, 'Spießige Knie belegen ausdrücklich NICHT den Rüstungsplatz');
+  assert.strictEqual(eqActor.equipped.legs, undefined, 'einen eigenen Beine-Platz gibt es nicht mehr');
   assert.strictEqual(eqActor.hand.length, 0, 'angelegte Karten sind von der Hand weg');
   assert.strictEqual(baseStrength(eqActor), 1 + schwert.bonus + strumpfhose.bonus + knie.bonus,
     'die Boni der Spezialausrüstung zählen in der Kampfstärke');
@@ -380,7 +380,7 @@ function run() {
   // Wieder ablegen räumt den Sammelplatz korrekt auf.
   handleUnequipItem(eqRoom, 'p1', schwert.id);
   if (eqRoom.cleanupTimer) clearTimeout(eqRoom.cleanupTimer);
-  assert.deepStrictEqual(eqActor.equipped.special, [strumpfhose.id], 'abgelegte Karte verschwindet aus dem Sammelplatz');
+  assert.deepStrictEqual(eqActor.equipped.special, [strumpfhose.id, knie.id], 'abgelegte Karte verschwindet aus dem Sammelplatz');
   assert.ok(eqActor.hand.includes(schwert.id), 'und liegt wieder auf der Hand');
   assert.strictEqual(baseStrength(eqActor), 1 + strumpfhose.bonus + knie.bonus, 'der Bonus fällt mit weg');
 

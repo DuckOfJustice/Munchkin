@@ -421,8 +421,8 @@
     }
   }
 
-  // Eine Zeile pro belegtem Platz; Sammelplaetze (multi) zeigen jede Karte
-  // einzeln und bleiben mit einer leeren Zeile sichtbar.
+  // Eine Zeile pro Karte auf dem Spezialplatz; ohne Karten bleibt der Platz
+  // mit einer leeren Zeile sichtbar.
   function specialSlotRows(p) {
     const cfg = state.specialSlots || {};
     return Object.keys(cfg).flatMap((key) => {

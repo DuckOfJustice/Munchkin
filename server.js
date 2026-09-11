@@ -251,20 +251,18 @@ const SPECIAL_SLOT_ITEMS = {
   'TRITTLEITER': { slot: 'special' },
   // "aber nur fuer Halblinge"
   'LIMBURGER UND SARDELLEN-SANDWICH': { slot: 'special', races: ['HALBLING'] },
-  // Ruestungsteil fuer die Beine - eigener Platz, nicht der Ruestungsplatz.
-  'SPIESSIGE KNIE': { slot: 'legs' },
+  'SPIESSIGE KNIE': { slot: 'special' },
 };
-// 'special' ist ein Sammelplatz (mehrere Karten nebeneinander), 'legs' ein
-// Koerperplatz wie Kopf/Ruestung (genau eine Karte).
+// Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
+// nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).
 const SPECIAL_SLOTS = {
-  special: { multi: true, label: 'Spezialausrüstung' },
-  legs: { multi: false, label: 'Beine' },
+  special: { label: 'Spezialausrüstung' },
 };
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 
 function newEquipped() {
   const eq = { head: null, armor: null, feet: null, hands: [null, null] };
-  SPECIAL_SLOT_KEYS.forEach((k) => { eq[k] = SPECIAL_SLOTS[k].multi ? [] : null; });
+  SPECIAL_SLOT_KEYS.forEach((k) => { eq[k] = []; });
   return eq;
 }
 
@@ -343,8 +341,7 @@ function removeFromHand(player, cardId) {
 
 function unequipSlotCard(player, cardId) {
   SPECIAL_SLOT_KEYS.forEach((k) => {
-    if (Array.isArray(player.equipped[k])) player.equipped[k] = player.equipped[k].filter((id) => id !== cardId);
-    else if (player.equipped[k] === cardId) player.equipped[k] = null;
+    player.equipped[k] = specialSlotCards(player, k).filter((id) => id !== cardId);
   });
   if (player.equipped.head === cardId) player.equipped.head = null;
   if (player.equipped.armor === cardId) player.equipped.armor = null;
@@ -2603,16 +2600,14 @@ function handleEquipItem(room, playerId, cardId) {
   // haben keinen slotKind, gehoeren aber trotzdem angelegt.
   const special = specialSlotRule(c);
   if (special) {
-    const multi = SPECIAL_SLOTS[special.slot].multi;
-    if (multi ? specialSlotCards(player, special.slot).includes(cardId) : player.equipped[special.slot]) return; // Platz belegt
+    if (specialSlotCards(player, special.slot).includes(cardId)) return; // liegt schon an
     if (special.races && !special.races.some((r) => hasRace(player, r))) {
       log(room, `${player.name} kann "${c.name}" nicht anlegen - nur für ${special.races.join('/')}.`);
       touchRoom(room);
       return;
     }
     removeFromHand(player, cardId);
-    if (multi) player.equipped[special.slot] = [...specialSlotCards(player, special.slot), cardId];
-    else player.equipped[special.slot] = cardId;
+    player.equipped[special.slot] = [...specialSlotCards(player, special.slot), cardId];
     log(room, `${player.name} legt "${c.name}" an (${SPECIAL_SLOTS[special.slot].label}).`, [cardId]);
     touchRoom(room);
     return;
