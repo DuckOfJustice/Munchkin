@@ -214,6 +214,27 @@ function run() {
     assert.strictEqual(room.players[room.turnIndex].id, 'a', 'currentPlayer ist weiterhin A');
     done(room);
   }
+  {
+    // c) Fix Round 1, Finding 1 (Regression): der Kampf endet weder durch
+    // Sieg noch durch Flucht, sondern durch MAHLZEIT! (endCombatNoLevel ohne
+    // thenLoot) - auch dieser Pfad muss c.originalActorId respektieren,
+    // sonst landet A faelschlich in "gabe" statt "pluendern".
+    const goblin = byName('LAHMER GOBLIN');
+    const trank = byName('ÜBERFALLTRANK');
+    const mahlzeit = byName('MAHLZEIT!');
+    const a = makePlayer('a', { hand: [trank.id] });
+    const b = makePlayer('b', { hand: [mahlzeit.id] });
+    const room = combatRoom([a, b], [goblin.id]);
+    handlePlayCombatCard(room, 'a', trank.id);
+    handleResolveCardTarget(room, 'a', 'b');
+    assert.strictEqual(room.combat.actorId, 'b', 'B kaempft jetzt');
+    handlePlayCombatCard(room, 'b', mahlzeit.id);
+    assert.strictEqual(room.combat, null, 'MAHLZEIT! beendet den Kampf sofort');
+    assert.strictEqual(room.turnPhase, 'pluendern',
+      'A bekommt die Pluenderphase auch ueber den endCombatNoLevel-Pfad (MAHLZEIT!/Traenke/Lampe)');
+    assert.strictEqual(room.players[room.turnIndex].id, 'a', 'currentPlayer ist weiterhin A');
+    done(room);
+  }
 
   console.log('OK - Kampfreaktionen: Kumpel verdoppelt (dedupliziert abgelegt), Wanderndes Monster/' +
     'Illusion haengen Handmonster an bzw. tauschen, Hilf mir nimmt einen Gegenstand, ' +

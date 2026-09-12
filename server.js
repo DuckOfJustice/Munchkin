@@ -645,16 +645,16 @@ function handleAckConsequence(room, playerId) {
   if (wasCurse) {
     room.turnPhase = 'aerger';
     log(room, `${player.name} macht weiter mit Phase 2: Auf Ärger aus sein.`);
-  } else if (pc.originalActorId) {
-    // ÜBERFALLTRANK: der urspruengliche Spieler darf den Raum trotz
-    // verlorenem Kampf pluendern (siehe applyFleeFailure).
-    room.turnPhase = 'pluendern';
-    log(room, `${player.name} macht weiter mit Phase 3: Raum plündern.`);
   } else {
     // Folge einer verlorenen Kampfrunde: direkt weiter zu Phase 4 (wurde beim
-    // Kampfstart bereits als combatHappenedThisTurn markiert).
-    room.turnPhase = 'gabe';
-    log(room, `${player.name} macht weiter mit Phase 4: Milde Gabe.`);
+    // Kampfstart bereits als combatHappenedThisTurn markiert) - ausser
+    // ÜBERFALLTRANK war im Spiel (pc.originalActorId, siehe applyFleeFailure
+    // und combatEndPhase), dann bekommt die urspruengliche Person trotz
+    // verlorenem Kampf ihre Pluenderphase.
+    room.turnPhase = combatEndPhase({ originalActorId: pc.originalActorId }, false);
+    log(room, room.turnPhase === 'pluendern'
+      ? `${player.name} macht weiter mit Phase 3: Raum plündern.`
+      : `${player.name} macht weiter mit Phase 4: Milde Gabe.`);
   }
   touchRoom(room);
 }
@@ -2109,6 +2109,20 @@ function isCombatPotionCard(c) {
   return COMBAT_PLAYABLE_RE.test(t) && parseCombatPotion(c.text) != null;
 }
 
+// Welche Phase nach EINEM DER SECHS Kampfende-Pfade folgt (Sieg, gelungene/
+// garantierte Flucht, verlorener Kampf, sowie die beiden Kartenkraefte, die
+// einen Kampf ohne Sieg/Niederlage beenden: endCombatNoLevel/
+// killMonsterInCombat). thenLoot ist die kartentexteigene Regel ("... und
+// pluendere danach den Raum", z.B. MAHLZEIT!); c.originalActorId ist
+// ÜBERFALLTRANK ("... der urspruengliche Spieler darf danach pluendern,
+// unabhaengig davon, ob der Kampf gewonnen oder verloren wurde" - das deckt
+// ausdruecklich JEDEN Kampfausgang ab, nicht nur Sieg/Niederlage). EINE
+// Stelle statt an jeder Kampfende-Stelle einzeln dieselbe Bedingung zu
+// wiederholen, damit ein siebter Beendigungspfad sie nicht vergisst.
+function combatEndPhase(c, thenLoot) {
+  return (thenLoot || (c && c.originalActorId)) ? 'pluendern' : 'gabe';
+}
+
 // Wendet eine bereits aufgelöste Kampf-Trank-Aktion an (mutiert
 // room.combat). Machtgruppe Alchemist ("Tränkemeister") verdoppelt den
 // Bonus von "Nur einmal einsetzbar"-Gegenständen.
@@ -2152,7 +2166,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
         };
       }
       room.combat = null;
-      room.turnPhase = action.thenLoot ? 'pluendern' : 'gabe';
+      room.turnPhase = combatEndPhase(c, action.thenLoot);
       return action.leavesTreasure
         ? `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`
         : `Kampf gegen ${names} beendet, kein Schatz`;
@@ -2171,7 +2185,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       if (idx < 0) return 'Monster nicht im Kampf gefunden';
       const [dead] = c.monsterIds.splice(idx, 1);
       room.doorDiscard.push(dead);
-      if (c.monsterIds.length === 0) { room.combat = null; room.turnPhase = 'gabe'; }
+      if (c.monsterIds.length === 0) { room.combat = null; room.turnPhase = combatEndPhase(c, false); }
       return `${action.name} sofort besiegt (kein Schatz)`;
     }
     // WANDERNDES MONSTER: "Dein Monster schliesst sich dem schon kaempfenden
@@ -2191,10 +2205,14 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.monsterIds.unshift(action.cardId);
       // monsterModifier ist ein einziges kampfweites Feld, keine Zuordnung
       // pro Monster - bei genau einem Monster im Kampf (Regelfall) verfaellt
-      // er damit korrekt mit dem ausgetauschten Monster. ponytail: bei
-      // mehreren Monstern (Kumpel/Wanderndes Monster im selben Kampf) trifft
-      // der Reset faelschlich auch die anderen - Aufruestweg: monsterModifier
-      // pro monsterId statt kampfweit fuehren, falls das je gebraucht wird.
+      // er damit korrekt mit dem ausgetauschten Monster. ponytail: mehrere
+      // Monster im selben Kampf sind KEIN Task-8-Sonderfall - startCombat
+      // nimmt schon immer ein monsterIds-Array (ganz normale Tuer-Aufdeckung
+      // mit zwei Monstern reicht), das gab es lange vor dieser Karte. Die
+      // Falle braucht nur einen Monster-Verstaerker auf dem einen Monster und
+      // ILLUSION auf dem anderen - der Reset trifft dann faelschlich auch das
+      // unbeteiligte Monster. Aufruestweg: monsterModifier pro monsterId
+      // statt kampfweit fuehren, falls das je gebraucht wird.
       c.monsterModifier = 0;
       refreshCombatReady(room);
       return `"${card(alt).name}" wird durch "${card(action.cardId).name}" ersetzt`;
@@ -2518,10 +2536,10 @@ function resolveCombatWin(room) {
   // besiegten Monster, damit zählt sie als Sieg.
   let won = checkWin(room, actor);
   if (!won && helper) won = checkWin(room, helper);
-  // ÜBERFALLTRANK: der urspruengliche Spieler (nicht die/der Kaempfende) darf
-  // danach den Raum pluendern - room.turnIndex zeigt ohnehin noch auf sie/ihn,
-  // der Zug ist nie gewechselt.
-  if (!won) room.turnPhase = c.originalActorId ? 'pluendern' : 'gabe';
+  // ÜBERFALLTRANK: siehe combatEndPhase - der urspruengliche Spieler (nicht
+  // die/der Kaempfende) darf danach den Raum pluendern, room.turnIndex zeigt
+  // ohnehin noch auf sie/ihn, der Zug ist nie gewechselt.
+  if (!won) room.turnPhase = combatEndPhase(c, false);
   touchRoom(room);
 }
 
@@ -2630,8 +2648,8 @@ function finishFleeSuccess(room, actor, c) {
   }
   discardMonsterIds(room.doorDiscard, c.monsterIds);
   room.combat = null;
-  // ÜBERFALLTRANK: siehe Kommentar in resolveCombatWin.
-  room.turnPhase = c.originalActorId ? 'pluendern' : 'gabe';
+  // ÜBERFALLTRANK: siehe combatEndPhase.
+  room.turnPhase = combatEndPhase(c, false);
 }
 
 // POST_FLEE_ESCAPE_CARDS: siehe src/cards/treasures.js. "Ablegen, wenn der
@@ -2781,8 +2799,8 @@ function handleUseGuaranteedFlee(room, playerId, cardId) {
   discardCard(room, cardId);
   discardMonsterIds(room.doorDiscard, c.monsterIds);
   room.combat = null;
-  // ÜBERFALLTRANK: siehe Kommentar in resolveCombatWin.
-  room.turnPhase = c.originalActorId ? 'pluendern' : 'gabe';
+  // ÜBERFALLTRANK: siehe combatEndPhase.
+  room.turnPhase = combatEndPhase(c, false);
   let extra = '';
   // "Du kannst automatisch aus einem beliebigen Kampf weglaufen ... aber du
   // verlierst eine Stufe."
