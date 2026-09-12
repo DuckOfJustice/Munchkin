@@ -1939,13 +1939,34 @@ function combatStartOptionRule(cardId, player) {
 // siehe MONSTER_TRAIT_BONUS in src/cards/passives.js. Der Bonus gilt einmal
 // pro Monster, sobald IRGENDWER auf der Munchkin-Seite die Rasse/Klasse hat
 // (Angreifer:in oder Helfer:in) - nicht einmal pro Person.
+// SUPER MUNCHKIN / HALB-BLUT, zweite Kartenhaelfte: "Oder du darfst 1
+// Klassenkarte haben und hast alle Vorteile aber keine Nachteile der Klasse
+// (z.B. Monster, die Priester hassen, werden diesen Bonus nicht gegen einen
+// Super Priester haben)." Es braucht keinen Moduswahl-Dialog: der Kartentext
+// leitet den Modus selbst ab - Cap-Karte plus genau EIN Merkmal heisst "ohne
+// Nachteile", Cap-Karte plus zwei Merkmale heisst "normal, mit allem".
+// Rassen und Klassen sind getrennt: SUPER MUNCHKIN schuetzt nicht vor einem
+// Rassen-Malus.
+// ponytail: gilt nur fuer MONSTER_TRAIT_BONUS, den einzigen Nachteil, den
+// die Design-Spec (Abschnitt 4) dieser Karte zuordnet. Rassenabhaengige
+// "Schlimme Dinge" (ZUNGENDAEMON/FUNGUS treffen Elfen haerter,
+// src/cards/consequences.js) und BEKIFFTER GOLEMs forcedFightRaces sind
+// ebenfalls Nachteile und bleiben vorerst bestehen - Aufruestweg: dieselbe
+// traitImmun-Abfrage an jenen drei Stellen.
+function traitImmun(player, welches) {
+  if (welches === 'classes') return !!player.classCapCard && player.classes.length === 1;
+  if (welches === 'races') return !!player.raceCapCard && player.races.length === 1;
+  return false;
+}
+
 function monsterTraitBonusSum(room) {
   const parts = combatParticipants(room);
   return room.combat.monsterIds.reduce((sum, id) => {
     const c = card(id);
     const rule = c && MONSTER_TRAIT_BONUS[c.name];
     if (!rule) return sum;
-    const hit = parts.some((p) => (rule.races || []).some((r) => hasRace(p, r)) || (rule.classes || []).some((k) => hasClass(p, k)));
+    const hit = parts.some((p) => (!traitImmun(p, 'races') && (rule.races || []).some((r) => hasRace(p, r)))
+      || (!traitImmun(p, 'classes') && (rule.classes || []).some((k) => hasClass(p, k))));
     return sum + (hit ? rule.bonus : 0);
   }, 0);
 }

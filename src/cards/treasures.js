@@ -44,6 +44,18 @@ module.exports = (ctx) => {
     // Stufe hast oder die höchste Stufe teilst."
     'JAMMER DEN SPIELLEITER AN': (player, room) => (isTopLevel(room, player) ? null : { type: 'levelUp', amount: 1 }),
     'CHARAKTERSEITEN WECHSELN': (player, room) => (isTopLevel(room, player) ? null : { type: 'levelUp', amount: 1 }),
+    // "Steige eine Stufe auf. Diese Karte darf nur nach einem Kampf
+    // ausgespielt werden, aber es muss nicht dein Kampf gewesen sein."
+    // Ohne diesen Eintrag greift die allgemeine "Steige eine Stufe
+    // auf"-Erkennung (isInstantLevelUpCard) und die Karte waere jederzeit
+    // spielbar - der kuratierte Eintrag hat Vorrang und haengt die
+    // Zeitbedingung daran.
+    // ponytail: room.combatHappenedThisTurn wird bei jedem Zugwechsel
+    // zurueckgesetzt, "nicht dein Kampf" heisst hier also "ein fremder Kampf
+    // in DEINEM Zug" (Mithilfe, Wanderndes Monster). Ein Kampf im Zug davor
+    // zaehlt nicht mit. Aufruestweg: ein Zaehler, der erst beim Ausspielen
+    // der Karte zurueckgesetzt wird, statt beim Zugwechsel.
+    'VERSTÜMMLE DIE LEICHEN': (player, room) => (room.combatHappenedThisTurn ? { type: 'levelUp', amount: 1 } : null),
 
     // --- Bewusst manuell: hängt von Karten/Zustand ab, den dieser Server
     // nicht separat verfolgt (Mietling "im Spiel" ist keine eigene Zone;
