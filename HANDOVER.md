@@ -17,7 +17,7 @@ Datei ist der Stand nach der Runde vom **2026-09-11**.
 
 **Wer hier neu anfängt, liest zuerst Abschnitt 8.** Dort steht der Stand der
 Runde vom 2026-09-12 (fehlende Basis-Set-Kartenkräfte), die zur Hälfte fertig
-ist: acht von dreizehn Aufgaben sind erledigt und geprüft, fünf sind offen,
+ist: zehn von dreizehn Aufgaben sind umgesetzt, drei sind offen,
 und Abschnitt 8 sagt genau, wie man sie zu Ende bringt.
 
 Abschnitt 7 ist weiterhin gültig und beschreibt die Runde davor
@@ -716,7 +716,7 @@ Repo (Einmalwerkzeug). Kurzform zum Nachbauen: `data/cards.json` laden,
 (`\n`, `<br>`, `<i>` entfernen), pro Muster-Regex über alle Karten laufen und
 gegen die jeweilige Tabelle prüfen.
 
-## 8. Fehlende Basis-Set-Kartenkräfte (Runde vom 2026-09-12) - **zur Hälfte fertig**
+## 8. Fehlende Basis-Set-Kartenkräfte (Runde vom 2026-09-12) - **10 von 13 fertig**
 
 Diese Runde begann mit einem Audit aller 147 Basis-Set-Karten gegen den Code.
 Ergebnis: 12 Karten waren **vollständig wirkungslos** (kein Ausspielweg,
@@ -740,12 +740,18 @@ die Landkarte:
 Im selben Verzeichnis liegen je Aufgabe ein `task-N-brief.md` (die Anforderung)
 und ein `task-N-report.md` (was die umsetzende Session gemacht hat).
 
-### 8.2 Was fertig ist (Tasks 1-8)
+### 8.2 Was fertig ist (Tasks 1-10)
 
-14 Commits, `10641fc..b66feb1`. `npm test` = **13/13 grün**, Server startet
+20 Commits, `10641fc..b2db73a`. `npm test` = **15/15 grün**, Server startet
 sauber. Jede Aufgabe wurde nach der Umsetzung von einer zweiten, unabhängigen
-Instanz geprüft; drei Prüfungen fanden echte Fehler, die in einer Fix-Runde
+Instanz geprüft; fünf Prüfungen fanden echte Fehler, die in einer Fix-Runde
 behoben und erneut geprüft wurden.
+
+**Eine offene Stelle:** die Fix-Runde von Task 10 (`b2db73a`) ist **noch nicht
+nachgeprüft**. Der umsetzende Agent meldet 15/15 grün und einen Test, der ohne
+den Fix rot wird; das ist aber sein eigener Bericht, nicht die unabhängige
+Gegenprüfung, die alle anderen Fix-Runden bekommen haben. Erste Amtshandlung
+einer neuen Session: diesen einen Diff gegenprüfen (`git diff d1602f0..b2db73a`).
 
 | # | Was | Commits |
 |---|---|---|
@@ -757,32 +763,33 @@ behoben und erneut geprüft wurden.
 | 6 | **Kartenanhänge**: SCHUMMELN!, KNIESCHÜTZER DER VERLOCKUNG | `ebb76e9`, `35f027b` |
 | 7 | **Fluch-Tracker**: MIESER SPIEGEL, GESCHLECHTSUMWANDLUNG, HUHN AUF DEINEM KOPF, WINZIGE HÄNDE, WUNSCHRING | `1279897` |
 | 8 | **Kampfreaktionen**: KUMPEL, WANDERNDES MONSTER, ILLUSION, HILF MIR, ÜBERFALLTRANK | `4b0306d`, `b66feb1` |
+| 9 | **Schlimme Dinge mit Fremdbeteiligung**: HIPPOGREIF, ANWALT, LEPRACHAUN, NETZ-TROLL, VERSICHERUNGSVERTRETER, SCHNECKEN AUF SPEED, FLUCH! EINKOMMENSSTEUER | `7bc2d70`, `0acca45` |
+| 10 | **Kampf-Alternativen**: MÖCHTEGERN-VAMPIR, LAUFENDE NASE, PIT BULL, ZUNGENDÄMON | `d1602f0`, `b2db73a` |
 
-### 8.3 Was noch offen ist (Tasks 9-13)
+Dazu ein Einschub auf Zuruf: die **Kartengroßansicht zeigt jetzt die Werte**
+(Stufe/Schätze bei Monstern, Slot/Hände/Bonus/Gold bei Gegenständen) und
+kennzeichnet Große Gegenstände (`80fcdf0`). Das `big`-Flag hängt dafür am
+Kartenobjekt selbst (`server.js`, beim Einlesen von `ALL_CARDS`), nicht als
+fünfte handgepflegte Namensliste im Client - siehe die Driftquelle in 8.5.
+
+### 8.3 Was noch offen ist (Tasks 11-13)
 
 Der Plan enthält für jede dieser Aufgaben den vollständigen Code und die
-Tests. Reihenfolge einhalten - 9 braucht die Warteschlange aus 3, 12 braucht
-das Reaktionsfenster aus 4 **und** muss nach 7 und 8 laufen, weil alle drei in
-`combatTotals` rechnen.
+Tests.
 
-- **Task 9 - Schlimme Dinge mit Fremdbeteiligung.** HIPPOGREIF, ANWALT,
-  LEPRACHAUN, NETZ-TROLL, VERSICHERUNGSVERTRETER, SCHNECKEN AUF SPEED,
-  FLUCH! EINKOMMENSSTEUER. Nutzt `playerQueueFrom` + `openQueuedCardAction`
-  aus Task 3.
-- **Task 10 - Kampf-Alternativen.** MÖCHTEGERN-VAMPIR, LAUFENDE NASE,
-  PIT BULL (Wahl bei Kampfbeginn, gleiche Bauform wie BEKIFFTER GOLEM) und
-  ZUNGENDÄMON (erzwungenes Ablegen vor dem Kampf).
 - **Task 11 - Kleinkram.** SUPER MUNCHKIN / HALB-BLUT zweite Hälfte ("alle
   Vorteile, keine Nachteile") und VERSTÜMMLE DIE LEICHEN nur nach einem Kampf.
-  Unabhängig von 9, 10 und 12, kann jederzeit laufen.
+  Hängt von nichts ab, kann sofort laufen.
 - **Task 12 - Klassenkräfte.** DIEB ("In den Rücken fallen", "Diebstahl") und
-  PRIESTER ("Auferstehung").
+  PRIESTER ("Auferstehung"). Braucht `rollWithWindow` aus Task 4 und die
+  Zielauswahl aus Task 3, und **muss nach 7 und 8 laufen** (alle drei rechnen
+  in `combatTotals`) - was inzwischen erfüllt ist.
 - **Task 13 - Abnahme.** Volle Testsuite, Abdeckung neu messen, Durchlauf im
   Browser, README-Abschnitt "Was automatisiert ist" nachziehen.
 
 ### 8.4 Fünf Dinge, die eine neue Session vorher wissen muss
 
-Das sind Entscheidungen und Fallen aus den ersten acht Aufgaben. Wer sie nicht
+Das sind Entscheidungen und Fallen aus den ersten zehn Aufgaben. Wer sie nicht
 kennt, verliert Zeit oder baut Fehler ein.
 
 1. **Der Plan enthält zwei Fehler im Test-Gerüst.** Jedes `makeRoom` im Plan
@@ -793,19 +800,23 @@ kennt, verliert Zeit oder baut Fehler ein.
    3-Stunden-Timer, der Node am Leben hält. Vorbild ist der `done(room)`-Helfer
    in `tests/card-reactions.test.js`.
 
-2. **Die Abdeckungs-Schranke in `tests/auto-consequence.test.js:113` reißt in
-   Task 9 - das ist erwartet.** Sie steht auf `manual >= 20`, aktuell sind es
-   27. Der Plan sagt, auf 12 zu senken; **das ist falsch gerechnet.** Der Scan
-   dort zählt nur Karten der Kategorien `monster` und `curse`, `door_other`
-   fällt heraus. Nachgerechnet: Task 9 automatisiert 8 Karten innerhalb des
-   Scans, also 27 - 8 = **19**. Die Schranke reißt um genau eins.
-   **Auf 15 senken, nicht auf 12**, mit einem Kommentar, der die neu
-   automatisierten Karten nennt. Das ist die **einzige** erlaubte Änderung an
-   einer bestehenden Testdatei im ganzen Plan. Wird irgendein *anderer* Test
-   angepasst, um grün zu werden, ist ein echter Fehler versteckt worden.
+2. **Die Abdeckungs-Schranke in `tests/auto-consequence.test.js` ist bereits
+   erledigt - nicht noch einmal anfassen.** Sie stand auf `manual >= 20`, Task 9
+   automatisierte sieben Karten innerhalb des Scans (27 -> 20), und die Schranke
+   steht jetzt korrekt auf `>= 15` (Zeile 123). Das war die **einzige** erlaubte
+   Änderung an einer bestehenden Testdatei im ganzen Plan, und sie ist
+   verbraucht. Wird ab jetzt irgendein Test angepasst, um grün zu werden, ist ein
+   echter Fehler versteckt worden.
+
+   Zur Warnung, weil der Plan an dieser Stelle zweimal falsch lag: der Plan sagte
+   „auf 12 senken", ich korrigierte das auf „19, also Schranke 15", und richtig
+   waren am Ende 20 - GALLERT-OKTAEDER war schon in Task 2 automatisiert worden
+   und zählte nicht mit. Der Scan iteriert **nur** über die Kategorien `monster`
+   und `curse`; `door_other`-Karten tauchen dort gar nicht auf. Wer die Zahl
+   erneut verschieben will, misst sie vorher, statt sie zu rechnen.
 
 3. **Die Zeilennummern im Plan sind veraltet.** Task 1 hat `server.js`
-   umgebaut, Tasks 2-8 haben es erweitert. Immer über den Funktionsnamen
+   umgebaut, Tasks 2-10 haben es erweitert. Immer über den Funktionsnamen
    suchen, nie über die Nummer im Plan.
 
 4. **Alles, was die Kampfstärke verändert, muss durch `combatTotals` laufen.**
@@ -834,10 +845,20 @@ Entdeckungen noch einmal Zeit kosten.
   darauf. Ein weiteres Fenster wäre ein eigener Ausspielweg plus UI. **Die
   auffälligste der zurückgestellten Sachen - hier zuerst nachbessern, falls
   jemand es im Spiel vermisst.**
-- **VERLIERE 1 GROSSEN GEGENSTAND** legt *alle* Großen Gegenstände ab statt
-  einen zur Wahl. Für Nicht-Zwerge gleichwertig (sie tragen höchstens einen),
-  falsch nur für Zwerge. Task 9 baut ohnehin die "such dir eine Karte
-  aus"-Mechanik - dort mitnehmen.
+- **Die Warteschlangen-Reihenfolge ist kartenspezifisch.** Jede Karte sagt
+  etwas anderes ("beginnend mit dem Spieler **vor** dir" gegen "**nach** dir",
+  nur die Nachbarn, nur die Höchststufigen, alle anderen), und eine verdrehte
+  Reihenfolge löst diese Karte still für immer falsch auf - kein Test merkt das.
+  `playerQueueFrom(room, player, mode)` hat dafür fünf Modi. Wer eine Karte
+  ergänzt: den Modus aus dem echten Kartentext ableiten, nicht raten.
+- **`curseIncomeTax`** wählt für die ziehende Person automatisch ihren
+  *teuersten* Gegenstand als "Gegenstand deiner Wahl". Ein eigennütziger Mensch
+  gäbe den billigsten her, um die Latte für alle anderen niedrig zu halten - die
+  Richtung ist also fragwürdig, aber offengelegt.
+- **`handleAckConsequence`** prüft `room.pendingCardAction` nicht, die ziehende
+  Person könnte also theoretisch "Fertig" drücken, bevor die anderen ihre
+  Warteschlange abgearbeitet haben. Clientseitig durch das `myTurn`-Gating
+  entschärft, daher kosmetisch.
 - **GOTTLICHE INTERVENTION** muss laut Karte sofort beim Erhalten gespielt
   werden; umgesetzt ist sie als freiwillige Sonderkraft.
 - **`combatConditionalBonusFields`** ist nicht durch
@@ -872,13 +893,31 @@ Unverändert gegenüber der Design-Spec, Abschnitt 5:
 
 ### 8.7 Wie man weitermacht
 
-Der Ablauf der ersten acht Aufgaben war: je Aufgabe eine frische Instanz mit
+Der Ablauf der ersten zehn Aufgaben war: je Aufgabe eine frische Instanz mit
 dem `task-N-brief.md` beauftragen, danach eine **zweite, unabhängige** Instanz
 denselben Diff prüfen lassen, Fehler in einer Fix-Runde beheben, erneut prüfen,
-erst dann weiter. Das hat sich gelohnt - drei der acht Aufgaben hatten echte
-Fehler, die so gefunden wurden, darunter einer, der eine Karte dauerhaft
-unspielbar gemacht hätte, und einer, der eine Karte doppelt in den Stapel
-gelegt hätte.
+erst dann weiter.
+
+Das hat sich gelohnt. Fünf der zehn Aufgaben hatten echte Fehler, die so
+gefunden wurden - und **jeder einzelne davon war grün getestet**, bevor der
+Reviewer ihn fand:
+
+- ein Fluch, der den SCHUMMELN!-Anhang nicht löste und die Person damit dauerhaft
+  daran hinderte, je wieder eine SCHUMMELN!-Karte zu spielen,
+- eine Zielauswahl in der Warteschlange, die einen leeren Resolver baute und
+  deshalb wirkungslos blieb - ohne Fehler, ohne Logzeile,
+- KUMPEL, das dieselbe Karte zweimal auf den Ablagestapel gelegt und damit den
+  Stapel dauerhaft verfälscht hätte,
+- ÜBERFALLTRANK, das die ursprüngliche Person über zwei Kampfenden hinweg in die
+  falsche Phase schickte,
+- und zwei Warteschlangen, die sich bei einem verlorenen Kampf mit mehreren
+  Monstern gegenseitig verschluckten, während das Log die verschluckte Wirkung
+  weiterhin meldete.
+
+Daraus die Lehre für die restlichen Aufgaben: **grüne Tests heißen hier wenig.**
+Die Fehler dieser Runde saßen durchweg in Pfaden, die kein Test beschritt -
+mehrere Monster gleichzeitig, ein Bot an der Reihe, eine Karte in der Hand statt
+angelegt. Wer prüft, sollte gezielt nach genau solchen Kombinationen suchen.
 
 Wer den Prozess nachbauen will: das Skill `superpowers:subagent-driven-development`
 beschreibt ihn, und `progress.md` ist der Wiederaufsetzpunkt - Aufgaben mit
