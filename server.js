@@ -197,6 +197,33 @@ function log(room, text, cardIds) {
 function findPlayer(room, playerId) { return room.players.find((p) => p.id === playerId); }
 function currentPlayer(room) { return room.players[room.turnIndex] || null; }
 
+// Reihenfolge, in der Mitspielende von einer Karte betroffen werden. Die
+// Karten sagen Unterschiedliches ("beginnend mit dem Spieler VOR dir" gegen
+// "NACH dir"), deshalb ein Modus je Formulierung statt einer festen Regel.
+function playerQueueFrom(room, player, mode) {
+  const n = room.players.length;
+  const self = room.players.findIndex((p) => p.id === player.id);
+  if (self < 0 || n < 2) return [];
+  if (mode === 'after') {
+    return Array.from({ length: n - 1 }, (_, i) => room.players[(self + 1 + i) % n].id);
+  }
+  if (mode === 'before') {
+    return Array.from({ length: n - 1 }, (_, i) => room.players[((self - 1 - i) % n + n) % n].id);
+  }
+  if (mode === 'neighbours') {
+    const vor = room.players[((self - 1) % n + n) % n].id;
+    const danach = room.players[(self + 1) % n].id;
+    return vor === danach ? [vor] : [vor, danach];
+  }
+  if (mode === 'topLevel') {
+    const others = room.players.filter((p) => p.id !== player.id);
+    if (!others.length) return [];
+    const max = Math.max.apply(null, others.map((p) => p.level));
+    return others.filter((p) => p.level === max).map((p) => p.id);
+  }
+  return room.players.filter((p) => p.id !== player.id).map((p) => p.id); // 'allOthers'
+}
+
 // ---------------------------------------------------------------------------
 // Decks
 // ---------------------------------------------------------------------------
@@ -1112,6 +1139,39 @@ const {
   POST_FLEE_ESCAPE_CARDS, GUARANTEED_FLEE_CARDS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
 } = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel });
 
+// Eine Aktion, die mehrere Personen NACHEINANDER betrifft. specFor(playerId)
+// liefert je Person den Inhalt (kind/options/prompt/candidateIds) - so kann
+// jede Person aus ihrer eigenen Hand waehlen.
+function openQueuedCardAction(room, cardName, queue, specFor) {
+  room._queuedCardAction = { cardName, queue: queue.slice(), specFor };
+  advanceCardActionQueue(room);
+}
+
+function advanceCardActionQueue(room) {
+  const q = room._queuedCardAction;
+  if (!q) {
+    room.pendingCardAction = null;
+    room._pendingCardActionResolvers = null;
+    return;
+  }
+  const nextId = q.queue.shift();
+  if (!nextId) {
+    room._queuedCardAction = null;
+    room.pendingCardAction = null;
+    room._pendingCardActionResolvers = null;
+    return;
+  }
+  const p = findPlayer(room, nextId);
+  // Getrennte werden uebersprungen - sonst haengt die Partie an jemandem, der
+  // gerade nicht am Geraet ist (gleiche Regel wie bei combatReadyRequired).
+  if (!p || !p.connected) return advanceCardActionQueue(room);
+  const spec = q.specFor(nextId);
+  if (!spec) return advanceCardActionQueue(room);
+  room.pendingCardAction = Object.assign({ playerId: nextId, cardName: q.cardName }, spec);
+  room._pendingCardActionResolvers = {};
+  (spec.options || []).forEach((o) => { room._pendingCardActionResolvers[o.id] = o.action; });
+}
+
 function openCardChoice(room, player, cardName, options) {
   room.pendingCardAction = { playerId: player.id, cardName, kind: 'choice', options: options.map((o) => ({ id: o.id, label: o.label })) };
   room._pendingCardActionResolvers = {};
@@ -1218,11 +1278,17 @@ function handleResolveCardChoice(room, playerId, optionId) {
   if (!player) return;
   const option = pa.options.find((o) => o.id === optionId);
   const action = stored[optionId];
-  room.pendingCardAction = null;
-  room._pendingCardActionResolvers = null;
   // Eine Wahl kann selbst wieder eine Ziel-Auswahl auslösen (z.B. "Sinnloser
-  // Akt der Freundlichkeit" -> "Auf Mitspieler anwenden").
+  // Akt der Freundlichkeit" -> "Auf Mitspieler anwenden"). In dem Fall bleibt
+  // eine laufende Warteschlange bei dieser Person stehen, statt schon
+  // weiterzuruecken.
+  // ponytail: verschachteltes targetPlayer INNERHALB einer Warteschlange
+  // (Task 3) wird nicht gesondert behandelt - kein Basis-Set-Karte braucht
+  // das. Falls doch: Ziel-Aufloesung muesste die Warteschlange erst nach der
+  // Ziel-Wahl vorruecken statt hier direkt.
   if (action.type === 'targetPlayer') {
+    room.pendingCardAction = null;
+    room._pendingCardActionResolvers = null;
     openCardTarget(room, player, pa.cardName, action.prompt, action.action);
     log(room, `${player.name}: "${pa.cardName}" -> ${option ? option.label : optionId} - Ziel nötig.`);
     touchRoom(room);
@@ -1234,6 +1300,8 @@ function handleResolveCardChoice(room, playerId, optionId) {
     ? applyCombatPotionAction(room, player, action, sourceCard)
     : applyPrimitiveAction(room, player, action);
   log(room, `${player.name}: "${pa.cardName}" -> ${option ? option.label : optionId} (${desc}).`);
+  if (room._queuedCardAction) advanceCardActionQueue(room);
+  else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
   touchRoom(room);
 }
 
@@ -1245,10 +1313,10 @@ function handleResolveCardTarget(room, playerId, targetId) {
   const player = findPlayer(room, playerId);
   const target = findPlayer(room, targetId);
   if (!stored || !player || !target) return;
-  room.pendingCardAction = null;
-  room._pendingCardActionResolvers = null;
   const desc = applyTargetAction(room, player, target, stored);
   log(room, `${player.name}: "${pa.cardName}" -> ${target.name} (${desc}).`);
+  if (room._queuedCardAction) advanceCardActionQueue(room);
+  else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
   touchRoom(room);
 }
 
@@ -1267,9 +1335,9 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
   }
   player.hand.push(chosenCardId);
   const chosen = card(chosenCardId);
-  room.pendingCardAction = null;
-  room._pendingCardActionResolvers = null;
   log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" aus dem Ablagestapel geholt.`, [chosenCardId]);
+  if (room._queuedCardAction) advanceCardActionQueue(room);
+  else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
   touchRoom(room);
 }
 
@@ -2554,6 +2622,26 @@ function addBot(room) {
   return bot;
 }
 
+// Beantwortet eine an einen Bot gerichtete Kartenaktion (Wahl/Ziel/Karte aus
+// dem Ablagestapel) mit der jeweils ersten Option - siehe
+// scheduleBotActionsIfNeeded für den Aufrufkontext.
+function resolveBotCardAction(room) {
+  const pa = room.pendingCardAction;
+  if (!pa) return;
+  const bot = findPlayer(room, pa.playerId);
+  if (!bot || !bot.isBot) return;
+  if (pa.kind === 'choice' && (pa.options || []).length) {
+    handleResolveCardChoice(room, bot.id, pa.options[0].id);
+  } else if (pa.kind === 'targetPlayer' && (pa.candidateIds || []).length) {
+    handleResolveCardTarget(room, bot.id, pa.candidateIds[0]);
+  } else if (pa.kind === 'chooseCard' && (pa.candidateIds || []).length) {
+    handleResolveCardCardChoice(room, bot.id, pa.candidateIds[0]);
+  } else {
+    // Nichts Waehlbares oder unbekannte Art: ueberspringen statt haengen.
+    advanceCardActionQueue(room);
+  }
+}
+
 const BOT_DELAY_MIN = Number(process.env.BOT_DELAY_MIN_MS) || 900;
 const BOT_DELAY_MAX = Number(process.env.BOT_DELAY_MAX_MS) || 2200;
 function randomDelay(min = BOT_DELAY_MIN, max = BOT_DELAY_MAX) { return min + Math.random() * (max - min); }
@@ -2568,6 +2656,24 @@ function scheduleBotActionsIfNeeded(room) {
   if (room.phase !== 'playing') return;
   const actor = currentPlayer(room);
   if (!actor) return;
+
+  // Eine an einen Bot gerichtete Kartenaktion muss der Server selbst
+  // beantworten - sonst wartet die Partie ewig auf einen Dialog, den niemand
+  // sieht. Bots waehlen bewusst simpel (erste Option / erstes Ziel); eine
+  // kluegere Auswahl waere ein eigenes Thema.
+  if (room.pendingCardAction) {
+    const p = findPlayer(room, room.pendingCardAction.playerId);
+    if (p && p.isBot) {
+      const snapshot = room.pendingCardAction;
+      room.botTimer = setTimeout(() => {
+        room.botTimer = null;
+        if (!rooms.has(room.code) || room.pendingCardAction !== snapshot) return;
+        resolveBotCardAction(room);
+        broadcastState(room);
+      }, randomDelay());
+    }
+    return;
+  }
 
   // Konsequenz eines Bots automatisch bestätigen (ohne manuelle Anpassung -
   // ein Bot "spielt einfach den Text nach bestem Wissen selbst nicht aus").
@@ -2877,6 +2983,8 @@ module.exports = {
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
   SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS, newEquipped, handleEquipItem, handleUnequipItem, equippedItemIds,
   MONSTER_AUTO_KILL_BY_RACE, MONSTER_PASS_OPTION, handleResolveCardChoice,
+  playerQueueFrom, openQueuedCardAction, advanceCardActionQueue, resolveBotCardAction,
+  handleResolveCardTarget, handleResolveCardCardChoice,
   MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
   FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
   MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
