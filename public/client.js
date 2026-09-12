@@ -1142,10 +1142,11 @@
     const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence && !state.pendingCardAction;
 
     const specialRule = (state.specialSlotItems || {})[c.name];
+    const isBig = (state.bigItems || []).includes(c.name);
     if ((c.category === 'item' || specialRule) && myTurn) {
       const label = specialRule
-        ? `Anlegen (${(state.specialSlots[specialRule.slot] || {}).label || specialRule.slot}${specialRule.races ? `, nur ${specialRule.races.join('/')}` : ''})`
-        : 'Anlegen';
+        ? `Anlegen (${(state.specialSlots[specialRule.slot] || {}).label || specialRule.slot}${specialRule.races ? `, nur ${specialRule.races.join('/')}` : ''}${isBig ? ', Großer Gegenstand' : ''})`
+        : `Anlegen${isBig ? ' (Großer Gegenstand)' : ''}`;
       const btn = mkBtn(label, () => socket.emit('equipItem', { cardId: id }));
       wrap.appendChild(btn);
     }
