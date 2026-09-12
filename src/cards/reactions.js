@@ -10,5 +10,13 @@ module.exports = () => {
   // automatisch gelungen war. Nur einmal einsetzbar."
   const ESCAPE_REACTION_CARDS = new Set(['KLEBERFLÄSCHCHEN']);
 
-  return { ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS };
+  // Tuerkarten mit aktiver Sonderkraft. handleUseCardPower kennt bisher nur
+  // Schatzkarten - diese Tabelle oeffnet denselben Weg fuer Tuerkarten.
+  const DOOR_POWER_CARDS = {
+    // "Alle Priester steigen sofort 1 Stufe auf. Dies darf die Siegesstufe
+    // sein." Kartenname in den Rohdaten ohne Umlaut.
+    'GOTTLICHE INTERVENTION': () => ({ type: 'levelUpAllPriests' }),
+  };
+
+  return { ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS };
 };

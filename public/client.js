@@ -1200,7 +1200,7 @@
     // Generische "Sonderkraft nutzen"-Aktion für Schatzkarten mit
     // automatisierter Fähigkeit (Sofort-Stufenaufstieg, kuratierte
     // Einzelfälle - siehe TREASURE_POWER_NAMES/isInstantLevelUpText unten).
-    if (myTurn && !state.pendingCardAction && hasTreasurePower(c)) {
+    if (myTurn && !state.pendingCardAction && (hasTreasurePower(c) || hasDoorPower(c))) {
       const btn = mkBtn('✨ Sonderkraft nutzen', () => socket.emit('useCardPower', { cardId: id }));
       wrap.appendChild(btn);
     }
@@ -1327,6 +1327,14 @@
     if (!c || c.category !== 'treasure_other') return false;
     if (TREASURE_POWER_NAMES.has(c.name)) return true;
     return INSTANT_LEVEL_UP_RE.test(c.text || '');
+  }
+
+  // Tuerkarten mit aktiver Sonderkraft (server.js: DOOR_POWER_CARDS) - Namen
+  // muessen dort synchron gehalten werden.
+  const DOOR_POWER_NAMES = new Set(['GOTTLICHE INTERVENTION']);
+
+  function hasDoorPower(c) {
+    return !!c && DOOR_POWER_NAMES.has(c.name);
   }
 
   const COMBAT_POTION_NAMES = new Set([

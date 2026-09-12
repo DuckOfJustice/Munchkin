@@ -760,6 +760,14 @@ function applyPrimitiveAction(room, player, action) {
     case 'levelUp':
       setLevel(player, player.level + action.amount);
       return `+${action.amount} Stufe(n) (jetzt Stufe ${player.level})`;
+    case 'levelUpAllPriests': {
+      const priester = room.players.filter((p) => hasClass(p, 'PRIESTER'));
+      if (!priester.length) return 'niemand ist Priester - keine Wirkung';
+      priester.forEach((p) => setLevel(p, p.level + 1));
+      // Ausdruecklich erlaubt: "Dies darf die Siegesstufe sein."
+      priester.forEach((p) => { if (!room.winner) checkWin(room, p); });
+      return `Priester steigen 1 Stufe auf: ${priester.map((p) => p.name).join(', ')}`;
+    }
     case 'drawTreasureN': {
       const drawn = [];
       for (let i = 0; i < action.n; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
@@ -1153,9 +1161,9 @@ const {
   POST_FLEE_ESCAPE_CARDS, GUARANTEED_FLEE_CARDS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
 } = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel });
 
-// ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS: siehe src/cards/reactions.js.
+// ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS: siehe src/cards/reactions.js.
 const reactionsFactory = require('./src/cards/reactions.js');
-const { ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS } = reactionsFactory();
+const { ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS } = reactionsFactory();
 
 // Eine Aktion, die mehrere Personen NACHEINANDER betrifft. specFor(playerId)
 // liefert je Person den Inhalt (kind/options/prompt/candidateIds) - so kann
@@ -1260,7 +1268,9 @@ function handleUseCardPower(room, playerId, cardId) {
   const c = card(cardId);
   if (!c) return;
   let spec;
-  if (TREASURE_POWER_OVERRIDES[c.name] !== undefined) {
+  if (DOOR_POWER_CARDS[c.name] !== undefined) {
+    spec = DOOR_POWER_CARDS[c.name](player, room);
+  } else if (TREASURE_POWER_OVERRIDES[c.name] !== undefined) {
     spec = TREASURE_POWER_OVERRIDES[c.name](player, room);
   } else if (isInstantLevelUpCard(c)) {
     spec = { type: 'levelUp', amount: 1 };
@@ -2589,7 +2599,10 @@ function handleSellItems(room, playerId, cardIds) {
   setLevel(player, player.level + levels);
   if (halblingBonus) log(room, `${player.name} ist Halbling und verkauft den teuersten Gegenstand zum doppelten Preis (+${halblingBonus} Goldstücke, einmal pro Runde).`);
   log(room, `${player.name} legt Gegenstände im Wert von ${total} Goldstücken ab und steigt ${levels} Stufe(n) auf (jetzt Stufe ${player.level}).`);
-  checkWin(room, player);
+  // Die Siegesstufe ist laut Regelwerk nur durch ein besiegtes Monster
+  // erreichbar - Verkaufen bringt auf Stufe 10, gewinnt aber nicht. Der Sieg
+  // faellt beim naechsten gewonnenen Kampf (resolveCombatWin ruft checkWin
+  // ohnehin auf). Einzige gedruckte Ausnahme: GOTTLICHE INTERVENTION.
   touchRoom(room);
 }
 
@@ -3184,4 +3197,5 @@ module.exports = {
   BIG_ITEMS, isBigItem, bigItemCount, canCarryAnotherBigItem,
   ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, reactionHolders, rollWithWindow,
   handlePlayReactionCard, handlePassReaction, LAMP_CARDS, lampCardIds, handleUseLamp,
+  handleUseCardPower, DOOR_POWER_CARDS,
 };
