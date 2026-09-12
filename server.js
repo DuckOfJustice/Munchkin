@@ -21,6 +21,9 @@ const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
+// Ganz oben, weil das big-Flag schon beim Einlesen der Kartendaten gebraucht
+// wird (siehe ALL_CARDS weiter unten).
+const { BIG_ITEMS, isBigItem } = require('./src/cards/bigitems.js');
 
 const app = express();
 const server = http.createServer(app);
@@ -39,6 +42,11 @@ const ALL_CARDS = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'cards
 // &<BR>TANZENDES SCHWERT") - einmal hier begradigt, dann stimmt es in Logs,
 // Kartenkacheln und Ausruestungsplaetzen gleichzeitig.
 ALL_CARDS.forEach((c) => { c.name = String(c.name).replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim(); });
+// "Grosser Gegenstand" einmalig ans Kartenobjekt haengen, statt die Namensliste
+// im Client ein zweites Mal zu pflegen: ALL_CARDS_MIN geht ohnehin komplett an
+// die Clients, damit kennt die Grossansicht das Flag ohne eigene Tabelle - und
+// es kann gar nicht erst von der Serverliste abweichen.
+ALL_CARDS.forEach((c) => { c.big = isBigItem(c); });
 const CARDS_BY_ID = new Map(ALL_CARDS.map((c) => [c.id, c]));
 const SET_KEYS = ['base', 'clericalerrors', 'pixelsandpaperpromos', 'unnaturalaxe', 'pathfinder'];
 const SET_LABELS = {
@@ -295,8 +303,6 @@ function equippedItemIds(player) {
   return [player.equipped.head, player.equipped.armor, player.equipped.feet, ...player.equipped.hands,
     ...SPECIAL_SLOT_KEYS.flatMap((k) => specialSlotCards(player, k))].filter(Boolean);
 }
-
-const { BIG_ITEMS, isBigItem } = require('./src/cards/bigitems.js');
 
 // ZWERG: "Du kannst eine beliebige Anzahl Grosser Gegenstaende tragen und
 // ausruesten." Alle anderen duerfen genau einen tragen.

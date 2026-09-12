@@ -1479,6 +1479,23 @@
     return div;
   }
 
+  // Werte-Zeile fuer die Grossansicht: zeigt nur, was die Karte wirklich hat -
+  // eine Monsterkarte hat keinen Slot, ein Schatz keine Stufe. "Grosser
+  // Gegenstand" kommt als c.big direkt vom Server mit (siehe ALL_CARDS in
+  // server.js), damit hier keine zweite Namensliste gepflegt werden muss.
+  function cardValuesHtml(c) {
+    const teile = [];
+    if (typeof c.level === 'number') teile.push(`Stufe ${c.level}`);
+    if (typeof c.treasureCount === 'number') teile.push(`🎁 ${c.treasureCount} Schatz/Schaetze`);
+    if (c.slotLabel) teile.push(escapeHtml(c.slotLabel));
+    if (c.handsCost) teile.push(`${c.handsCost} Hand${c.handsCost > 1 ? 'e' : ''}`);
+    if (c.bonus) teile.push(`${c.bonus > 0 ? '+' : ''}${c.bonus} im Kampf`);
+    if (typeof c.gold === 'number' && c.gold > 0) teile.push(`${c.gold} GS`);
+    if (c.big) teile.push('📦 <b>Grosser Gegenstand</b>');
+    if (!teile.length) return '';
+    return `<p class="cardvalues">${teile.join(' &middot; ')}</p>`;
+  }
+
   function openCardModal(id) {
     const c = card(id);
     const img = new Image();
@@ -1488,6 +1505,7 @@
     img.onerror = () => img.remove();
     $('cardModalBody').innerHTML = `<h3>${escapeHtml(c.name)}</h3>` +
       `<p class="hint">${CATEGORY_LABELS[c.category] || ''} - ${escapeHtml(c.setLabel || '')}</p>` +
+      cardValuesHtml(c) +
       (c.text ? `<p>${formatCardText(c.text)}</p>` : '') +
       (c.badstuff ? `<p><b>Schlimme Dinge:</b> ${formatCardText(c.badstuff)}</p>` : '');
     $('cardModalBody').prepend(img);
