@@ -148,6 +148,9 @@ function newPlayer(name, socketId, isBot) {
     equipped: newEquipped(),
     // SCHUMMELN!: hebt fuer genau einen Gegenstand die Anlege-Regeln auf.
     attachments: { cheatedItemId: null },
+    // Anhaltende Flueche (MIESER SPIEGEL, GESCHLECHTSUMWANDLUNG, HUHN AUF
+    // DEINEM KOPF, WINZIGE HÄNDE) - siehe LINGERING_CURSES/addActiveCurse.
+    activeCurses: [],
   };
 }
 
@@ -380,6 +383,7 @@ function publicPlayer(room, p) {
     handCount: p.hand.length,
     equipped: p.equipped,
     attachments: p.attachments, // SCHUMMELN!: markiert den geschummelten Gegenstand fuer den Client
+    activeCurses: p.activeCurses, // anhaltende Flueche, siehe LINGERING_CURSES
     strength: baseStrength(p),
     handLimit: handLimit(p), // ZWERG darf 6 Karten halten, alle anderen 5
   };
@@ -508,6 +512,7 @@ function startGame(room) {
     p.classes = [];
     p.hand = [];
     p.equipped = newEquipped();
+    p.activeCurses = [];
     for (let i = 0; i < 4; i++) {
       const d = drawDoor(room); if (d) p.hand.push(d);
       const t = drawTreasure(room); if (t) p.hand.push(t);
@@ -607,7 +612,7 @@ function handleDrawDoor(room, playerId) {
     } else {
       room.pendingConsequence = { playerId: player.id, kind: 'curse', cardId: id, text: c.text || c.name, autoApplied: null, choice: null };
       log(room, `Fluch! ${player.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
-      autoApplyLossConsequence(room, player, [{ name: c.name, text: c.text }]);
+      autoApplyLossConsequence(room, player, [{ name: c.name, text: c.text, cardId: id }]);
     }
   } else {
     // Karte bleibt offen auf dem Tisch liegen (wie ein Monster), bis sie per
@@ -1031,6 +1036,11 @@ function applyPrimitiveAction(room, player, action) {
       return action.actions.map((a) => applyPrimitiveAction(room, player, a)).join('; ');
     case 'noEffect':
       return 'kein spielmechanischer Effekt';
+    // WUNSCHRING: "Beendet jeden Fluch." - siehe TREASURE_POWER_OVERRIDES.
+    case 'clearCurse': {
+      const removed = clearActiveCurse(room, player, action.index);
+      return removed ? `Fluch "${removed.name}" beendet` : 'kein Fluch (mehr) vorhanden';
+    }
     default:
       return '';
   }
@@ -1111,6 +1121,9 @@ function autoApplyLossConsequence(room, player, sources) {
   const parts = [];
   sources.forEach((s) => {
     const spec = resolveConsequenceSpec(s.name, s.text, player, room);
+    // Anhaltende Flüche: zusätzlich zum (fehlenden) Sofort-Effekt den Tracker
+    // eintragen - unabhängig davon, ob spec null/choice/eine Aktion ist.
+    if (LINGERING_CURSES[s.name]) addActiveCurse(room, player, s.name, s.cardId);
     if (!spec || spec.type === 'choice') return; // Mehrere Quellen mit echter Wahl gleichzeitig: bewusst manuell
     const desc = applyPrimitiveAction(room, player, spec);
     if (desc) parts.push(`${s.name}: ${desc}`);
@@ -1182,9 +1195,12 @@ const {
   POST_FLEE_ESCAPE_CARDS, GUARANTEED_FLEE_CARDS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
 } = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel });
 
-// ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS: siehe src/cards/reactions.js.
+// ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES:
+// siehe src/cards/reactions.js.
 const reactionsFactory = require('./src/cards/reactions.js');
-const { ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS } = reactionsFactory();
+const {
+  ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES,
+} = reactionsFactory();
 
 // Eine Aktion, die mehrere Personen NACHEINANDER betrifft. specFor(playerId)
 // liefert je Person den Inhalt (kind/options/prompt/candidateIds) - so kann
@@ -1503,6 +1519,57 @@ const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 function curseProtectionItem(player) {
   return equippedItemIds(player).find((id) => { const c = card(id); return c && CURSE_PROOF_ITEMS.has(c.name); }) || null;
 }
+
+// --- Anhaltende Flüche (M1) -------------------------------------------------
+// LINGERING_CURSES (src/cards/reactions.js): Flüche, die nach dem Ziehen
+// weiterwirken statt nur einmalig. Ergänzt CONSEQUENCE_OVERRIDES (die dort
+// bleiben `() => null`/`noEffect`, weil sie keinen SOFORT-Effekt haben) um
+// einen laufenden Zustand je Spieler:in.
+function addActiveCurse(room, player, cardName, cardId) {
+  const regel = LINGERING_CURSES[cardName];
+  if (!regel) return;
+  // ponytail: defensiv statt eine Invariante vorauszusetzen - ältere
+  // Test-Helper/Spielstände ohne activeCurses sollen nicht abstürzen.
+  if (!player.activeCurses) player.activeCurses = [];
+  player.activeCurses.push({
+    cardId, name: cardName, kind: regel.kind, amount: regel.amount || 0, dauer: regel.dauer,
+  });
+  log(room, `${player.name} steht unter dem Fluch "${cardName}".`);
+}
+
+// Rückgabewert statt eigenem log() - die aufrufende Stelle (applyPrimitiveAction
+// 'clearCurse' -> handleUseCardPower/handleResolveCardChoice) loggt bereits
+// einheitlich "X spielt WUNSCHRING: ...", wie bei jeder anderen Sonderkraft.
+function clearActiveCurse(room, player, index) {
+  return (player.activeCurses || []).splice(index, 1)[0] || null;
+}
+
+// "Nächster Kampf"-Flüche gelten für GENAU den einen folgenden Kampf - egal
+// ob er mit Sieg oder Flucht endet. Wird an beiden Stellen aufgerufen, an
+// denen ein Kampf wirklich vorbei ist (resolveCombatWin, finishFleeSuccess).
+function clearNextCombatCurses(players) {
+  (players || []).forEach((p) => {
+    if (!p || !p.activeCurses || !p.activeCurses.length) return;
+    p.activeCurses = p.activeCurses.filter((f) => f.dauer !== 'naechsterKampf');
+  });
+}
+
+function curseCombatModifier(player) {
+  return (player.activeCurses || [])
+    .filter((f) => f.kind === 'combatMalus')
+    .reduce((sum, f) => sum + f.amount, 0);
+}
+
+function curseSuppressesItemBonuses(player) {
+  return (player.activeCurses || []).some((f) => f.kind === 'noItemBonusExceptArmor');
+}
+
+// ponytail: 'rollMalus' (HUHN AUF DEINEM KOPF) und 'noTwoHandedItems'
+// (WINZIGE HÄNDE) werden getrackt und angezeigt, aber nicht mechanisch
+// durchgesetzt (kein Abzug in rollDie, keine Anlege-Sperre in
+// handleEquipItem) - wie die übrigen Dauer-Mali ohne eigenen Tracker vorher
+// bleiben sie bewusst manuell. Ausbauweg: rollDie um curseRollModifier(player)
+// ergänzen bzw. handleEquipItem für zweihändige Gegenstände sperren.
 
 // --- Monster, die bestimmte Munchkins gar nicht angreifen ------------------
 // siehe MONSTER_REFUSES in src/cards/passives.js. Das Monster zieht weiter:
@@ -1894,8 +1961,17 @@ function combatTotals(room) {
     // ausgespielten Karten. Monster-Verstärker bleiben davon unberührt.
     playerStrength = sides.reduce((sum, p) => sum + p.level, 0);
   } else {
-    playerStrength = sides.reduce((sum, p) => sum + baseStrength(p) + conditionalItemBonusSum(p, monsters) -
-      (ignoreLevel ? p.level : 0), 0) + c.actorModifier;
+    playerStrength = sides.reduce((sum, p) => {
+      // MIESER SPIEGEL: "keine Boni durch Gegenstände, die einzige Ausnahme
+      // sind Rüstungsboni" - sonst zaehlen Ausruestung + situative Item-Boni
+      // wie gewohnt. hellknightArmorBonus bleibt in beiden Faellen stehen
+      // (kein regulaerer Gegenstands-Slot, siehe Kommentar dort).
+      const items = curseSuppressesItemBonuses(p)
+        ? ((card(p.equipped.armor) || {}).bonus || 0)
+        : equippedBonusSum(p) + conditionalItemBonusSum(p, monsters);
+      return sum + p.level + items + hellknightArmorBonus(p)
+        + curseCombatModifier(p) - (ignoreLevel ? p.level : 0);
+    }, 0) + c.actorModifier;
   }
   // DOPPELGAENGER: "Verdopple deine Kampfstaerke" - auf die fertige Summe der
   // Munchkin-Seite, gespielte Karten eingeschlossen.
@@ -2249,6 +2325,9 @@ function resolveCombatWin(room) {
   const c = room.combat;
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
+  // MIESER SPIEGEL/GESCHLECHTSUMWANDLUNG gelten nur "im nächsten Kampf" -
+  // der ist hiermit vorbei (gewonnen).
+  clearNextCombatCurses([actor, helper]);
   const monsters = c.monsterIds.map(card);
   // 1 Stufe pro besiegtem Monster, dazu die kartenspezifischen Bonusstufen
   // und -schätze (Bossmonster, PIKOTZU ohne Hilfe, Feuer gegen das Huhn,
@@ -2385,6 +2464,11 @@ function applyFleeSuccess(room, actor, c) {
 }
 
 function finishFleeSuccess(room, actor, c) {
+  // MIESER SPIEGEL/GESCHLECHTSUMWANDLUNG gelten nur "im nächsten Kampf" -
+  // der ist hiermit vorbei (geflohen). Helfer:in ist an einer Flucht nicht
+  // beteiligt (siehe handleAttemptFlee: nur actor würfelt), daher hier nur
+  // die/der Fliehende.
+  clearNextCombatCurses([actor]);
   let penalty = 0;
   c.monsterIds.forEach((id) => {
     const m = card(id);
@@ -2470,6 +2554,9 @@ function handleUseLamp(room, playerId, cardId, monsterId) {
 // Das Miese Zeug nach einem endgueltig gescheiterten Weglaufwurf. Steht
 // separat, weil beim HALBLING noch eine Entscheidung dazwischen liegt.
 function applyFleeFailure(room, actor, c) {
+  // Auch eine misslungene Flucht beendet "den nächsten Kampf" - sonst würde
+  // der Fluch fälschlich in einen weiteren, künftigen Kampf hineinwirken.
+  clearNextCombatCurses([actor]);
   const monsters = c.monsterIds.map(card);
   const badstuffText = monsters.map((m) => `${m.name}: ${m.badstuff || '(kein Text hinterlegt)'}`).join(' | ');
   c.monsterIds.forEach((id) => room.doorDiscard.push(id));
@@ -3283,4 +3370,6 @@ module.exports = {
   ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, reactionHolders, rollWithWindow,
   handlePlayReactionCard, handlePassReaction, LAMP_CARDS, lampCardIds, handleUseLamp,
   handleUseCardPower, DOOR_POWER_CARDS,
+  LINGERING_CURSES, addActiveCurse, clearActiveCurse, curseCombatModifier, curseSuppressesItemBonuses,
+  clearNextCombatCurses,
 };

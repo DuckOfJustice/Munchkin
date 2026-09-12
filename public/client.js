@@ -447,6 +447,7 @@
         (p.id === myInfo.playerId ? '<span class="tag you">Du</span> ' : '') +
         (!p.connected ? '<span class="tag off">offline</span> ' : '') +
         `<span class="tag">Stufe ${p.level}</span> <span class="tag">⚔ ${p.strength}</span> <span class="tag">🎒 ${equip}</span>` +
+        (p.activeCurses && p.activeCurses.length ? ` <span class="tag">🌀 Fluch x${p.activeCurses.length}</span>` : '') +
         `</span>`;
       row.title = 'Klicken für Ausrüstung';
       row.addEventListener('click', () => openPlayerModal(p.id));
@@ -1335,7 +1336,7 @@
     'KLAUE EINE STUFE', 'SINNIEREN', 'SINNLOSER AKT DER FREUNDLICHKEIT',
     'JAMMER DEN SPIELLEITER AN', 'CHARAKTERSEITEN WECHSELN',
     'ENTE DER VIELEN SACHEN',
-    'SCHATZHORT!', 'WÜNSCHELSTAB', 'GEDENKTAFEL',
+    'SCHATZHORT!', 'WÜNSCHELSTAB', 'GEDENKTAFEL', 'WUNSCHRING',
   ]);
   const INSTANT_LEVEL_UP_RE = /^\s*Steige\s+(?:eine|\d+)\s+Stufen?\s+auf\b/i;
 

@@ -59,6 +59,20 @@ module.exports = (ctx) => {
     // beim Ausspielen ohnehin abgelegt.)
     'WÜNSCHELSTAB': () => ({ type: 'chooseDiscardedCard' }),
     'GEDENKTAFEL': (player, room) => (room.combat ? null : { type: 'chooseDiscardedCard' }),
+
+    // "Beendet jeden Fluch. Jederzeit spielbar. Nur einmal einsetzbar." - mit
+    // genau einem aktiven Fluch braucht es keinen Wahldialog dafür.
+    'WUNSCHRING': (player) => {
+      const flueche = player.activeCurses || [];
+      if (!flueche.length) return null; // nichts zu beenden
+      if (flueche.length === 1) return { type: 'clearCurse', index: 0 };
+      return {
+        type: 'choice',
+        options: flueche.map((f, i) => ({
+          id: `fluch-${i}`, label: `"${f.name}" beenden`, action: { type: 'clearCurse', index: i },
+        })),
+      };
+    },
   };
 
   const COMBAT_POTION_OVERRIDES = {
