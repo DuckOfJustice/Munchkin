@@ -5,7 +5,9 @@
 // (bleibt manuell), oder `undefined` um an den generischen Regex-Fallback
 // durchzureichen.
 module.exports = (ctx) => {
-  const { card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec } = ctx;
+  const {
+    card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
+  } = ctx;
 
   const CONSEQUENCE_OVERRIDES = {
     // --- Eindeutiger Tod in ungewöhnlicher Formulierung ---
@@ -23,6 +25,7 @@ module.exports = (ctx) => {
     'TOPFPFLANZE': () => ({ type: 'noEffect' }), // "Keine. Automatische Flucht."
 
     // --- Fester Ausrüstungsverlust (kein Auswahl nötig) ---
+    'GALLERT-OKTAEDER': () => ({ type: 'discardBigItem' }), // "Lass alle deine Großen Gegenstände fallen."
     'BIGFOOT': () => ({ type: 'discardSlot', slot: 'head' }),
     'RIESENKAKERLAKE': () => ({ type: 'discardSlot', slot: 'head' }),
     'FÜRST YAHOO': () => ({ type: 'discardSlot', slot: 'head' }),
@@ -126,9 +129,9 @@ module.exports = (ctx) => {
           { id: 'group', label: 'Machtgruppe (Kundschafter) ablegen', action: { type: 'discardPowerGroupCards' } },
         ] }
       : { type: 'levelDelta', amount: 1 }),
-    // Bewusst NICHT automatisch: "Großer Gegenstand"-Bezug (kein Datenfeld) -
-    // bleibt manuell, wie die anderen "Großer Gegenstand"-Fälle im Spiel:
-    'GRÜNSCHLEIM': () => null,
+    // "VERLIERE 1 GROSSEN GEGENSTAND. Wenn du keinen Großen Gegenstand hast,
+    // verliere 1 Stufe."
+    'GRÜNSCHLEIM': (player) => (bigItemCount(player) ? { type: 'discardBigItem' } : { type: 'levelDelta', amount: 1 }),
     // Betrifft, WELCHE Karte(n) andere Spieler:innen von der eigenen Hand
     // nehmen (freie/zufällige Auswahl, in den Rohdaten nicht festgelegt) -
     // bleibt bewusst manuell:
@@ -191,9 +194,12 @@ module.exports = (ctx) => {
     'VERLIERE ZWEI KARTEN': () => ({ type: 'giveHandCardsToNeighbors' }),
     // "Verliere 2 Stufen" (fällt bereits unter den generischen Fallback, hier
     // nur zur Klarheit/Dokumentation nicht nötig - kein Override nötig).
-    // Bewusst NICHT automatisch (freie Auswahl aus dem gesamten Ablagestapel
-    // ohne Wertgrenze in den Rohdaten, o.ä.) - bleibt manuell:
-    'VERLIERE 1 GROSSEN GEGENSTAND': () => null,
+    // "Wähle einen Großen Gegenstand aus, den du ablegst."
+    // ponytail: discardBigItem legt ALLE getragenen Großen Gegenstände ab,
+    // nicht nur einen ausgewählten - für Nicht-Zwerge (max. 1) ohne
+    // Unterschied, bei einem Zwerg mit mehreren zu grob. Upgrade: eigene
+    // 'chooseBigItem'-Aktion mit Auswahl-UI, falls das je relevant wird.
+    'VERLIERE 1 GROSSEN GEGENSTAND': () => ({ type: 'discardBigItem' }),
     'VERLIERE 1 KLEINEN GEGENSTAND': () => null,
     // Persistente Mali/Flags ohne laufenden Status-Tracker in diesem Server -
     // bleiben nach dem Einordnen als Fluch bewusst manuell/nur textlich:

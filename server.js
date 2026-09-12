@@ -263,6 +263,18 @@ function equippedItemIds(player) {
     ...SPECIAL_SLOT_KEYS.flatMap((k) => specialSlotCards(player, k))].filter(Boolean);
 }
 
+const { BIG_ITEMS, isBigItem } = require('./src/cards/bigitems.js');
+
+// ZWERG: "Du kannst eine beliebige Anzahl Grosser Gegenstaende tragen und
+// ausruesten." Alle anderen duerfen genau einen tragen.
+function bigItemCount(player) {
+  return equippedItemIds(player).filter((id) => isBigItem(card(id))).length;
+}
+
+function canCarryAnotherBigItem(player) {
+  return hasRace(player, 'ZWERG') || bigItemCount(player) < 1;
+}
+
 function equippedBonusSum(player) {
   return equippedItemIds(player).reduce((sum, id) => {
     const c = card(id);
@@ -357,6 +369,10 @@ function publicState(room) {
     // keine zweite Kartenliste (er zeigt nur Knopf und Platz an).
     specialSlots: SPECIAL_SLOTS,
     specialSlotItems: SPECIAL_SLOT_ITEMS,
+    // Statische Liste fuer den Hinweistext am "Anlegen"-Knopf (siehe
+    // BIG_ITEMS in src/cards/bigitems.js) - die eigentliche Durchsetzung
+    // bleibt serverseitig in handleEquipItem.
+    bigItems: [...BIG_ITEMS],
     doorCombatCards: Object.keys(DOOR_COMBAT_CARDS),
     turnIndex: room.turnIndex,
     turnPlayerId: room.players[room.turnIndex] ? room.players[room.turnIndex].id : null,
@@ -757,6 +773,14 @@ function applyPrimitiveAction(room, player, action) {
       discardCard(room, id);
       return `${slotLabelDe(action.slot)} "${card(id).name}" abgelegt`;
     }
+    case 'discardBigItem': {
+      // GALLERT-OKTAEDER: "Lass ALLE deine Grossen Gegenstaende fallen." -
+      // deshalb alle betroffenen, nicht nur einer.
+      const ids = equippedItemIds(player).filter((id) => isBigItem(card(id)));
+      if (!ids.length) return 'kein Grosser Gegenstand getragen';
+      ids.forEach((id) => { unequipSlotCard(player, id); discardCard(room, id); });
+      return `Grosse Gegenstaende abgelegt: ${ids.map((id) => card(id).name).join(', ')}`;
+    }
     case 'discardAllEquipped': {
       const ids = equippedItemIds(player);
       if (!ids.length) return 'keine Ausrüstung getragen';
@@ -950,7 +974,7 @@ function applyPrimitiveAction(room, player, action) {
 const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
   card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
-  resolveConsequenceSpec,
+  resolveConsequenceSpec, bigItemCount,
 });
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
@@ -2228,6 +2252,11 @@ function handleEquipItem(room, playerId, cardId) {
   if (!player || !player.hand.includes(cardId)) return;
   const c = card(cardId);
   if (!c) return;
+  if (isBigItem(c) && !canCarryAnotherBigItem(player)) {
+    log(room, `${player.name} kann "${c.name}" nicht anlegen - Grosser Gegenstand, und es wird bereits einer getragen (nur Zwerge duerfen mehrere).`);
+    touchRoom(room);
+    return;
+  }
   // Spezialausruestung zuerst: diese Karten sind keine 'item'-Karten und
   // haben keinen slotKind, gehoeren aber trotzdem angelegt.
   const special = specialSlotRule(c);
@@ -2857,4 +2886,5 @@ module.exports = {
   handleSetCombatReady, combatReadyRequired, combatAllReady, refreshCombatReady,
   handleSetCombatModifier, handlePlayCombatCard,
   handleProposeTrade, handleCancelTrade, handleRespondTrade, tradableCardIds,
+  BIG_ITEMS, isBigItem, bigItemCount, canCarryAnotherBigItem,
 };
