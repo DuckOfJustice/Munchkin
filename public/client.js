@@ -767,6 +767,26 @@
       div.appendChild(el);
     });
 
+    // Bedingtes Reaktionsfenster: GEZINKTER WÜRFEL (auf den Weglaufwurf) und
+    // KLEBERFLÄSCHCHEN (auf eine gelungene Flucht). Beide Felder kommen
+    // direkt vom Server - das eigentliche Ausspielen passiert an der
+    // jeweiligen Handkarte (siehe handActionsFor), hier nur Hinweis + Passen.
+    if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId)) {
+      const row = document.createElement('div');
+      row.className = 'row gap wrap';
+      const werfer = state.players.find((p) => p.id === state.pendingRoll.playerId);
+      row.appendChild(textNode(`${werfer ? werfer.name : '?'} hat ${state.pendingRoll.roll} gewürfelt - du darfst noch mit "GEZINKTER WÜRFEL" reagieren.`));
+      row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
+      div.appendChild(row);
+    }
+    if (c.escapeReactionOffer && c.escapeReactionOffer.includes(myInfo.playerId)) {
+      const row = document.createElement('div');
+      row.className = 'row gap wrap';
+      row.appendChild(textNode(`${actor.name} ist entkommen - du darfst noch ein "KLEBERFLÄSCHCHEN" spielen und die Flucht wiederholen lassen.`));
+      row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
+      div.appendChild(row);
+    }
+
     // Jede:r am Tisch darf hier eingreifen - nicht nur Angreifer:in/Helfer:in -
     // um z.B. einen Fluch oder eine Hilfskarte zu verrechnen, die nicht
     // automatisch erkannt wird (Monster-Verstärkerkarten mit festem Bonus
@@ -873,11 +893,23 @@
       const wege = [];
       if (c.canReroll) wege.push('als Halbling 1 Handkarte ablegen (Knopf unter der Karte) und noch einmal würfeln');
       if (escapeIds.length) wege.push('eine Rettungskarte ablegen und automatisch entkommen');
+      const lampIds = myInfo.lampCardIds || [];
+      if (lampIds.length) wege.push('die Magische Lampe nutzen und ein Monster verschwinden lassen');
       div.appendChild(textNode(`Der Wurf ist misslungen - du kannst noch ${wege.join(' oder ')}. Oder du stellst dich dem Miesen Zeug.`));
       escapeIds.forEach((escId) => {
         const btn = mkBtn(`🫥 "${card(escId).name}" ablegen und automatisch entkommen`, () => socket.emit('fleeEscape', { cardId: escId }));
         btn.className = 'primary';
         div.appendChild(btn);
+      });
+      // MAGISCHE LAMPE: pro gehaltener Lampe und pro Monster im Kampf ein
+      // Knopf - war es das einzige Monster, gibt es dafür noch seinen Schatz.
+      lampIds.forEach((lampId) => {
+        c.monsterIds.forEach((monsterId) => {
+          const btn = mkBtn(`🧞 "${card(lampId).name}": "${card(monsterId).name}" verschwinden lassen`,
+            () => socket.emit('useLamp', { cardId: lampId, monsterId }));
+          btn.className = 'primary';
+          div.appendChild(btn);
+        });
       });
       const acceptBtn = mkBtn('Miesem Zeug stellen', () => socket.emit('fleeReroll', { cardId: null }));
       div.appendChild(acceptBtn);
@@ -1229,6 +1261,23 @@
     // während tatsächlich geflohen werden muss.
     if (guaranteedFleeUsable(c)) {
       const btn = mkBtn(`🛡️ Garantiert entkommen mit "${c.name}"`, () => socket.emit('useGuaranteedFlee', { cardId: id }));
+      btn.className = 'primary';
+      wrap.appendChild(btn);
+    }
+    // GEZINKTER WÜRFEL: nur, solange das Reaktionsfenster für genau diese
+    // Person offen ist (state.pendingRoll.holders).
+    if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId) && c.name === 'GEZINKTER WÜRFEL') {
+      const btn = mkBtn('🎲 Wurf ändern', () => {
+        const v = Number(window.prompt('Neues Würfelergebnis (1-6)?', String(state.pendingRoll.roll)));
+        if (v >= 1 && v <= 6) socket.emit('playReactionCard', { cardId: id, value: v });
+      });
+      btn.className = 'primary';
+      wrap.appendChild(btn);
+    }
+    // KLEBERFLÄSCHCHEN: nur, solange das Fluchtreaktionsfenster für genau
+    // diese Person offen ist (combat.escapeReactionOffer).
+    if (state.combat && (state.combat.escapeReactionOffer || []).includes(myInfo.playerId) && c.name === 'KLEBERFLÄSCHCHEN') {
+      const btn = mkBtn('🧪 Kleberfläschchen: Flucht wiederholen lassen', () => socket.emit('playReactionCard', { cardId: id }));
       btn.className = 'primary';
       wrap.appendChild(btn);
     }

@@ -1,0 +1,253 @@
+// Bedingtes Reaktionsfenster (Task 4): GEZINKTER WÜRFEL reagiert auf einen
+// Wurf, KLEBERFLÄSCHCHEN auf eine gelungene Flucht - beide brauchen ein
+// Zeitfenster, das es sonst nirgends gibt. MAGISCHE LAMPE braucht KEIN neues
+// Fenster, sie haengt am bestehenden Fluchtentscheidungsfenster.
+//
+// Der zentrale Kern, den dieser Test am haertesten prueft: haelt NIEMAND
+// eine passende Karte, muss rollWithWindow synchron und bitgleich zum
+// bisherigen Verhalten aufloesen - genau das schuetzt die bestehenden
+// Wuerfel- und Fluchtpfade (card-passives.test.js) vor Verhaltensaenderung.
+const assert = require('assert');
+const {
+  ALL_CARDS, reactionHolders, rollWithWindow, ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS,
+  newEquipped, handleAttemptFlee, handlePlayReactionCard, handlePassReaction, handleUseLamp,
+} = require('../server.js');
+
+function findCard(name, category) {
+  const c = ALL_CARDS.find((x) => x.name === name && (!category || x.category === category));
+  if (!c) throw new Error(`Testkarte nicht gefunden: ${name}`);
+  return c;
+}
+
+function makePlayer(overrides) {
+  return Object.assign({
+    id: 'p1', name: 'A', level: 5, hand: [], races: [], classes: [], powerGroups: [],
+    raceCapCard: null, classCapCard: null, powerGroupCapCard: null,
+    equipped: newEquipped(), isBot: false, connected: true,
+  }, overrides || {});
+}
+
+const treasureFiller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 20).map((c) => c.id);
+
+function makeRoom(extra) {
+  return Object.assign({
+    code: 'TEST',
+    players: [makePlayer({ id: 'p1', name: 'A' }), makePlayer({ id: 'p2', name: 'B' })],
+    turnIndex: 0, turnPhase: 'kampf', combatHappenedThisTurn: true,
+    doorDeck: [], doorDiscard: [], treasureDeck: treasureFiller.slice(), treasureDiscard: [],
+    revealedDoorCard: null, doorReveal: null, dieRoll: null,
+    combat: null, pendingConsequence: null, pendingCardAction: null, pendingRoll: null,
+    winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+    settings: { sets: {} },
+  }, extra || {});
+}
+
+function done(room) {
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  if (room.botTimer) clearTimeout(room.botTimer);
+  return room;
+}
+
+// Kampf-Raum, in dem p1 fliehen muss.
+function fleeRoom(monsterNames, actorOverrides, combatOverrides) {
+  const ids = monsterNames.map((n) => findCard(n, 'monster').id);
+  const room = makeRoom({
+    combat: Object.assign({
+      actorId: 'p1', helperId: null, helperPending: null, monsterIds: ids,
+      actorModifier: 0, monsterModifier: 0, mustFlee: true, fromHand: false,
+    }, combatOverrides || {}),
+  });
+  Object.assign(room.players[0], actorOverrides || {});
+  return room;
+}
+
+function run() {
+  // -------------------------------------------------------------------
+  // Kartennamen/-mengen stimmen mit den Rohdaten ueberein
+  // -------------------------------------------------------------------
+  assert.ok(findCard('GEZINKTER WÜRFEL') && ROLL_REACTION_CARDS.has('GEZINKTER WÜRFEL'));
+  assert.ok(findCard('KLEBERFLÄSCHCHEN') && ESCAPE_REACTION_CARDS.has('KLEBERFLÄSCHCHEN'));
+  assert.ok(findCard('MAGISCHE LAMPE'));
+
+  // -------------------------------------------------------------------
+  // rollWithWindow: das zentrale Verhalten, das bestehende Pfade schuetzt
+  // -------------------------------------------------------------------
+  {
+    // Niemand haelt die Karte -> sofort und synchron aufgeloest, kein Fenster.
+    const room = makeRoom();
+    let gesehen = null;
+    rollWithWindow(room, room.players[0], 'test', (roll) => { gesehen = roll; });
+    assert.ok(gesehen !== null, 'ohne Reaktionskarte muss sofort aufgeloest werden');
+    assert.ok(gesehen >= 1 && gesehen <= 6, 'Wurf muss 1..6 sein');
+    assert.ok(!room.pendingRoll, 'es darf kein Fenster offen bleiben');
+  }
+  {
+    // Ein Bot haelt die Karte -> zaehlt nicht, kein Fenster.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const room = makeRoom({ players: [makePlayer({ id: 'p1' }), makePlayer({ id: 'bot', hand: [wuerfel.id], isBot: true })] });
+    let gesehen = null;
+    rollWithWindow(room, room.players[0], 'test', (roll) => { gesehen = roll; });
+    assert.ok(gesehen !== null, 'Bots spielen keine Reaktionskarten - kein Fenster');
+    assert.ok(!room.pendingRoll);
+  }
+  {
+    // Eine getrennte Person haelt die Karte -> zaehlt ebenfalls nicht.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const room = makeRoom({ players: [makePlayer({ id: 'p1' }), makePlayer({ id: 'weg', hand: [wuerfel.id], connected: false })] });
+    let gesehen = null;
+    rollWithWindow(room, room.players[0], 'test', (roll) => { gesehen = roll; });
+    assert.ok(gesehen !== null, 'Getrennte oeffnen kein Fenster');
+  }
+  {
+    // Eine verbundene, menschliche Person haelt die Karte -> Fenster offen.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const room = makeRoom({ players: [makePlayer({ id: 'p1' }), makePlayer({ id: 'p2', hand: [wuerfel.id] })] });
+    let gesehen = null;
+    rollWithWindow(room, room.players[0], 'test', (roll) => { gesehen = roll; });
+    assert.strictEqual(gesehen, null, 'mit Reaktionskarte darf noch nicht aufgeloest werden');
+    assert.ok(room.pendingRoll, 'Fenster muss offen sein');
+    assert.deepStrictEqual(reactionHolders(room, ROLL_REACTION_CARDS), ['p2']);
+  }
+
+  // -------------------------------------------------------------------
+  // GEZINKTER WÜRFEL am echten Weglaufwurf (handleAttemptFlee)
+  // -------------------------------------------------------------------
+  {
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const room = fleeRoom(['LAHMER GOBLIN'], null, null);
+    room.players[1].hand = [wuerfel.id];
+    handleAttemptFlee(room, 'p1', 0);
+    assert.ok(room.pendingRoll, 'mit Karte auf einer fremden Hand muss der Wurf erst im Fenster stehen');
+    assert.strictEqual(room.combat.actorId, 'p1', 'der Kampf selbst bleibt bis zur Aufloesung unveraendert stehen');
+    assert.strictEqual(room.dieRoll, null, 'die Wuerfelanimation darf vor der Aufloesung noch nicht gesetzt sein');
+
+    // Fremde Spielerin darf nicht mitreden.
+    handlePlayReactionCard(room, 'p1', wuerfel.id, 6);
+    assert.ok(room.pendingRoll, 'nur die Halterin des Fensters darf reagieren');
+
+    // p2 aendert den Wurf auf 6 -> total 6, damit garantiert Erfolg.
+    const handVorher = room.players[1].hand.length;
+    handlePlayReactionCard(room, 'p2', wuerfel.id, 6);
+    assert.ok(!room.pendingRoll, 'nach dem Spielen loest sich das Fenster auf');
+    assert.strictEqual(room.dieRoll.roll, 6, 'der geaenderte Wurf muss uebernommen werden');
+    assert.strictEqual(room.dieRoll.success, true, 'Wurf 6 muss gegen den Lahmen Goblin gelingen');
+    assert.strictEqual(room.players[1].hand.length, handVorher - 1, 'die Karte wird beim Spielen abgelegt');
+    assert.ok(room.treasureDiscard.includes(wuerfel.id), 'und landet auf dem Schatz-Ablagestapel');
+    done(room);
+  }
+  {
+    // Alle Halter:innen passen -> der urspruengliche Wurf gilt unveraendert.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const room = fleeRoom(['FILZLAUSE'], null, null); // FLEE_IMPOSSIBLE: Erfolg ist unmoeglich, Ergebnis bleibt trotzdem eindeutig pruefbar
+    room.players[1].hand = [wuerfel.id];
+    handleAttemptFlee(room, 'p1', 0);
+    assert.ok(room.pendingRoll);
+    const urspruenglich = room.pendingRoll.roll;
+    handlePassReaction(room, 'p2');
+    assert.ok(!room.pendingRoll, 'nachdem alle Halter:innen gepasst haben, loest sich das Fenster auf');
+    assert.strictEqual(room.dieRoll.roll, urspruenglich, 'ohne Kartenspiel bleibt der urspruengliche Wurf stehen');
+    assert.strictEqual(room.dieRoll.success, false, 'vor Filzlaeusen gibt es kein Entkommen, egal welcher Wurf');
+    done(room);
+  }
+
+  // -------------------------------------------------------------------
+  // KLEBERFLÄSCHCHEN an der gelungenen Flucht (TOPFPFLANZE: automatische
+  // Flucht, damit der Erfolg nicht vom Zufallswurf abhaengt)
+  // -------------------------------------------------------------------
+  {
+    const flasche = findCard('KLEBERFLÄSCHCHEN');
+    const room = fleeRoom(['TOPFPFLANZE'], null, null);
+    room.players[1].hand = [flasche.id];
+    handleAttemptFlee(room, 'p1', 0);
+    assert.strictEqual(room.dieRoll.success, true, 'Testvoraussetzung: automatische Flucht gelingt');
+    assert.ok(room.combat, 'mit Reaktionskarte auf einer fremden Hand darf die Flucht noch nicht fertig sein');
+    assert.ok(room.combat.escapeReactionOffer && room.combat.escapeReactionOffer.includes('p2'));
+
+    // p2 spielt die Karte -> zwingt einen zweiten Wurf.
+    handlePlayReactionCard(room, 'p2', flasche.id, undefined);
+    assert.ok(!room.players[1].hand.includes(flasche.id), 'die Karte wird beim Spielen abgelegt');
+    assert.ok(room.treasureDiscard.includes(flasche.id));
+    // TOPFPFLANZE ist weiterhin automatisch erfolgreich, aber escapeReactionDone
+    // verhindert eine zweite Nachfrage - der Kampf muss jetzt fertig sein.
+    assert.strictEqual(room.combat, null, 'nach dem erzwungenen (wieder erfolgreichen) Neuwurf ist der Kampf vorbei');
+    done(room);
+  }
+  {
+    // p2 passt -> die Flucht wird ganz normal abgeschlossen.
+    const flasche = findCard('KLEBERFLÄSCHCHEN');
+    const room = fleeRoom(['TOPFPFLANZE'], null, null);
+    room.players[1].hand = [flasche.id];
+    handleAttemptFlee(room, 'p1', 0);
+    assert.ok(room.combat && room.combat.escapeReactionOffer);
+    handlePassReaction(room, 'p2');
+    assert.strictEqual(room.combat, null, 'nach dem Passen ist die Flucht abgeschlossen');
+    assert.ok(room.players[1].hand.includes(flasche.id), 'wer passt, behaelt die Karte');
+    done(room);
+  }
+  {
+    // Ohne Halter:in kein Angebot - bitgleich zum bisherigen Verhalten.
+    const room = fleeRoom(['TOPFPFLANZE'], null, null);
+    handleAttemptFlee(room, 'p1', 0);
+    assert.strictEqual(room.combat, null, 'ohne Kleberflaeschchen im Spiel schliesst die gelungene Flucht sofort ab');
+    done(room);
+  }
+
+  // -------------------------------------------------------------------
+  // MAGISCHE LAMPE - haengt am bestehenden Fluchtentscheidungsfenster
+  // -------------------------------------------------------------------
+  {
+    // Einziges Monster: Schatz ja, Stufe nein (Korrektur B: nicht vorher
+    // splicen, sonst zahlt endCombatNoLevel nichts aus).
+    const lampe = findCard('MAGISCHE LAMPE');
+    const goblin = findCard('LAHMER GOBLIN', 'monster');
+    const room = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id], level: 5 }, { fleeRerollOffer: true });
+    const handVorher = room.players[0].hand.length;
+    const levelVorher = room.players[0].level;
+    handleUseLamp(room, 'p1', lampe.id, goblin.id);
+    assert.strictEqual(room.combat, null, 'einziges Monster verschwunden -> Kampf vorbei');
+    assert.strictEqual(room.players[0].level, levelVorher, 'keine Stufe fuer die Lampe');
+    assert.strictEqual(room.players[0].hand.length, handVorher - 1 + goblin.treasureCount,
+      'Lampe abgelegt, aber der Schatz des einzigen Monsters kommt noch auf die Hand');
+    assert.ok(room.doorDiscard.includes(goblin.id), 'das verschwundene Monster landet im Tuerablagestapel');
+    done(room);
+  }
+  {
+    // Zwei Monster: das gewaehlte verschwindet ohne Schatz, der Kampf geht
+    // gegen das verbleibende weiter.
+    const lampe = findCard('MAGISCHE LAMPE');
+    const goblin = findCard('LAHMER GOBLIN', 'monster');
+    const orks = findCard('3.872 ORKS', 'monster');
+    const room = fleeRoom(['LAHMER GOBLIN', '3.872 ORKS'], { hand: [lampe.id], level: 5 }, { fleeRerollOffer: true });
+    const handVorher = room.players[0].hand.length;
+    const levelVorher = room.players[0].level;
+    handleUseLamp(room, 'p1', lampe.id, goblin.id);
+    assert.ok(room.combat, 'bei mehreren Monstern geht der Kampf weiter');
+    assert.deepStrictEqual(room.combat.monsterIds, [orks.id], 'nur das gewaehlte Monster verschwindet');
+    assert.strictEqual(room.combat.fleeRerollOffer, false, 'das Entscheidungsfenster ist beantwortet');
+    assert.strictEqual(room.players[0].level, levelVorher, 'kein Level-Effekt bei laufendem Kampf');
+    assert.strictEqual(room.players[0].hand.length, handVorher - 1, 'nur die Lampe verschwindet von der Hand, kein Schatz');
+    assert.ok(room.doorDiscard.includes(goblin.id));
+    done(room);
+  }
+  {
+    // Fremdeingaben duerfen nichts tun: falscher Akteur, kein offenes
+    // Fenster, unbekannte Karte.
+    const lampe = findCard('MAGISCHE LAMPE');
+    const goblin = findCard('LAHMER GOBLIN', 'monster');
+    const raum1 = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id] }, { fleeRerollOffer: false });
+    handleUseLamp(raum1, 'p1', lampe.id, goblin.id);
+    assert.ok(raum1.combat, 'ohne offenes Entscheidungsfenster wirkt die Lampe nicht');
+    done(raum1);
+
+    const raum2 = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id] }, { fleeRerollOffer: true });
+    handleUseLamp(raum2, 'p2', lampe.id, goblin.id);
+    assert.ok(raum2.combat, 'nur die kaempfende Person darf die Lampe spielen');
+    done(raum2);
+  }
+
+  console.log('OK - Reaktionsfenster: synchron ohne Karte, Fenster mit Karte, Bots/Getrennte aus, ' +
+    'Gezinkter Wuerfel/Kleberflaeschchen am echten Fluchtpfad, Magische Lampe am Fluchtfenster.');
+}
+
+run();
+console.log('1/1 Tests erfolgreich (card-reactions.test.js).');

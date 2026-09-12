@@ -168,6 +168,7 @@ function createRoom() {
     combat: null,
     pendingConsequence: null,
     pendingCardAction: null,
+    pendingRoll: null, // {playerId, purpose, roll, holders, onResolve} - siehe rollWithWindow
     winner: null,
     logs: [],
     lastActivity: Date.now(),
@@ -415,6 +416,12 @@ function publicState(room) {
     dieRoll: room.dieRoll,
     combat: room.combat ? Object.assign({}, room.combat, combatConditionalBonusFields(room)) : null,
     pendingConsequence: room.pendingConsequence,
+    // onResolve ist eine Funktion und darf nicht serialisiert werden -
+    // deshalb hier nur die drei Felder, die der Client fuer den
+    // "Wurf aendern"/"Passen"-Knopf braucht.
+    pendingRoll: room.pendingRoll
+      ? { playerId: room.pendingRoll.playerId, roll: room.pendingRoll.roll, holders: room.pendingRoll.holders }
+      : null,
     pendingCardAction: room.pendingCardAction,
     winner: room.winner,
     logs: room.logs.slice(-80),
@@ -453,6 +460,9 @@ function sendInfoTo(room, player) {
     classEnchant: room.combat ? enchantInfo(room, player) : null,
     fleeEscapeCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.actorId === player.id)
       ? postFleeEscapeCardIds(player) : [],
+    // MAGISCHE LAMPE: nur waehrend des Fluchtentscheidungsfensters relevant.
+    lampCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.actorId === player.id)
+      ? lampCardIds(player) : [],
     // Beute-Animation nach einem Kampfsieg. Bewusst hier im privaten
     // yourInfo statt im oeffentlichen publicState: welche Schatzkarten
     // jemand gezogen hat, gehoert zur Hand und ist damit geheim - im
@@ -779,6 +789,10 @@ function applyPrimitiveAction(room, player, action) {
       setLevel(player, minLevel);
       return `auf Stufe ${player.level} gesetzt (niedrigste Stufe am Tisch)`;
     }
+    // ponytail: Konsequenz-Wuerfe bleiben synchron - applyPrimitiveAction
+    // liefert einen Text zurueck und kann nicht warten. GEZINKTER WUERFEL
+    // wirkt deshalb vorerst nur auf den Weglaufwurf. Aufruestweg:
+    // applyPrimitiveAction auf Callbacks umstellen.
     case 'diceLevelLoss': {
       const roll = rollDie();
       setLevel(player, player.level - roll);
@@ -1138,6 +1152,10 @@ const {
   TREASURE_POWER_OVERRIDES, COMBAT_POTION_OVERRIDES, DOOR_COMBAT_CARDS,
   POST_FLEE_ESCAPE_CARDS, GUARANTEED_FLEE_CARDS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
 } = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel });
+
+// ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS: siehe src/cards/reactions.js.
+const reactionsFactory = require('./src/cards/reactions.js');
+const { ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS } = reactionsFactory();
 
 // Eine Aktion, die mehrere Personen NACHEINANDER betrifft. specFor(playerId)
 // liefert je Person den Inhalt (kind/options/prompt/candidateIds) - so kann
@@ -1533,6 +1551,98 @@ function fleeModifierParts(room, player) {
     if (room.combat.fleeBonus) parts.push({ label: 'Flugzauber', amount: room.combat.fleeBonus });
   }
   return parts;
+}
+
+// --- Bedingtes Reaktionsfenster --------------------------------------------
+// Manche Karten reagieren auf ein Ereignis, statt aktiv ausgespielt zu
+// werden (GEZINKTER WÜRFEL auf einen Wurf, KLEBERFLÄSCHCHEN auf eine
+// gelungene Flucht). Dafür braucht es ein kurzes Zeitfenster, das der Server
+// sonst nirgends hat.
+
+// Wer koennte auf dieses Ereignis reagieren? Bots spielen keine
+// Reaktionskarten, Getrennte koennen nicht - beide oeffnen deshalb kein
+// Fenster, sonst haengt die Partie an niemandem.
+function reactionHolders(room, cardSet) {
+  return room.players
+    .filter((p) => p.connected && !p.isBot
+      && p.hand.some((id) => cardSet.has((card(id) || {}).name)))
+    .map((p) => p.id);
+}
+
+// ponytail: kein generischer Reaktions-Stack. Haelt niemand eine passende
+// Karte, laeuft alles synchron weiter - bitgleich zum Verhalten vorher. Ein
+// Fenster entsteht nur, wenn es wirklich jemanden gibt, der es nutzen
+// koennte. Obergrenze: genau zwei Ausloeser (Wurf, gelungene Flucht). Kommen
+// mehr dazu, lohnt sich ein echter Stack.
+function rollWithWindow(room, player, purpose, onResolve) {
+  const roll = rollDie();
+  const holders = reactionHolders(room, ROLL_REACTION_CARDS);
+  if (!holders.length) { onResolve(roll); return; }
+  room.pendingRoll = { playerId: player.id, purpose, roll, holders, onResolve };
+  log(room, `${player.name} würfelt ${roll} - es darf noch auf den Wurf reagiert werden.`);
+}
+
+function resolvePendingRoll(room, finalRoll) {
+  const pr = room.pendingRoll;
+  if (!pr) return;
+  room.pendingRoll = null;
+  pr.onResolve(typeof finalRoll === 'number' ? finalRoll : pr.roll);
+}
+
+// Gemeinsamer Einstiegspunkt fuer beide Reaktionskarten: welches Fenster
+// gerade offen ist (Wurf oder gelungene Flucht), entscheidet, welcher Ast
+// greift. Aussenrum bewusst kein drittes generisches Feld - siehe
+// ponytail-Kommentar oben.
+function handlePlayReactionCard(room, playerId, cardId, value) {
+  const pr = room.pendingRoll;
+  if (pr && pr.holders.includes(playerId)) {
+    const p = findPlayer(room, playerId);
+    const c = card(cardId);
+    if (!p || !c || !p.hand.includes(cardId) || !ROLL_REACTION_CARDS.has(c.name)) return;
+    const neu = Math.max(1, Math.min(6, Math.round(Number(value) || pr.roll)));
+    removeFromHand(p, cardId);
+    discardCard(room, cardId);
+    log(room, `${p.name} spielt "${c.name}": Wurf ${pr.roll} wird zu ${neu}.`, [cardId]);
+    resolvePendingRoll(room, neu);
+    touchRoom(room);
+    return;
+  }
+  const combat = room.combat;
+  const offer = combat && combat.escapeReactionOffer;
+  if (offer && offer.includes(playerId)) {
+    const p = findPlayer(room, playerId);
+    const c = card(cardId);
+    if (!p || !c || !p.hand.includes(cardId) || !ESCAPE_REACTION_CARDS.has(c.name)) return;
+    const actor = findPlayer(room, combat.actorId);
+    removeFromHand(p, cardId);
+    discardCard(room, cardId);
+    combat.escapeReactionOffer = null;
+    combat.escapeReactionDone = true; // verhindert eine Endlosschleife bei erneut gelungener Flucht
+    log(room, `${p.name} spielt "${c.name}": ${actor.name} muss die Flucht noch einmal würfeln.`, [cardId]);
+    touchRoom(room);
+    handleAttemptFlee(room, actor.id, combat.fleeManualModifier || 0);
+  }
+}
+
+function handlePassReaction(room, playerId) {
+  const pr = room.pendingRoll;
+  if (pr && pr.holders.includes(playerId)) {
+    pr.holders = pr.holders.filter((id) => id !== playerId);
+    if (!pr.holders.length) resolvePendingRoll(room, pr.roll);
+    touchRoom(room);
+    return;
+  }
+  const combat = room.combat;
+  const offer = combat && combat.escapeReactionOffer;
+  if (offer && offer.includes(playerId)) {
+    combat.escapeReactionOffer = offer.filter((id) => id !== playerId);
+    if (!combat.escapeReactionOffer.length) {
+      const actor = findPlayer(room, combat.actorId);
+      combat.escapeReactionOffer = null;
+      finishFleeSuccess(room, actor, combat);
+    }
+    touchRoom(room);
+  }
 }
 
 // --- Bonusstufen und Bonusschätze beim Sieg ------------------------------
@@ -2142,7 +2252,6 @@ function handleAttemptFlee(room, playerId, modifier) {
   const c = room.combat;
   if (c.actorId !== playerId) return;
   const actor = findPlayer(room, c.actorId);
-  const roll = rollDie();
   // `modifier` kommt aus dem Client und ist damit ungeprüfte Fremdeingabe
   // (manuell eingetragene Karteneffekte). Alles, was fest auf Karten steht -
   // Elfenbonus, Weglaufstiefel, Tuba, Monster wie die Schnecken auf Speed -
@@ -2151,49 +2260,76 @@ function handleAttemptFlee(room, playerId, modifier) {
   const manual = Math.max(-9, Math.min(9, Math.round(Number(modifier) || 0)));
   const parts = fleeModifierParts(room, actor);
   const mod = manual + parts.reduce((sum, x) => sum + x.amount, 0);
-  const total = roll + mod;
-  const impossible = combatHasMonster(room, FLEE_IMPOSSIBLE);
-  const automatic = combatHasMonster(room, FLEE_AUTOMATIC);
-  const success = impossible ? false : (automatic ? true : total >= 5);
-  let note = parts.length ? parts.map((x) => `${x.label} ${x.amount >= 0 ? '+' : ''}${x.amount}`).join(', ') : '';
-  if (impossible) note = 'Vor diesem Monster gibt es kein Entkommen.';
-  else if (automatic) note = 'Automatische Flucht.';
-  log(room, `${actor.name} würfelt ${roll} (${mod >= 0 ? '+' : ''}${mod} = ${total}) zum Weglaufen: ${success ? 'geschafft!' : 'gescheitert!'}${note ? ` [${note}]` : ''}`);
-  // Eigenes seq-Feld fuer die Wuerfel-Animation: room.combat wird gleich auf
-  // null gesetzt, die Animation darf davon nicht abhaengen.
-  room.dieRoll = {
-    seq: (room.dieRoll ? room.dieRoll.seq : 0) + 1,
-    roll, mod, total, success, note, playerId: actor.id, playerName: actor.name,
-  };
-  if (success) {
-    applyFleeSuccess(room, actor, c);
-  } else if (halblingRerollPossible(room, actor) || postFleeEscapeCardIds(actor).length) {
-    // Entscheidung nach dem verpatzten Wurf - der Kampf bleibt stehen, bis
-    // sie da ist (handleFleeReroll / handleFleeEscape):
-    //  * HALBLING: "1 Karte ablegen und es noch mal probieren"
-    //  * UNSICHTBARKEITSTRANK: "Ablegen, wenn der Weglaufen-Wurf misslingt.
-    //    Du entkommst automatisch."
-    const optionen = [];
-    if (halblingRerollPossible(room, actor)) {
-      c.halblingRerollUsed = true;
-      c.canReroll = true;
-      optionen.push('als Halbling 1 Karte ablegen und noch einmal weglaufen');
+  // GEZINKTER WÜRFEL darf den Weglaufwurf noch aendern, bevor er ausgewertet
+  // wird - deshalb ab hier ueber das Reaktionsfenster statt mit einem
+  // direkten rollDie(). Haelt niemand die Karte, laeuft der Rest synchron
+  // weiter wie zuvor (siehe rollWithWindow).
+  rollWithWindow(room, actor, 'flee', function mitWurf(roll) {
+    const total = roll + mod;
+    const impossible = combatHasMonster(room, FLEE_IMPOSSIBLE);
+    const automatic = combatHasMonster(room, FLEE_AUTOMATIC);
+    const success = impossible ? false : (automatic ? true : total >= 5);
+    let note = parts.length ? parts.map((x) => `${x.label} ${x.amount >= 0 ? '+' : ''}${x.amount}`).join(', ') : '';
+    if (impossible) note = 'Vor diesem Monster gibt es kein Entkommen.';
+    else if (automatic) note = 'Automatische Flucht.';
+    log(room, `${actor.name} würfelt ${roll} (${mod >= 0 ? '+' : ''}${mod} = ${total}) zum Weglaufen: ${success ? 'geschafft!' : 'gescheitert!'}${note ? ` [${note}]` : ''}`);
+    // Eigenes seq-Feld fuer die Wuerfel-Animation: room.combat wird gleich auf
+    // null gesetzt, die Animation darf davon nicht abhaengen.
+    room.dieRoll = {
+      seq: (room.dieRoll ? room.dieRoll.seq : 0) + 1,
+      roll, mod, total, success, note, playerId: actor.id, playerName: actor.name,
+    };
+    if (success) {
+      applyFleeSuccess(room, actor, c);
+    } else if (halblingRerollPossible(room, actor) || postFleeEscapeCardIds(actor).length || lampCardIds(actor).length) {
+      // Entscheidung nach dem verpatzten Wurf - der Kampf bleibt stehen, bis
+      // sie da ist (handleFleeReroll / handleFleeEscape / handleUseLamp):
+      //  * HALBLING: "1 Karte ablegen und es noch mal probieren"
+      //  * UNSICHTBARKEITSTRANK: "Ablegen, wenn der Weglaufen-Wurf misslingt.
+      //    Du entkommst automatisch."
+      //  * MAGISCHE LAMPE: "... selbst wenn dein Weglaufenwurf verpatzt
+      //    wurde und es dich fangen wuerde." Kein eigenes Fenster noetig -
+      //    genau dieser Moment ist es schon.
+      const optionen = [];
+      if (halblingRerollPossible(room, actor)) {
+        c.halblingRerollUsed = true;
+        c.canReroll = true;
+        optionen.push('als Halbling 1 Karte ablegen und noch einmal weglaufen');
+      }
+      if (postFleeEscapeCardIds(actor).length) optionen.push('eine Rettungskarte ablegen und automatisch entkommen');
+      if (lampCardIds(actor).length) optionen.push('die Magische Lampe nutzen und ein Monster verschwinden lassen');
+      c.fleeRerollOffer = true;
+      c.fleeManualModifier = manual;
+      log(room, `${actor.name} kann noch reagieren: ${optionen.join(' oder ')} - oder das Miese Zeug hinnehmen.`);
+    } else {
+      applyFleeFailure(room, actor, c);
     }
-    if (postFleeEscapeCardIds(actor).length) optionen.push('eine Rettungskarte ablegen und automatisch entkommen');
-    c.fleeRerollOffer = true;
-    c.fleeManualModifier = manual;
-    log(room, `${actor.name} kann noch reagieren: ${optionen.join(' oder ')} - oder das Miese Zeug hinnehmen.`);
-  } else {
-    applyFleeFailure(room, actor, c);
-  }
-  touchRoom(room);
+    touchRoom(room);
+  });
 }
 
-// Gelungene Flucht: Stufenverlust trotz Flucht (MR. BONES, KOENIG TUT,
+// Gelungene Flucht: erst das Reaktionsfenster fuer KLEBERFLÄSCHCHEN, dann
+// (finishFleeSuccess) Stufenverlust trotz Flucht (MR. BONES, KOENIG TUT,
 // GRUFTIGE GEBRUEDER), Tuba-Schatz auf dem Weg nach draussen, Monster weg.
 // Steht separat, weil eine Rettungskarte nach verpatztem Wurf hier
 // hereinspringt (handleFleeEscape).
 function applyFleeSuccess(room, actor, c) {
+  // "Einsetzbar, wenn jemand erfolgreich (egal warum) einem Kampf entkommt.
+  // Er muss seine Flucht noch einmal wuerfeln." escapeReactionDone
+  // verhindert eine Endlosschleife, wenn der erzwungene Neuwurf wieder
+  // gelingt.
+  if (!c.escapeReactionDone) {
+    const holders = reactionHolders(room, ESCAPE_REACTION_CARDS);
+    if (holders.length) {
+      c.escapeReactionOffer = holders;
+      log(room, `${actor.name} entkommt - es darf noch ein Kleberfläschchen gespielt werden.`);
+      return;
+    }
+  }
+  finishFleeSuccess(room, actor, c);
+}
+
+function finishFleeSuccess(room, actor, c) {
   let penalty = 0;
   c.monsterIds.forEach((id) => {
     const m = card(id);
@@ -2231,6 +2367,48 @@ function handleFleeEscape(room, playerId, cardId) {
   discardCard(room, cardId);
   log(room, `${actor.name} legt "${card(cardId).name}" ab und entkommt trotz des verpatzten Wurfs.`, [cardId]);
   applyFleeSuccess(room, actor, c);
+  touchRoom(room);
+}
+
+// "Nur in deiner Runde spielbar. Sie beschwoert einen Geist, der ein Monster
+// verschwinden laesst, selbst wenn dein Weglaufenwurf verpatzt wurde und es
+// dich fangen wuerde. War es das einzige Monster, erhaeltst du seinen Schatz,
+// aber keine Stufe." - ponytail: kein eigenes Fenster, sie haengt am
+// bestehenden Fluchtentscheidungsfenster (c.fleeRerollOffer), das genau
+// diesen Moment beschreibt. Aufruestweg fuer "jederzeit spielbar": ein
+// eigenes Kampf-weites Fenster wie bei den Reaktionskarten oben.
+const LAMP_CARDS = new Set(['MAGISCHE LAMPE']);
+
+function lampCardIds(actor) {
+  return actor.hand.filter((id) => LAMP_CARDS.has((card(id) || {}).name));
+}
+
+function handleUseLamp(room, playerId, cardId, monsterId) {
+  const c = room.combat;
+  if (!c || !c.fleeRerollOffer || c.actorId !== playerId) return;
+  const actor = findPlayer(room, playerId);
+  if (!actor || !actor.hand.includes(cardId)) return;
+  const lampe = card(cardId);
+  if (!lampe || !LAMP_CARDS.has(lampe.name)) return;
+  const idx = c.monsterIds.indexOf(monsterId);
+  if (idx < 0) return;
+  removeFromHand(actor, cardId);
+  discardCard(room, cardId);
+  if (c.monsterIds.length === 1) {
+    // War es das einzige Monster, erhaeltst du seinen Schatz, aber keine
+    // Stufe - endCombatNoLevel liest den Schatz aus den noch im Kampf
+    // stehenden Monstern, das Monster darf also NICHT vorher aus
+    // c.monsterIds gesplict werden (siehe VERZAUBERARMBAND-Kommentar in
+    // src/cards/treasures.js, derselbe Grund).
+    log(room, `${actor.name} spielt "${lampe.name}": "${card(monsterId).name}" verschwindet - es war das einzige Monster.`, [cardId, monsterId]);
+    applyCombatPotionAction(room, actor, { type: 'endCombatNoLevel', leavesTreasure: true }, lampe);
+  } else {
+    const weg = c.monsterIds.splice(idx, 1)[0];
+    room.doorDiscard.push(weg);
+    log(room, `${actor.name} spielt "${lampe.name}": "${card(weg).name}" verschwindet.`, [cardId, weg]);
+    c.fleeRerollOffer = false;
+    refreshCombatReady(room);
+  }
   touchRoom(room);
 }
 
@@ -2941,6 +3119,9 @@ io.on('connection', (socket) => {
   onSafe(socket, 'attemptFlee', ({ modifier }) => act(socket, (room, pid) => handleAttemptFlee(room, pid, modifier)));
   onSafe(socket, 'fleeReroll', ({ cardId }) => act(socket, (room, pid) => handleFleeReroll(room, pid, cardId === undefined ? null : cardId)));
   onSafe(socket, 'fleeEscape', ({ cardId }) => act(socket, (room, pid) => handleFleeEscape(room, pid, cardId)));
+  onSafe(socket, 'useLamp', ({ cardId, monsterId }) => act(socket, (room, pid) => handleUseLamp(room, pid, cardId, monsterId)));
+  onSafe(socket, 'playReactionCard', ({ cardId, value }) => act(socket, (room, pid) => handlePlayReactionCard(room, pid, cardId, value)));
+  onSafe(socket, 'passReaction', () => act(socket, (room, pid) => handlePassReaction(room, pid)));
   onSafe(socket, 'enchantMonster', () => act(socket, (room, pid) => handleEnchantMonster(room, pid)));
   onSafe(socket, 'equipItem', ({ cardId }) => act(socket, (room, pid) => handleEquipItem(room, pid, cardId)));
   onSafe(socket, 'unequipItem', ({ cardId }) => act(socket, (room, pid) => handleUnequipItem(room, pid, cardId)));
@@ -3001,4 +3182,6 @@ module.exports = {
   handleSetCombatModifier, handlePlayCombatCard,
   handleProposeTrade, handleCancelTrade, handleRespondTrade, tradableCardIds,
   BIG_ITEMS, isBigItem, bigItemCount, canCarryAnotherBigItem,
+  ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, reactionHolders, rollWithWindow,
+  handlePlayReactionCard, handlePassReaction, LAMP_CARDS, lampCardIds, handleUseLamp,
 };
