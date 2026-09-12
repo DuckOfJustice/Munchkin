@@ -1256,6 +1256,12 @@
       const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
       wrap.appendChild(btn);
     }
+    // Kampfreaktionskarten (Kumpel, Wanderndes Monster, Illusion, Hilf mir,
+    // Ueberfalltrank) - welche das sind, sagt der Server (state.combatReactionCards).
+    if (state.combat && !state.combat.mustFlee && !state.pendingCardAction && (state.combatReactionCards || []).includes(c.name)) {
+      const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
+      wrap.appendChild(btn);
+    }
     // Klassenkräfte, die Handkarten kosten (Krieger "Berserken", Priester
     // "Vertreiben", Zauberer "Flugzauber"). Welche gerade nutzbar ist und wie
     // viele Karten noch gehen, rechnet der Server - hier steht bewusst keine

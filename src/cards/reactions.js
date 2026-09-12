@@ -40,7 +40,29 @@ module.exports = () => {
     'WINZIGE HÄNDE': { kind: 'noTwoHandedItems', dauer: 'dauerhaft' },
   };
 
+  // Karten, die einen LAUFENDEN Kampf veraendern. Sie reiten auf der
+  // bestehenden combatAllReady-Schranke: solange nicht alle bereit sind, darf
+  // eingegriffen werden, und jede Aenderung setzt den Bereit-Status
+  // automatisch zurueck (combatSignature).
+  const COMBAT_REACTION_CARDS = {
+    // "Ein weiteres Monster mit der gleichen Stufe und mit den gleichen
+    // Monsterverstaerker-Karten taucht auf. Werden die Monster besiegt, ziehst
+    // du fuer beide Monster Schaetze und steigst fuer beide Stufen auf."
+    'KUMPEL': { kind: 'duplicateMonster' },
+    // "Spiele diese Karte mit einem Monster von deiner Hand, wenn jemand im
+    // Kampf ist. Dein Monster schliesst sich dem schon kaempfenden an."
+    'WANDERNDES MONSTER': { kind: 'addMonsterFromHand' },
+    // "Lege ein beliebiges Monster in diesem Kampf ab ... und ersetze es durch
+    // eine Monsterkarte von deiner Hand."
+    'ILLUSION': { kind: 'replaceMonsterFromHand' },
+    // "Nimm einen Gegenstand von einem beliebigen Spieler."
+    'HILF MIR': { kind: 'takeItemFromPlayer' },
+    // "Ein anderer Spieler (deiner Wahl) kaempft gegen das/die Monster."
+    'ÜBERFALLTRANK': { kind: 'handOverCombat' },
+  };
+
   return {
     ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES,
+    COMBAT_REACTION_CARDS,
   };
 };
