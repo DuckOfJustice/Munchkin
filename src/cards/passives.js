@@ -2,7 +2,7 @@
 // im Spiel ist. Kuratiert statt per Regex - die Formulierungen auf den Karten
 // sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6 gegen Elfen").
 module.exports = (ctx) => {
-  const { hasRace, hasClass } = ctx;
+  const { hasRace, hasClass, card, equippedItemIds } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
   // SCHUTZSANDALEN: "Flüche, die du ziehst, nachdem du eine Tür
@@ -43,6 +43,60 @@ module.exports = (ctx) => {
   // gespieltes Monster hat sich die kaempfende Person selbst eingeladen.
   const MONSTER_PASS_OPTION = {
     'BEKIFFTER GOLEM': { forcedFightRaces: ['HALBLING'] },
+  };
+
+  // --- Monster, die statt des Kampfes eine Alternative anbieten -------------
+  // Gleiche Bauform wie MONSTER_PASS_OPTION oben, nur mit einer zusaetzlichen
+  // Bedingung: die Alternative wird nur angeboten, wenn sie ueberhaupt nutzbar
+  // ist (Klasse bzw. passender Gegenstand vorhanden).
+  // ponytail: "Stab oder Aehnliches" (PIT BULL) und ein konkreter Goldwert
+  // (LAUFENDE NASE) lassen sich nicht aus dem Kartentext ableiten - siehe
+  // STAFF_ITEMS und hatGegenstandAbGold direkt darunter.
+  const STAFF_ITEMS = new Set(['NAPALMSTAB', 'STANGE, 11-FUSS']);
+
+  function hatStab(player) {
+    return equippedItemIds(player).some((id) => { const c = card(id); return c && STAFF_ITEMS.has(c.name); });
+  }
+  function hatGegenstandAbGold(player, minGold) {
+    return equippedItemIds(player).some((id) => { const c = card(id); return c && (c.gold || 0) >= minGold; });
+  }
+
+  const COMBAT_START_OPTIONS = {
+    // "Statt zu kaempfen kann ein Priester den Moechtegern-Vampir wegjagen,
+    // indem er 'Booga Booga' ruft und seinen Schatz nimmt. Steige keine Stufe
+    // auf dafuer!"
+    'MÖCHTEGERN-VAMPIR': {
+      wennErfuellt: (p) => hasClass(p, 'PRIESTER'),
+      label: 'Als Priester wegjagen (Schatz, keine Stufe)',
+      action: { type: 'wegjagenMitSchatz' },
+    },
+    // "Willst du die Laufende Nase nicht bekaempfen, so bestich sie mit einem
+    // Gegenstand im Wert von wenigstens 200 Goldstuecken und sie laesst dich
+    // gehen."
+    'LAUFENDE NASE': {
+      wennErfuellt: (p) => hatGegenstandAbGold(p, 200),
+      label: 'Mit einem Gegenstand (mind. 200 GS) bestechen',
+      action: { type: 'bribeMonster', minGold: 200 },
+    },
+    // "Kannst du ihn nicht besiegen, darfst du ihn ablenken (automatische
+    // Flucht), indem du einen Stab oder Aehnliches fallen laesst."
+    'PIT BULL': {
+      wennErfuellt: (p) => hatStab(p),
+      label: 'Mit einem Stab ablenken (automatische Flucht)',
+      action: { type: 'dropStaffEscape' },
+    },
+  };
+
+  // --- Monster, die VOR dem Kampf einen Gegenstand kosten --------------------
+  // Keine Wahl, OB abgelegt wird (anders als COMBAT_START_OPTIONS oben) - nur
+  // WELCHER Gegenstand, siehe die discardOwn-Wahl beim Kampfstart in
+  // server.js/handleDrawDoor.
+  const COMBAT_START_COST = {
+    // "Lege einen Gegenstand deiner Wahl VOR dem Kampf ab." Das Kartentext-
+    // eigene "+4 gegen Priester" steht in MONSTER_TRAIT_BONUS, der Stufen-
+    // verlust als Badstuff in CONSEQUENCE_OVERRIDES (src/cards/consequences.js)
+    // - beide bleiben von diesem Vorab-Preis unberuehrt.
+    'ZUNGENDÄMON': true,
   };
 
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
@@ -202,5 +256,6 @@ module.exports = (ctx) => {
     FLEE_TREASURE_ITEMS, MONSTER_EXTRA_LEVEL, FIRE_ITEMS,
     CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
     ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
+    COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
   };
 };

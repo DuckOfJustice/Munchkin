@@ -623,6 +623,38 @@ function handleDrawDoor(room, playerId) {
         ]);
         log(room, `"${c.name}": ${player.name} darf kaempfen oder einfach vorbeigehen.`, [id]);
       }
+    } else if (combatStartOptionRule(id, player)) {
+      // MÖCHTEGERN-VAMPIR/LAUFENDE NASE/PIT BULL: "Statt zu kaempfen ..." -
+      // dieselbe choice-Warteschlange wie beim Vorbeigeh-Zweig oben, nur mit
+      // einer kartenspezifischen Alternative statt "vorbeigehen". Kein
+      // eigener Bot-Zweig nötig: scheduleBotActionsIfNeeded/
+      // resolveBotCardAction (Task 3) beantworten JEDE pendingCardAction
+      // generisch (erste Option), auch diese hier.
+      const rule = combatStartOptionRule(id, player);
+      openCardChoice(room, player, c.name, [
+        { id: 'fight', label: 'Kaempfen', action: { type: 'startRevealedCombat', cardId: id } },
+        { id: 'alt', label: rule.label, action: Object.assign({ cardId: id }, rule.action) },
+      ]);
+      log(room, `"${c.name}": ${player.name} darf kaempfen oder die Alternative nutzen (${rule.label}).`, [id]);
+    } else if (COMBAT_START_COST[c.name]) {
+      // ZUNGENDÄMON: "Lege einen Gegenstand deiner Wahl VOR dem Kampf ab." -
+      // erzwungen (keine Wahl OB), aber WELCHER Gegenstand bleibt eine echte
+      // Wahl - dieselbe discardOwn-chooseCard-Mechanik wie bei SCHNECKEN AUF
+      // SPEED, nur ohne Wuerfelwurf und mit Kampfstart als Folgeaktion (siehe
+      // room._preCombatCost in handleResolveCardCardChoice). Kein Gegenstand
+      // vorhanden: Kampf startet direkt, es gibt nichts abzulegen.
+      const itemIds = equippedItemIds(player).concat(player.hand).filter((iid) => (card(iid) || {}).category === 'item');
+      if (!itemIds.length) {
+        startCombat(room, player.id, [id], { fromHand: false });
+      } else {
+        room.pendingCardAction = {
+          playerId: player.id, cardName: c.name, kind: 'chooseCard',
+          prompt: 'Vor dem Kampf einen Gegenstand ablegen', candidateIds: itemIds, discardOwn: true,
+        };
+        room._pendingCardActionResolvers = null;
+        room._preCombatCost = { monsterCardId: id };
+        log(room, `"${c.name}": ${player.name} muss vor dem Kampf einen Gegenstand ablegen.`, [id]);
+      }
     } else {
       startCombat(room, player.id, [id], { fromHand: false });
     }
@@ -815,6 +847,58 @@ function applyPrimitiveAction(room, player, action) {
       room.doorDiscard.push(action.cardId);
       room.turnPhase = 'aerger';
       return `geht vorbei und winkt - "${card(action.cardId).name}" behaelt seinen Schatz`;
+    // MÖCHTEGERN-VAMPIR: "wegjagen ... und seinen Schatz nimmt. Steige keine
+    // Stufe auf dafuer!" Bewusst OHNE room.combat/applyCombatPotionAction -
+    // es findet nie ein Kampf statt, den man beenden könnte.
+    case 'wegjagenMitSchatz': {
+      const m = card(action.cardId);
+      room.doorDiscard.push(action.cardId);
+      const drawn = [];
+      for (let i = 0; i < (m.treasureCount || 0); i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+      drawn.forEach((cid) => player.hand.push(cid));
+      player.lastReward = {
+        seq: (player.lastReward ? player.lastReward.seq : 0) + 1,
+        cardIds: drawn, levelsGained: 0, monsterNames: [m.name],
+      };
+      room.turnPhase = 'aerger';
+      return `jagt "${m.name}" weg, ${drawn.length} Schatzkarte(n), keine Stufe`;
+    }
+    // LAUFENDE NASE: "bestich sie mit einem Gegenstand im Wert von
+    // wenigstens 200 Goldstuecken und sie laesst dich gehen." Kein Schatz,
+    // keine Stufe.
+    // ponytail: es wird automatisch der GUENSTIGSTE noch ausreichende
+    // getragene Gegenstand verwendet statt einer eigenen Auswahl-Runde -
+    // Aufruestweg wie bei 'curseIncomeTax' oben: eine chooseCard-Runde
+    // (discardOwn) ueber die qualifizierenden Gegenstaende.
+    case 'bribeMonster': {
+      const ids = equippedItemIds(player).filter((iid) => ((card(iid) || {}).gold || 0) >= action.minGold);
+      if (!ids.length) return 'kein Gegenstand mehr wertvoll genug';
+      let chosen = ids[0];
+      ids.forEach((iid) => { if (((card(iid) || {}).gold || 0) < ((card(chosen) || {}).gold || 0)) chosen = iid; });
+      unequipSlotCard(player, chosen);
+      clearCheatIfLost(player, chosen);
+      discardCard(room, chosen);
+      room.doorDiscard.push(action.cardId);
+      room.turnPhase = 'aerger';
+      return `bestochen mit "${card(chosen).name}" - "${card(action.cardId).name}" laesst ${player.name} gehen`;
+    }
+    // PIT BULL: "darfst du ihn ablenken (automatische Flucht), indem du
+    // einen Stab oder Aehnliches fallen laesst." Kein Kampf, kein Schatz,
+    // keine Stufe.
+    // ponytail: es wird automatisch der erste passende Stab genommen statt
+    // einer eigenen Auswahl-Runde, falls mehrere getragen werden - gleicher
+    // Aufruestweg wie bei 'bribeMonster' oben.
+    case 'dropStaffEscape': {
+      const ids = equippedItemIds(player).filter((iid) => STAFF_ITEMS.has((card(iid) || {}).name));
+      if (!ids.length) return 'kein Stab mehr getragen';
+      const chosen = ids[0];
+      unequipSlotCard(player, chosen);
+      clearCheatIfLost(player, chosen);
+      discardCard(room, chosen);
+      room.doorDiscard.push(action.cardId);
+      room.turnPhase = 'aerger';
+      return `laesst "${card(chosen).name}" fallen - "${card(action.cardId).name}" lenkt ab (automatische Flucht)`;
+    }
     case 'death':
       applyDeathConsequence(room, player);
       return 'Tod';
@@ -1634,6 +1718,15 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
   }
   if (room._queuedCardAction) advanceCardActionQueue(room);
   else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
+  // ZUNGENDÄMON: "Gegenstand deiner Wahl VOR dem Kampf ablegen" - siehe
+  // room._preCombatCost in handleDrawDoor. Der Kampf beginnt erst JETZT,
+  // nachdem der Preis bezahlt ist.
+  if (room._preCombatCost) {
+    const cost = room._preCombatCost;
+    room._preCombatCost = null;
+    startCombat(room, player.id, [cost.monsterCardId], { fromHand: false });
+    log(room, `${player.name} stellt sich danach "${card(cost.monsterCardId).name}".`, [cost.monsterCardId]);
+  }
   touchRoom(room);
 }
 
@@ -1735,7 +1828,8 @@ const {
   FLEE_TREASURE_ITEMS, MONSTER_EXTRA_LEVEL, FIRE_ITEMS,
   CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
   ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
-} = passivesFactory({ card, hasRace, hasClass });
+  COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
+} = passivesFactory({ card, hasRace, hasClass, equippedItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 
 // --- Fluchschutz -----------------------------------------------------------
@@ -1824,6 +1918,17 @@ function monsterPassOption(cardId, player) {
   const rule = c && MONSTER_PASS_OPTION[c.name];
   if (!rule) return null;
   if ((rule.forcedFightRaces || []).some((r) => hasRace(player, r))) return null;
+  return rule;
+}
+
+// --- Monster, die statt des Kampfes eine bedingte Alternative anbieten -----
+// siehe COMBAT_START_OPTIONS in src/cards/passives.js. Anders als
+// monsterPassOption oben gilt die Bedingung nicht pro Rasse, sondern prüft,
+// ob die Person die Alternative überhaupt nutzen kann (Klasse/Gegenstand).
+function combatStartOptionRule(cardId, player) {
+  const c = card(cardId);
+  const rule = c && COMBAT_START_OPTIONS[c.name];
+  if (!rule || !rule.wennErfuellt(player)) return null;
   return rule;
 }
 
@@ -3718,4 +3823,5 @@ module.exports = {
   LINGERING_CURSES, addActiveCurse, clearActiveCurse, curseCombatModifier, curseSuppressesItemBonuses,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
+  COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
 };
