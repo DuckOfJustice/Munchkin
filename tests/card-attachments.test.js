@@ -7,7 +7,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, handleEquipItem, handlePlayCheat, equippedItemIds, newEquipped,
   handleSellItems, handleUnequipItem, handleRequestHelp, handleRespondHelp,
-  resolveCombatWin, MAX_LEVEL,
+  resolveCombatWin, MAX_LEVEL, applyPrimitiveAction,
 } = require('../server.js');
 
 function byName(name) {
@@ -184,6 +184,43 @@ function done(room) {
   resolveCombatWin(room);
   assert.strictEqual(a.level, MAX_LEVEL, 'regulaerer Sieg bleibt moeglich');
   assert.strictEqual(room.winner, 'a', 'a gewinnt das Spiel');
+  done(room);
+}
+
+// 9) Regression (Fix Round 1): "VERLIERE ZWEI KARTEN" (giveHandCardsToNeighbors)
+// verschenkt eine zufaellige Handkarte an eine Nachbarperson, OHNE ueber
+// discardCard() zu laufen - ein dritter Transferweg neben Diebstahl/Handel,
+// der den Anhang zuvor nicht geloest hat. Deterministisch gemacht: genau
+// EINE Handkarte (der Zufallsindex trifft also immer sie) und genau EINE
+// Nachbarperson (zwei Spieler:innen am Tisch -> nur die (idx+1)-Richtung
+// feuert).
+{
+  const fels = byName('RIESIGER FELS');
+  const stange = byName('STANGE, 11-FUSS');
+  const schummelnKarten = ALL_CARDS.filter((x) => x.name === 'SCHUMMELN!');
+  assert.ok(schummelnKarten.length >= 2, 'braucht mindestens zwei SCHUMMELN!-Instanzen (versch. Sets)');
+  const [schummeln, schummeln2] = schummelnKarten;
+  const a = makePlayer('a', { hand: [fels.id, schummeln.id] });
+  const b = makePlayer('b', { hand: [] });
+  const room = makeRoom([a, b]);
+  handlePlayCheat(room, a.id, schummeln.id, fels.id);
+  assert.strictEqual(a.attachments.cheatedItemId, fels.id, 'Anhang haengt zunaechst am Fels');
+  // Nur noch der Fels ist auf der Hand -> giveHandCardsToNeighbors muss
+  // genau ihn verschenken.
+  assert.deepStrictEqual(a.hand, [fels.id]);
+  applyPrimitiveAction(room, a, { type: 'giveHandCardsToNeighbors' });
+  assert.ok(b.hand.includes(fels.id), 'b hat den Fels jetzt (Nachbarin erhaelt die Karte)');
+  assert.ok(!a.hand.includes(fels.id), 'a hat den Fels nicht mehr');
+  assert.strictEqual(a.attachments.cheatedItemId, null,
+    'Anhang muss geloest sein, sobald der geschummelte Gegenstand die Besitzerin verliert');
+  // Ohne den Fix waere a hier dauerhaft gesperrt (der Guard in handlePlayCheat
+  // haette weiterhin cheatedItemId gesetzt gesehen). Neuer Gegenstand
+  // (STANGE statt FELS), damit keine Karten-ID gleichzeitig in zwei Haenden
+  // steht.
+  a.hand.push(schummeln2.id, stange.id);
+  handlePlayCheat(room, a.id, schummeln2.id, stange.id);
+  assert.strictEqual(a.attachments.cheatedItemId, stange.id,
+    'nach dem Verlust kann erneut geschummelt werden');
   done(room);
 }
 

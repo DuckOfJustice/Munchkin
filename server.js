@@ -911,6 +911,9 @@ function applyPrimitiveAction(room, player, action) {
         if (!target || target.id === player.id) return;
         const cid = player.hand[Math.floor(Math.random() * player.hand.length)];
         removeFromHand(player, cid);
+        // SCHUMMELN!: dritter Transferweg neben Diebstahl/Handel, der nicht
+        // ueber discardCard laeuft - Anhang muss auch hier mit der Karte weg.
+        clearCheatIfLost(player, cid);
         target.hand.push(cid);
         results.push(`${target.name} erhält 1 Karte`);
       };
@@ -3263,7 +3266,7 @@ module.exports = {
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee,
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
   SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS, newEquipped, handleEquipItem, handleUnequipItem, equippedItemIds,
-  handlePlayCheat, handleRespondHelp, resolveCombatWin,
+  handlePlayCheat, handleRespondHelp, resolveCombatWin, applyPrimitiveAction,
   MONSTER_AUTO_KILL_BY_RACE, MONSTER_PASS_OPTION, handleResolveCardChoice,
   playerQueueFrom, openQueuedCardAction, advanceCardActionQueue, resolveBotCardAction,
   handleResolveCardTarget, handleResolveCardCardChoice,
