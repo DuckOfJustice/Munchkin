@@ -1182,6 +1182,22 @@
       const btn = mkBtn(label, () => socket.emit('equipItem', { cardId: id }));
       wrap.appendChild(btn);
     }
+    // SCHUMMELN!: hebt die Anlege-Regeln fuer GENAU EINEN eigenen Gegenstand
+    // auf (Hand oder angelegt) - Auswahl per Dropdown, der Server prueft den
+    // Rest (Besitz, schon vorhandener Anhang).
+    if (c.name === 'SCHUMMELN!' && myTurn) {
+      const items = myTradableIds().filter((iid) => {
+        const ic = card(iid);
+        return ic && iid !== id && (ic.category === 'item' || (state.specialSlotItems || {})[ic.name]);
+      });
+      const select = document.createElement('select');
+      select.innerHTML = '<option value="">🃏 Auf Gegenstand spielen...</option>' +
+        items.map((iid) => `<option value="${iid}">${escapeHtml(card(iid).name)}</option>`).join('');
+      select.onchange = () => {
+        if (select.value) socket.emit('playCheat', { cheatCardId: id, targetItemId: select.value });
+      };
+      wrap.appendChild(select);
+    }
     if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger') {
       const btn = mkBtn('Als Monster spielen', () => socket.emit('playMonsterFromHand', { cardId: id }));
       wrap.appendChild(btn);

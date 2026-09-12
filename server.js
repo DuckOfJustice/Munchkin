@@ -146,6 +146,8 @@ function newPlayer(name, socketId, isBot) {
     powerGroupCapCard: null, // DOPPELLEBEN, falls gehalten -> Machtgruppen-Obergrenze 2 statt 1
     hand: [], // card ids, privat
     equipped: newEquipped(),
+    // SCHUMMELN!: hebt fuer genau einen Gegenstand die Anlege-Regeln auf.
+    attachments: { cheatedItemId: null },
   };
 }
 
@@ -377,6 +379,7 @@ function publicPlayer(room, p) {
     powerGroupCapCard: p.powerGroupCapCard,
     handCount: p.hand.length,
     equipped: p.equipped,
+    attachments: p.attachments, // SCHUMMELN!: markiert den geschummelten Gegenstand fuer den Client
     strength: baseStrength(p),
     handLimit: handLimit(p), // ZWERG darf 6 Karten halten, alle anderen 5
   };
@@ -676,6 +679,21 @@ function discardCard(room, cardId) {
   if (!c) return;
   if (c.type === 'door') room.doorDiscard.push(cardId);
   else room.treasureDiscard.push(cardId);
+  // SCHUMMELN!: "Lege diese Karte ab, wenn du den geschummelten Gegenstand
+  // verlierst." Das trifft praktisch jeden Ablege-Weg (Verkauf, Konsequenzen,
+  // Weglaufkarten) - deshalb hier zentral geloest statt an jeder Aufrufstelle
+  // einzeln. Steal/Handel gehen NICHT über discardCard (Gegenstand landet in
+  // einer anderen Hand statt im Ablagestapel) - dafuer siehe clearCheatIfLost.
+  room.players.forEach((p) => {
+    if (p.attachments && p.attachments.cheatedItemId === cardId) p.attachments.cheatedItemId = null;
+  });
+}
+
+// SCHUMMELN!: fuer die zwei Faelle, in denen ein Gegenstand die Besitzerin
+// wechselt, ohne den Ablagestapel zu sehen (Diebstahl, Handel) - siehe
+// discardCard() fuer den haeufigeren Ablage-Fall.
+function clearCheatIfLost(player, cardId) {
+  if (player.attachments && player.attachments.cheatedItemId === cardId) player.attachments.cheatedItemId = null;
 }
 
 function applyDeathConsequence(room, player) {
@@ -1253,6 +1271,7 @@ function applyTargetAction(room, actor, target, action) {
       setLevel(target, target.level + 1);
       if (!best) return `${target.name} hatte keinen Gegenstand mit Bonus, bekommt trotzdem +1 Stufe`;
       unequipSlotCard(target, best);
+      clearCheatIfLost(target, best);
       actor.hand.push(best);
       return `${actor.name} erhält "${card(best).name}" von ${target.name}, ${target.name} +1 Stufe`;
     }
@@ -2130,6 +2149,7 @@ function handleRequestHelp(room, playerId, targetId) {
   if (!room.combat) return;
   const c = room.combat;
   if (c.actorId !== playerId || c.helperId) return;
+  const actor = findPlayer(room, playerId);
   const target = findPlayer(room, targetId);
   if (!target || targetId === c.actorId) return;
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
@@ -2138,8 +2158,14 @@ function handleRequestHelp(room, playerId, targetId) {
     touchRoom(room);
     return;
   }
-  c.helperPending = { targetId };
-  log(room, `${findPlayer(room, playerId).name} bittet ${target.name} um Hilfe.`);
+  // KNIESCHÜTZER DER VERLOCKUNG: "Kein Spieler mit einer höheren Stufe als du
+  // darf deine Bitte ablehnen ... beizustehen." Die Karte bleibt beim
+  // Anfragen auf der Hand (treasure_other, nicht anlegbar) - "das Fragen nach
+  // einer Belohnung" bildet der Server nirgends ab und bleibt daher aussen vor.
+  const compelled = target.level > actor.level
+    && actor.hand.some((id) => { const cc = card(id); return cc && cc.name === 'KNIESCHÜTZER DER VERLOCKUNG'; });
+  c.helperPending = { targetId, compelled };
+  log(room, `${actor.name} bittet ${target.name} um Hilfe${compelled ? ' (Knieschützer der Verlockung: kann nicht ablehnen)' : ''}.`);
   touchRoom(room);
 }
 
@@ -2148,8 +2174,16 @@ function handleRespondHelp(room, playerId, accept) {
   const c = room.combat;
   if (c.helperPending.targetId !== playerId) return;
   const target = findPlayer(room, playerId);
+  const compelled = !!c.helperPending.compelled;
+  if (!accept && compelled) {
+    log(room, `${target.name} darf nicht ablehnen (Knieschützer der Verlockung).`);
+    accept = true;
+  }
   if (accept) {
     c.helperId = playerId;
+    // "In einem Kampf, bei dem der Helfer ... genötigt wurde, kannst du
+    // nicht die Siegesstufe erreichen." Greift in resolveCombatWin.
+    if (compelled) c.noWinLevel = true;
     log(room, `${target.name} hilft im Kampf.`);
   } else {
     log(room, `${target.name} lehnt ab.`);
@@ -2246,6 +2280,14 @@ function resolveCombatWin(room) {
   if (helper && hasRace(helper, 'ELF')) {
     setLevel(helper, helper.level + monsters.length);
     log(room, `${helper.name} ist Elf und steigt fürs Helfen ${monsters.length} Stufe(n) auf -> jetzt Stufe ${helper.level}.`);
+  }
+  // KNIESCHÜTZER DER VERLOCKUNG: "In einem Kampf, bei dem der Helfer ...
+  // genötigt wurde, kannst du nicht die Siegesstufe erreichen." Nur die
+  // Siegesstufe in DIESEM Kampf ist gesperrt, nicht der Kampf selbst und
+  // nicht künftige Kämpfe (noWinLevel haengt am Kampf, nicht am Spieler).
+  if (c.noWinLevel && actor.level >= MAX_LEVEL) {
+    setLevel(actor, MAX_LEVEL - 1);
+    log(room, `${actor.name} hat die Hilfe mit den Knieschützern erzwungen und kann in diesem Kampf nicht gewinnen.`);
   }
   room.combat = null;
   // Auch die Helfer:in kann so Stufe 10 erreichen - die Stufe kommt aus einem
@@ -2514,7 +2556,17 @@ function handleEquipItem(room, playerId, cardId) {
   if (!player || !player.hand.includes(cardId)) return;
   const c = card(cardId);
   if (!c) return;
-  if (isBigItem(c) && !canCarryAnotherBigItem(player)) {
+  // SCHUMMELN!: "Diesen Gegenstand kannst du nun legal einsetzen, auch wenn
+  // das normalerweise nicht erlaubt wäre" - hebt fuer GENAU DIESEN Gegenstand
+  // die Anlege-Regeln auf (siehe handlePlayCheat). Bewusst nur fuer die
+  // Gross-Gegenstand- und Rassen-Sperre umgesetzt: die Slot-Belegung
+  // (Kopf/Ruestung/Schuhe/Haende) ist hier je Spieler:in ein fester Platz
+  // (kein Array), ein zweiter Gegenstand im selben Slot wuerde den ersten
+  // stillschweigend verdraengen statt ihn abzulegen - dafuer muesste das
+  // Ausruestungsmodell erst auf Arrays je Slot umgestellt werden.
+  // ponytail: Slot-Belegung/Handzahl bleiben deshalb hart, Ausbauweg s.o.
+  const geschummelt = player.attachments && player.attachments.cheatedItemId === cardId;
+  if (!geschummelt && isBigItem(c) && !canCarryAnotherBigItem(player)) {
     log(room, `${player.name} kann "${c.name}" nicht anlegen - Grosser Gegenstand, und es wird bereits einer getragen (nur Zwerge duerfen mehrere).`);
     touchRoom(room);
     return;
@@ -2524,7 +2576,7 @@ function handleEquipItem(room, playerId, cardId) {
   const special = specialSlotRule(c);
   if (special) {
     if (specialSlotCards(player, special.slot).includes(cardId)) return; // liegt schon an
-    if (special.races && !special.races.some((r) => hasRace(player, r))) {
+    if (!geschummelt && special.races && !special.races.some((r) => hasRace(player, r))) {
       log(room, `${player.name} kann "${c.name}" nicht anlegen - nur für ${special.races.join('/')}.`);
       touchRoom(room);
       return;
@@ -2547,6 +2599,34 @@ function handleEquipItem(room, playerId, cardId) {
     else { const idx = player.equipped.hands.indexOf(null); player.equipped.hands[idx] = cardId; }
   } else return;
   log(room, `${player.name} legt "${c.name}" an.`, [cardId]);
+  touchRoom(room);
+}
+
+// "Spiele diese Karte auf einen Gegenstand, den du im Spiel hast, oder dann,
+// wenn du einen Gegenstand aus deiner Hand ausspielst. Diesen Gegenstand
+// kannst du nun legal einsetzen, auch wenn das normalerweise nicht erlaubt
+// waere. Lege diese Karte ab, wenn du den geschummelten Gegenstand verlierst
+// (verkaufst usw.)." Der Anhang gilt fuer genau einen Gegenstand gleichzeitig
+// (siehe attachments.cheatedItemId - kein Array).
+function handlePlayCheat(room, playerId, cheatCardId, targetItemId) {
+  const player = findPlayer(room, playerId);
+  if (!player || !player.hand.includes(cheatCardId)) return;
+  const cheat = card(cheatCardId);
+  if (!cheat || cheat.name !== 'SCHUMMELN!') return;
+  const ziel = card(targetItemId);
+  if (!ziel) return;
+  if (ziel.category !== 'item' && !specialSlotRule(ziel)) return;
+  const besitzt = player.hand.includes(targetItemId) || equippedItemIds(player).includes(targetItemId);
+  if (!besitzt) return;
+  if (player.attachments.cheatedItemId) {
+    log(room, `${player.name} hat bereits einen geschummelten Gegenstand.`);
+    touchRoom(room);
+    return;
+  }
+  removeFromHand(player, cheatCardId);
+  discardCard(room, cheatCardId);
+  player.attachments.cheatedItemId = targetItemId;
+  log(room, `${player.name} schummelt bei "${ziel.name}" - die Anlege-Regeln gelten dafuer nicht mehr.`, [cheatCardId, targetItemId]);
   touchRoom(room);
 }
 
@@ -2796,8 +2876,8 @@ function finishTrade(room, trade, from, to, counterCardIds) {
   // übersprungen; der Rest wird getauscht.
   const offerIds = ownTradeIds(from, trade.offerCardIds);
   const counterIds = ownTradeIds(to, counterCardIds);
-  offerIds.forEach((id) => { takeTradedCard(from, id); to.hand.push(id); });
-  counterIds.forEach((id) => { takeTradedCard(to, id); from.hand.push(id); });
+  offerIds.forEach((id) => { takeTradedCard(from, id); clearCheatIfLost(from, id); to.hand.push(id); });
+  counterIds.forEach((id) => { takeTradedCard(to, id); clearCheatIfLost(to, id); from.hand.push(id); });
   const names = (ids) => ids.map((id) => { const c = card(id); return c ? c.name : id; }).join(', ');
   const offerText = offerIds.length ? `${names(offerIds)} - ${tradeGoldSum(offerIds)} GS` : '(nichts mehr davon verfügbar)';
   const counterText = counterIds.length ? `${names(counterIds)} - ${tradeGoldSum(counterIds)} GS` : '(nichts zurück)';
@@ -3138,6 +3218,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'enchantMonster', () => act(socket, (room, pid) => handleEnchantMonster(room, pid)));
   onSafe(socket, 'equipItem', ({ cardId }) => act(socket, (room, pid) => handleEquipItem(room, pid, cardId)));
   onSafe(socket, 'unequipItem', ({ cardId }) => act(socket, (room, pid) => handleUnequipItem(room, pid, cardId)));
+  onSafe(socket, 'playCheat', ({ cheatCardId, targetItemId }) => act(socket, (room, pid) => handlePlayCheat(room, pid, cheatCardId, targetItemId)));
   onSafe(socket, 'sellItems', ({ cardIds }) => act(socket, (room, pid) => handleSellItems(room, pid, cardIds)));
   onSafe(socket, 'playRaceOrClass', ({ cardId }) => act(socket, (room, pid) => handlePlayRaceOrClass(room, pid, cardId)));
   onSafe(socket, 'discardFromHand', ({ cardId }) => act(socket, (room, pid) => handleDiscardFromHand(room, pid, cardId)));
@@ -3182,6 +3263,7 @@ module.exports = {
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee,
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
   SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS, newEquipped, handleEquipItem, handleUnequipItem, equippedItemIds,
+  handlePlayCheat, handleRespondHelp, resolveCombatWin,
   MONSTER_AUTO_KILL_BY_RACE, MONSTER_PASS_OPTION, handleResolveCardChoice,
   playerQueueFrom, openQueuedCardAction, advanceCardActionQueue, resolveBotCardAction,
   handleResolveCardTarget, handleResolveCardCardChoice,
