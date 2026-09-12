@@ -1648,7 +1648,9 @@ function applyCombatReaction(room, player, cardId, regel) {
     discardCard(room, cardId);
     log(room, `${player.name} spielt "${karte.name}": "${card(erstes).name}" taucht ein zweites Mal auf.`, [cardId]);
   }
-  // ... weitere Arten in den folgenden Steps
+  // MARKER: hier setzt Step 6 die vier restlichen Arten ein
+  // (addMonsterFromHand, replaceMonsterFromHand, takeItemFromPlayer,
+  // handOverCombat). Der Code dafuer steht vollstaendig in Step 6.
   refreshCombatReady(room);
   touchRoom(room);
 }
