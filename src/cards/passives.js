@@ -49,16 +49,21 @@ module.exports = (ctx) => {
   // Gleiche Bauform wie MONSTER_PASS_OPTION oben, nur mit einer zusaetzlichen
   // Bedingung: die Alternative wird nur angeboten, wenn sie ueberhaupt nutzbar
   // ist (Klasse bzw. passender Gegenstand vorhanden).
-  // ponytail: "Stab oder Aehnliches" (PIT BULL) und ein konkreter Goldwert
-  // (LAUFENDE NASE) lassen sich nicht aus dem Kartentext ableiten - siehe
-  // STAFF_ITEMS und hatGegenstandAbGold direkt darunter.
+  // ponytail: "Stab oder Aehnliches" (PIT BULL) laesst sich nicht aus dem
+  // Kartentext ableiten - deshalb die kuratierte Liste STAFF_ITEMS. Neue
+  // Staebe hier ergaenzen. "Fallen lassen" heisst getragen: nur equipped.
   const STAFF_ITEMS = new Set(['NAPALMSTAB', 'STANGE, 11-FUSS']);
 
   function hatStab(player) {
     return equippedItemIds(player).some((id) => { const c = card(id); return c && STAFF_ITEMS.has(c.name); });
   }
+  // LAUFENDE NASE nennt einen festen Goldwert (200) - im Gegensatz zu
+  // STAFF_ITEMS also direkt aus dem Kartentext ableitbar. "Bestechen" nennt
+  // keinen getragenen Gegenstand, also equipped + Hand, wie ueberall sonst
+  // im Server bei Goldwert-Bedingungen (pickItemsWorthGold, ZUNGENDÄMON).
   function hatGegenstandAbGold(player, minGold) {
-    return equippedItemIds(player).some((id) => { const c = card(id); return c && (c.gold || 0) >= minGold; });
+    return equippedItemIds(player).concat(player.hand)
+      .some((id) => { const c = card(id); return c && (c.gold || 0) >= minGold; });
   }
 
   const COMBAT_START_OPTIONS = {

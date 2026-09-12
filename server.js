@@ -865,17 +865,20 @@ function applyPrimitiveAction(room, player, action) {
     }
     // LAUFENDE NASE: "bestich sie mit einem Gegenstand im Wert von
     // wenigstens 200 Goldstuecken und sie laesst dich gehen." Kein Schatz,
-    // keine Stufe.
+    // keine Stufe. Der Kartentext verlangt keinen GETRAGENEN Gegenstand -
+    // also equipped + Hand, wie ueberall sonst bei Goldwert-Bedingungen
+    // (pickItemsWorthGold, ZUNGENDÄMON oben).
     // ponytail: es wird automatisch der GUENSTIGSTE noch ausreichende
-    // getragene Gegenstand verwendet statt einer eigenen Auswahl-Runde -
-    // Aufruestweg wie bei 'curseIncomeTax' oben: eine chooseCard-Runde
-    // (discardOwn) ueber die qualifizierenden Gegenstaende.
+    // Gegenstand verwendet statt einer eigenen Auswahl-Runde - Aufruestweg
+    // wie bei 'curseIncomeTax' oben: eine chooseCard-Runde (discardOwn) ueber
+    // die qualifizierenden Gegenstaende.
     case 'bribeMonster': {
-      const ids = equippedItemIds(player).filter((iid) => ((card(iid) || {}).gold || 0) >= action.minGold);
+      const ids = equippedItemIds(player).concat(player.hand)
+        .filter((iid) => ((card(iid) || {}).gold || 0) >= action.minGold);
       if (!ids.length) return 'kein Gegenstand mehr wertvoll genug';
       let chosen = ids[0];
       ids.forEach((iid) => { if (((card(iid) || {}).gold || 0) < ((card(chosen) || {}).gold || 0)) chosen = iid; });
-      unequipSlotCard(player, chosen);
+      if (player.hand.includes(chosen)) removeFromHand(player, chosen); else unequipSlotCard(player, chosen);
       clearCheatIfLost(player, chosen);
       discardCard(room, chosen);
       room.doorDiscard.push(action.cardId);

@@ -77,7 +77,9 @@ function run() {
   }
 
   // -------------------------------------------------------------------
-  // 2) LAUFENDE NASE: nur mit einem getragenen Gegenstand >= 200 GS
+  // 2) LAUFENDE NASE: nur mit einem Gegenstand >= 200 GS (getragen ODER auf
+  //    der Hand - der Kartentext verlangt nichts Getragenes, anders als bei
+  //    PIT BULL unten, wo "fallen laesst" ausdruecklich etwas Getragenes ist)
   // -------------------------------------------------------------------
   {
     const p = makePlayer('a');
@@ -90,6 +92,21 @@ function run() {
     assert.strictEqual(p.equipped.head, null, 'Bestechungsgegenstand ist weg');
     assert.ok(room.treasureDiscard.includes(teuresTuch.id), 'Gegenstand liegt im Schatz-Ablagestapel');
     assert.strictEqual(p.hand.length, 0, 'kein Schatz fuer die Bestechung');
+    assert.strictEqual(p.level, 5, 'keine Stufe');
+    assert.strictEqual(room.turnPhase, 'aerger');
+    done(room);
+  }
+  {
+    // Regression: ein qualifizierender Gegenstand NUR auf der Hand (nicht
+    // angelegt) muss die Option genauso freischalten und bezahlt werden.
+    const p = makePlayer('a', { hand: [teuresTuch.id] });
+    const room = raumMitTuerkarte(p, 'LAUFENDE NASE');
+    handleDrawDoor(room, p.id);
+    assert.ok(room.pendingCardAction, 'Gegenstand auf der Hand reicht fuer die Bestechungs-Option');
+
+    handleResolveCardChoice(room, p.id, 'alt');
+    assert.ok(!p.hand.includes(teuresTuch.id), 'Gegenstand ist aus der Hand bezahlt');
+    assert.ok(room.treasureDiscard.includes(teuresTuch.id), 'Gegenstand liegt im Schatz-Ablagestapel');
     assert.strictEqual(p.level, 5, 'keine Stufe');
     assert.strictEqual(room.turnPhase, 'aerger');
     done(room);
