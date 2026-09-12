@@ -314,6 +314,24 @@ function canCarryAnotherBigItem(player) {
   return hasRace(player, 'ZWERG') || bigItemCount(player) < 1;
 }
 
+// Ermittelt gierig (teuerste zuerst) genug Gegenstaende/Handkarten, um
+// mindestens `gold` Goldstuecke Wert zu erreichen (oder alles, falls nicht
+// genug vorhanden) - gemeinsame Rechenregel fuer VERSICHERUNGSVERTRETER und
+// FLUCH! EINKOMMENSSTEUER.
+function pickItemsWorthGold(player, gold) {
+  const ids = equippedItemIds(player).concat(player.hand)
+    .filter((id) => (card(id) || {}).gold > 0)
+    .sort((a, b) => (card(b).gold || 0) - (card(a).gold || 0));
+  let summe = 0;
+  const weg = [];
+  for (const id of ids) {
+    if (summe >= gold) break;
+    summe += card(id).gold || 0;
+    weg.push(id);
+  }
+  return { summe, weg };
+}
+
 function equippedBonusSum(player) {
   return equippedItemIds(player).reduce((sum, id) => {
     const c = card(id);
@@ -876,6 +894,14 @@ function applyPrimitiveAction(room, player, action) {
       ids.forEach((id) => { unequipSlotCard(player, id); discardCard(room, id); });
       return `Grosse Gegenstaende abgelegt: ${ids.map((id) => card(id).name).join(', ')}`;
     }
+    // VERLIERE 1 GROSSEN GEGENSTAND bei einem Zwerg mit mehreren: der eine
+    // ausgewaehlte Gegenstand aus CONSEQUENCE_OVERRIDES' 'choice'-Optionen.
+    case 'discardSpecificItem': {
+      if (!equippedItemIds(player).includes(action.itemId)) return 'Gegenstand nicht (mehr) getragen';
+      unequipSlotCard(player, action.itemId);
+      discardCard(room, action.itemId);
+      return `Gegenstand "${card(action.itemId).name}" abgelegt`;
+    }
     case 'discardAllEquipped': {
       const ids = equippedItemIds(player);
       if (!ids.length) return 'keine Ausrüstung getragen';
@@ -1055,6 +1081,92 @@ function applyPrimitiveAction(room, player, action) {
       ids.forEach((id) => discardCard(room, id));
       return `Karte(n) abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
     }
+    // --- Schlimme Dinge mit Fremdbeteiligung: andere Spieler:innen nehmen
+    // sich Karten/Gegenstaende ueber die Aktions-Warteschlange (Task 3). Die
+    // Reihenfolge (mode) steht bereits im Kartentext, siehe playerQueueFrom. ---
+    case 'queuedTakeFromHand': {
+      // Jede betroffene Person zieht EINE Karte aus der Hand des Opfers.
+      // "ohne hinzusehen" (HIPPOGREIF) laesst sich hier nicht abbilden - die
+      // waehlende Person sieht die Karten. ponytail: bewusst offen gelassen,
+      // ein verdecktes Ziehen braeuchte eine eigene Anzeigeart im Client.
+      const opfer = player;
+      const queue = playerQueueFrom(room, opfer, action.mode);
+      if (!queue.length) return 'niemand sonst am Tisch';
+      openQueuedCardAction(room, 'Schlimme Dinge', queue, (pid) => {
+        if (!opfer.hand.length) return null; // nichts mehr zu holen: ueberspringen
+        return { kind: 'chooseCard', prompt: `Eine Karte von ${opfer.name} nehmen`,
+          candidateIds: opfer.hand.slice(), takeFrom: opfer.id };
+      });
+      if (action.discardRest) room._discardRestAfterQueue = opfer.id;
+      return `${queue.length} Mitspieler nehmen je 1 Handkarte`;
+    }
+    case 'queuedTakeItem': {
+      const opfer = player;
+      const queue = playerQueueFrom(room, opfer, action.mode);
+      if (!queue.length) return 'niemand sonst am Tisch';
+      openQueuedCardAction(room, 'Schlimme Dinge', queue, (pid) => {
+        const ids = equippedItemIds(opfer);
+        if (!ids.length) return null;
+        return { kind: 'chooseCard', prompt: `Einen Gegenstand von ${opfer.name} nehmen`,
+          candidateIds: ids, takeFrom: opfer.id };
+      });
+      return `${queue.length} Mitspieler nehmen je 1 Gegenstand`;
+    }
+    case 'discardItemsWorthGold': {
+      // VERSICHERUNGSVERTRETER: "Verliere Gegenstaende im Wert von 1.000
+      // Goldstuecken. Hast du nicht genug, verlierst du alles, was du hast."
+      const { summe, weg } = pickItemsWorthGold(player, action.gold);
+      weg.forEach((id) => {
+        if (player.hand.includes(id)) removeFromHand(player, id); else unequipSlotCard(player, id);
+        discardCard(room, id);
+      });
+      return weg.length
+        ? `Gegenstaende im Wert von ${summe} GS abgelegt: ${weg.map((id) => card(id).name).join(', ')}`
+        : 'nichts Verkaufbares vorhanden';
+    }
+    case 'diceItemOrHandLoss': {
+      // SCHNECKEN AUF SPEED: "Wuerfle und verliere entsprechend viele
+      // Gegenstaende oder Karten von deiner Hand - deine Wahl." Die Wahl
+      // laeuft ueber die Warteschlange an die eigene Person (roll-mal
+      // hintereinander), damit sie die Karten selbst aussucht.
+      const roll = rollDie();
+      openQueuedCardAction(room, 'SCHNECKEN AUF SPEED', Array(roll).fill(player.id), () => {
+        const ids = equippedItemIds(player).concat(player.hand);
+        if (!ids.length) return null;
+        return { kind: 'chooseCard', prompt: 'Eine Karte oder einen Gegenstand ablegen',
+          candidateIds: ids, discardOwn: true };
+      });
+      return `Wuerfelwurf ${roll} -> ${roll} Karte(n)/Gegenstand/Gegenstaende ablegen`;
+    }
+    case 'curseIncomeTax': {
+      // FLUCH! EINKOMMENSSTEUER: "Lege einen Gegenstand deiner Wahl ab. Jeder
+      // andere Spieler muss nun einen oder mehrere Gegenstaende ablegen,
+      // deren Wert mindestens dem entspricht, den du abgelegt hast. Sollten
+      // sie nicht genug haben, um die ganze Steuer zu zahlen, muessen sie
+      // alle ihre Gegenstaende ablegen und verlieren eine Stufe."
+      // ponytail: "Gegenstand deiner Wahl" wird automatisch der TEUERSTE
+      // eigene Gegenstand gewaehlt statt einer echten Auswahl - Aufruestweg:
+      // eigene chooseCard-Runde fuer diese erste Wahl, analog zu
+      // 'discardSpecificItem' oben, sobald dafuer eine Anzeige existiert.
+      const ownIds = equippedItemIds(player).concat(player.hand).filter((id) => (card(id) || {}).gold > 0);
+      if (!ownIds.length) return 'kein Gegenstand zum Ablegen - Fluch wirkungslos';
+      let chosen = ownIds[0];
+      ownIds.forEach((id) => { if ((card(id).gold || 0) > (card(chosen).gold || 0)) chosen = id; });
+      const gold = card(chosen).gold || 0;
+      if (player.hand.includes(chosen)) removeFromHand(player, chosen); else unequipSlotCard(player, chosen);
+      discardCard(room, chosen);
+      const betroffene = playerQueueFrom(room, player, action.mode).map((pid) => findPlayer(room, pid)).filter(Boolean);
+      const teile = betroffene.map((target) => {
+        const { summe, weg } = pickItemsWorthGold(target, gold);
+        weg.forEach((id) => {
+          if (target.hand.includes(id)) removeFromHand(target, id); else unequipSlotCard(target, id);
+          discardCard(room, id);
+        });
+        if (summe < gold) { setLevel(target, target.level - 1); return `${target.name}: alles abgelegt + 1 Stufe verloren`; }
+        return `${target.name}: ${summe} GS abgelegt`;
+      });
+      return `"${card(chosen).name}" (${gold} GS) abgelegt - ${teile.join('; ')}`;
+    }
     case 'combo':
       return action.actions.map((a) => applyPrimitiveAction(room, player, a)).join('; ');
     case 'noEffect':
@@ -1077,7 +1189,7 @@ function applyPrimitiveAction(room, player, action) {
 const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
   card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
-  resolveConsequenceSpec, bigItemCount,
+  resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem,
 });
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
@@ -1246,6 +1358,17 @@ function advanceCardActionQueue(room) {
     room._queuedCardAction = null;
     room.pendingCardAction = null;
     room._pendingCardActionResolvers = null;
+    // ANWALT: "Lege alle uebrigen Karten ab." - erst wenn die ganze
+    // Warteschlange durch ist, geht der Rest der Opfer-Hand weg (siehe
+    // queuedTakeFromHand/action.discardRest).
+    if (room._discardRestAfterQueue) {
+      const opfer = findPlayer(room, room._discardRestAfterQueue);
+      room._discardRestAfterQueue = null;
+      if (opfer && opfer.hand.length) {
+        const desc = applyPrimitiveAction(room, opfer, { type: 'discardWholeHand' });
+        log(room, `${opfer.name}: uebrige Handkarten abgelegt (${desc}).`);
+      }
+    }
     return;
   }
   const p = findPlayer(room, nextId);
@@ -1455,16 +1578,35 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
   if (!pa.candidateIds.includes(chosenCardId)) return;
   const player = findPlayer(room, playerId);
   if (!player) return;
-  const idx = room.doorDiscard.indexOf(chosenCardId);
-  if (idx >= 0) room.doorDiscard.splice(idx, 1);
-  else {
-    const tIdx = room.treasureDiscard.indexOf(chosenCardId);
-    if (tIdx >= 0) room.treasureDiscard.splice(tIdx, 1);
-    else return;
-  }
-  player.hand.push(chosenCardId);
   const chosen = card(chosenCardId);
-  log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" aus dem Ablagestapel geholt.`, [chosenCardId]);
+  // Schlimme Dinge mit Fremdbeteiligung (HIPPOGREIF/ANWALT/LEPRACHAUN/
+  // NETZ-TROLL): die gewaehlte Karte kommt vom OPFER, nicht aus einem
+  // Ablagestapel - siehe queuedTakeFromHand/queuedTakeItem.
+  if (pa.takeFrom) {
+    const opfer = findPlayer(room, pa.takeFrom);
+    if (!opfer) return;
+    if (opfer.hand.includes(chosenCardId)) removeFromHand(opfer, chosenCardId);
+    else unequipSlotCard(opfer, chosenCardId);
+    clearCheatIfLost(opfer, chosenCardId);
+    player.hand.push(chosenCardId);
+    log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" von ${opfer.name} genommen.`, [chosenCardId]);
+  } else if (pa.discardOwn) {
+    // SCHNECKEN AUF SPEED: die eigene Wahl geht direkt auf den Ablagestapel.
+    if (player.hand.includes(chosenCardId)) removeFromHand(player, chosenCardId);
+    else unequipSlotCard(player, chosenCardId);
+    discardCard(room, chosenCardId);
+    log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" abgelegt.`, [chosenCardId]);
+  } else {
+    const idx = room.doorDiscard.indexOf(chosenCardId);
+    if (idx >= 0) room.doorDiscard.splice(idx, 1);
+    else {
+      const tIdx = room.treasureDiscard.indexOf(chosenCardId);
+      if (tIdx >= 0) room.treasureDiscard.splice(tIdx, 1);
+      else return;
+    }
+    player.hand.push(chosenCardId);
+    log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" aus dem Ablagestapel geholt.`, [chosenCardId]);
+  }
   if (room._queuedCardAction) advanceCardActionQueue(room);
   else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
   touchRoom(room);

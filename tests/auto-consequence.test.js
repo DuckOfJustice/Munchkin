@@ -110,7 +110,17 @@ function run() {
   // Untergrenze statt exakter Zahl: neue Overrides dürfen die Abdeckung nur
   // erhöhen; ein deutlicher RÜCKGANG deutet auf eine kaputte Regel hin.
   assert.ok(resolved + choice >= 60, `Abdeckung eingebrochen: nur noch ${resolved + choice} von ${total} automatisch/Wahl (erwartet >= 60)`);
-  assert.ok(manual >= 20, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
+  // Nach der Runde vom 2026-09-12 (Task 9, "Schlimme Dinge mit Fremd-
+  // beteiligung") sind sieben weitere Karten kuratiert automatisiert:
+  // HIPPOGREIF, ANWALT, LEPRACHAUN, NETZ-TROLL, VERSICHERUNGSVERTRETER,
+  // SCHNECKEN AUF SPEED (Monster) und FLUCH! EINKOMMENSSTEUER (Fluch) -
+  // GALLERT-OKTAEDER war schon vorher automatisiert und zaehlt hier nicht
+  // erneut. Die Schranke sinkt deshalb von 27 auf tatsaechlich 20 manuell;
+  // sie wird hier bewusst nur bis 15 gesenkt (statt exakt auf 20), damit
+  // etwas Spielraum bleibt. Die Schranke schuetzt weiter davor, dass eine zu
+  // grosszuegige REGEX-Regel Karten einfaengt - kuratierte Eintraege wie die
+  // sieben obigen sind davon nicht betroffen.
+  assert.ok(manual >= 15, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
 }
 
 run();

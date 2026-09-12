@@ -7,6 +7,7 @@
 module.exports = (ctx) => {
   const {
     card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
+    equippedItemIds, isBigItem,
   } = ctx;
 
   const CONSEQUENCE_OVERRIDES = {
@@ -83,6 +84,36 @@ module.exports = (ctx) => {
     // "... und 1 kleinen Gegenstand" bleibt bewusst manuell (freie Auswahl über
     // das Ablege-Dropdown) - nur der garantierte Stufenverlust wird berechnet:
     'AFFENBANDE': () => ({ type: 'levelDelta', amount: 1 }),
+
+    // --- Schlimme Dinge mit Fremdbeteiligung: andere Spieler:innen nehmen
+    // sich Karten/Gegenstaende ueber die Aktions-Warteschlange (Task 3).
+    // "mode" ist die Reihenfolge/Auswahl laut Kartentext, siehe
+    // playerQueueFrom in server.js. ---
+    // "Beginnend mit dem Spieler VOR dir in Zugreihenfolge darf jeder Spieler
+    // eine Schatzkarte vor dir oder (ohne hinzusehen) aus deiner Hand nehmen."
+    'HIPPOGREIF': () => ({ type: 'queuedTakeFromHand', mode: 'before' }),
+    // "Jeder Spieler darf eine Karte aus deiner Hand ziehen, beginnend mit dem
+    // Spieler NACH dir in Zugreihenfolge. Lege alle uebrigen Karten ab."
+    'ANWALT': () => ({ type: 'queuedTakeFromHand', mode: 'after', discardRest: true }),
+    // "Er nimmt dir zwei Gegenstaende weg - ausgewaehlt von den Spielern vor
+    // und nach dir in Zugreihenfolge."
+    'LEPRACHAUN': () => ({ type: 'queuedTakeItem', mode: 'neighbours' }),
+    // "... indem er dich dazu zwingt, den (die) Spieler mit der hoechsten
+    // Stufe (jeweils) 1 Gegenstand von dir nehmen zu lassen."
+    'NETZ-TROLL': () => ({ type: 'queuedTakeItem', mode: 'topLevel' }),
+    // "Du kaufst eine Versicherung. Verliere Gegenstaende im Wert von 1.000
+    // Goldstuecken. Hast du nicht genug, verlierst du alles, was du hast."
+    'VERSICHERUNGSVERTRETER': () => ({ type: 'discardItemsWorthGold', gold: 1000 }),
+    // "Sie stehlen deinen Schatz. Wuerfle und verliere entsprechend viele
+    // Gegenstaende oder Karten von deiner Hand - deine Wahl."
+    'SCHNECKEN AUF SPEED': () => ({ type: 'diceItemOrHandLoss' }),
+    // "Lege einen Gegenstand deiner Wahl ab. Jeder andere Spieler muss nun
+    // einen oder mehrere Gegenstaende ablegen, deren Wert mindestens dem
+    // entspricht, den du abgelegt hast. Sollten sie nicht genug haben, um die
+    // ganze Steuer zu zahlen, muessen sie alle ihre Gegenstaende ablegen und
+    // verlieren eine Stufe." Betrifft laut Text ALLE anderen (kein Nachbar-
+    // oder Stufen-Bezug wie bei den Monstern oben).
+    'FLUCH! EINKOMMENSSTEUER': () => ({ type: 'curseIncomeTax', mode: 'allOthers' }),
 
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
     'ENTIKOR': () => ({
@@ -194,12 +225,22 @@ module.exports = (ctx) => {
     'VERLIERE ZWEI KARTEN': () => ({ type: 'giveHandCardsToNeighbors' }),
     // "Verliere 2 Stufen" (fällt bereits unter den generischen Fallback, hier
     // nur zur Klarheit/Dokumentation nicht nötig - kein Override nötig).
-    // "Wähle einen Großen Gegenstand aus, den du ablegst."
-    // ponytail: discardBigItem legt ALLE getragenen Großen Gegenstände ab,
-    // nicht nur einen ausgewählten - für Nicht-Zwerge (max. 1) ohne
-    // Unterschied, bei einem Zwerg mit mehreren zu grob. Upgrade: eigene
-    // 'chooseBigItem'-Aktion mit Auswahl-UI, falls das je relevant wird.
-    'VERLIERE 1 GROSSEN GEGENSTAND': () => ({ type: 'discardBigItem' }),
+    // "Wähle einen Großen Gegenstand aus, den du ablegst." Bei 0 oder 1
+    // getragenem Großen Gegenstand ist discardBigItem (alle ablegen)
+    // gleichwertig zu "einen auswählen" - erst ein Zwerg mit mehreren
+    // braucht die echte Wahl, siehe 'discardSpecificItem' in server.js.
+    'VERLIERE 1 GROSSEN GEGENSTAND': (player) => {
+      const ids = equippedItemIds(player).filter((id) => isBigItem(card(id)));
+      if (ids.length <= 1) return { type: 'discardBigItem' };
+      return {
+        type: 'choice',
+        options: ids.map((id) => ({
+          id: `item-${id}`,
+          label: `"${card(id).name}" ablegen`,
+          action: { type: 'discardSpecificItem', itemId: id },
+        })),
+      };
+    },
     'VERLIERE 1 KLEINEN GEGENSTAND': () => null,
     // Persistente Mali/Flags ohne laufenden Status-Tracker in diesem Server -
     // bleiben nach dem Einordnen als Fluch bewusst manuell/nur textlich:
