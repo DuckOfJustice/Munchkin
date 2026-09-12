@@ -3,7 +3,7 @@
 // sobald ein Bot an der Reihe ist.
 const assert = require('assert');
 const {
-  playerQueueFrom, openQueuedCardAction, handleResolveCardChoice, newEquipped,
+  playerQueueFrom, openQueuedCardAction, handleResolveCardChoice, handleResolveCardTarget, newEquipped,
 } = require('../server.js');
 
 function makePlayer(id, extra) {
@@ -99,4 +99,25 @@ function makeRoom(players, turnIndex) {
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
 }
 
-console.log('OK - Aktions-Warteschlange: fuenf Reihenfolgen, Vorruecken, Abraeumen, Getrennte.');
+// 6) Eine Warteschlange darf auch targetPlayer-Specs liefern - der Resolver
+// dort ist keine Options-Map, sondern die Aktion selbst (wie bei
+// openCardTarget). Ohne den Fix bleibt der Resolver {} und die Aktion
+// verpufft wortlos.
+{
+  const ps = [makePlayer('a', { level: 5 }), makePlayer('b', { level: 5 }), makePlayer('c', { level: 5 })];
+  const room = makeRoom(ps, 0);
+  openQueuedCardAction(room, 'TESTKARTE', ['b'], () => ({
+    kind: 'targetPlayer', prompt: 'Ziel wählen', candidateIds: ['a', 'c'],
+    action: { type: 'stealLevel' },
+  }));
+  assert.strictEqual(room.pendingCardAction.playerId, 'b');
+  assert.strictEqual(room.pendingCardAction.kind, 'targetPlayer');
+  handleResolveCardTarget(room, 'b', 'a');
+  assert.strictEqual(ps[1].level, 6, 'B (Akteur) +1 Stufe durch stealLevel');
+  assert.strictEqual(ps[0].level, 4, 'A (Ziel) -1 Stufe durch stealLevel');
+  assert.strictEqual(room.pendingCardAction, null, 'Warteschlange war danach leer, also abgeraeumt');
+
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+}
+
+console.log('OK - Aktions-Warteschlange: fuenf Reihenfolgen, Vorruecken, Abraeumen, Getrennte, targetPlayer-Resolver.');

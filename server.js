@@ -1168,8 +1168,18 @@ function advanceCardActionQueue(room) {
   const spec = q.specFor(nextId);
   if (!spec) return advanceCardActionQueue(room);
   room.pendingCardAction = Object.assign({ playerId: nextId, cardName: q.cardName }, spec);
-  room._pendingCardActionResolvers = {};
-  (spec.options || []).forEach((o) => { room._pendingCardActionResolvers[o.id] = o.action; });
+  // Der Resolver hat je "kind" eine andere Form - genau wie bei
+  // openCardChoice/openCardTarget/openCardCardChoice. Eine Warteschlange darf
+  // jede der drei Arten liefern (die Schnittstelle schraenkt "kind" nicht
+  // ein), also muss hier dieselbe Fallunterscheidung stehen wie dort.
+  if (spec.kind === 'targetPlayer') {
+    room._pendingCardActionResolvers = spec.action;
+  } else if (spec.kind === 'chooseCard') {
+    room._pendingCardActionResolvers = null;
+  } else {
+    room._pendingCardActionResolvers = {};
+    (spec.options || []).forEach((o) => { room._pendingCardActionResolvers[o.id] = o.action; });
+  }
 }
 
 function openCardChoice(room, player, cardName, options) {
@@ -1279,13 +1289,9 @@ function handleResolveCardChoice(room, playerId, optionId) {
   const option = pa.options.find((o) => o.id === optionId);
   const action = stored[optionId];
   // Eine Wahl kann selbst wieder eine Ziel-Auswahl auslösen (z.B. "Sinnloser
-  // Akt der Freundlichkeit" -> "Auf Mitspieler anwenden"). In dem Fall bleibt
-  // eine laufende Warteschlange bei dieser Person stehen, statt schon
-  // weiterzuruecken.
-  // ponytail: verschachteltes targetPlayer INNERHALB einer Warteschlange
-  // (Task 3) wird nicht gesondert behandelt - kein Basis-Set-Karte braucht
-  // das. Falls doch: Ziel-Aufloesung muesste die Warteschlange erst nach der
-  // Ziel-Wahl vorruecken statt hier direkt.
+  // Akt der Freundlichkeit" -> "Auf Mitspieler anwenden"). Eine laufende
+  // Warteschlange rueckt dabei NICHT sofort vor - das passiert erst, wenn die
+  // Ziel-Wahl in handleResolveCardTarget aufgeloest wird (return unten).
   if (action.type === 'targetPlayer') {
     room.pendingCardAction = null;
     room._pendingCardActionResolvers = null;
