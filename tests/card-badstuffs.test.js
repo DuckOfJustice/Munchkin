@@ -8,7 +8,7 @@ const assert = require('assert');
 const {
   resolveConsequenceSpec, newEquipped, playerQueueFrom, applyPrimitiveAction,
   handleResolveCardCardChoice, resolveBotCardAction, equippedItemIds, ALL_CARDS,
-  CARDS_BY_ID, isBigItem,
+  CARDS_BY_ID, isBigItem, autoApplyLossConsequence,
 } = require('../server.js');
 
 function card(id) { return CARDS_BY_ID.get(id) || null; }
@@ -318,4 +318,61 @@ const CARD_C = idByName('KLASSE WECHSELN');
   done(room);
 }
 
-console.log('OK - Schlimme Dinge mit Fremdbeteiligung: HIPPOGREIF/ANWALT/LEPRACHAUN/NETZ-TROLL/VERSICHERUNGSVERTRETER/SCHNECKEN AUF SPEED/FLUCH! EINKOMMENSSTEUER ueber die Aktions-Warteschlange, plus VERLIERE-1-GROSSEN-GEGENSTAND-Zwergwahl.');
+// 11) REGRESSIONSTEST (Fix Round 1): eine verlorene Kampfrunde mit ZWEI
+// Schlimme-Dinge-Monstern, die beide eine Warteschlange oeffnen (HIPPOGREIF +
+// ANWALT - realistisch z.B. durch WANDERNDES MONSTER, Task 8, oder zwei
+// aufgedeckte Monster in einem Kampf). autoApplyLossConsequence ruft
+// applyPrimitiveAction synchron fuer BEIDE Quellen auf, bevor irgendwer
+// antworten konnte - ohne Backlog wuerde ANWALTs openQueuedCardAction-Aufruf
+// HIPPOGREIFs bereits laufende Warteschlange klammheimlich ueberschreiben
+// (samt dessen pendingCardAction), und ANWALTs discardRest wuerde als loses
+// Raum-Feld am Ende von HIPPOGREIFs (nicht ANWALTs) Warteschlange feuern.
+{
+  const ps = ['a', 'b', 'c'].map((x) => makePlayer(x));
+  const opfer = ps[0]; // a
+  opfer.hand = [CARD_A, CARD_B, CARD_C];
+  const room = makeRoom(ps, 0);
+  room.pendingConsequence = {
+    playerId: opfer.id, kind: 'loss', cardId: null, text: '', autoApplied: null, choice: null,
+  };
+
+  assert.deepStrictEqual(playerQueueFrom(room, opfer, 'before'), ['c', 'b'], 'HIPPOGREIF-Reihenfolge');
+  assert.deepStrictEqual(playerQueueFrom(room, opfer, 'after'), ['b', 'c'], 'ANWALT-Reihenfolge');
+
+  autoApplyLossConsequence(room, opfer, [
+    { name: 'HIPPOGREIF', text: 'x' },
+    { name: 'ANWALT', text: 'x' },
+  ]);
+
+  // Ohne den Fix waere hier 'b' (ANWALTs erste Person) dran, weil ANWALT
+  // HIPPOGREIFs Warteschlange synchron ueberschrieben haette.
+  assert.strictEqual(room.pendingCardAction.playerId, 'c', 'HIPPOGREIFs Warteschlange laeuft zuerst durch, unangetastet von ANWALT');
+  assert.ok(/HIPPOGREIF/.test(room.pendingConsequence.autoApplied) && /ANWALT/.test(room.pendingConsequence.autoApplied),
+    'beide Monster wurden tatsaechlich aufgeloest, keins wurde stillschweigend verschluckt');
+
+  handleResolveCardCardChoice(room, 'c', CARD_A);
+  assert.ok(ps[2].hand.includes(CARD_A), 'C (HIPPOGREIF, vor-Reihenfolge) hat seine Karte erhalten');
+  assert.strictEqual(room.pendingCardAction.playerId, 'b', 'HIPPOGREIFs zweite Person');
+  handleResolveCardCardChoice(room, 'b', CARD_B);
+  assert.ok(ps[1].hand.includes(CARD_B), 'B (HIPPOGREIF) hat seine Karte erhalten');
+
+  // HIPPOGREIFs Warteschlange ist jetzt durch (kein discardRest bei ihr) -
+  // ANWALTs eigene Warteschlange startet jetzt erst, mit ihrer EIGENEN
+  // Reihenfolge (b, c) und ihrem EIGENEN discardRest, nicht vermischt mit
+  // HIPPOGREIFs bereits erledigter Runde.
+  assert.strictEqual(room.pendingCardAction.playerId, 'b', 'ANWALTs Warteschlange startet erst danach, wieder bei B');
+  assert.deepStrictEqual(room.pendingCardAction.candidateIds, [CARD_C], 'nur noch 1 Karte in Opfers Hand uebrig');
+  handleResolveCardCardChoice(room, 'b', CARD_C);
+  assert.ok(ps[1].hand.includes(CARD_C), 'B hat jetzt 2 Karten von A (je eine aus jeder Warteschlange)');
+
+  // C waere ANWALTs zweite Person, aber Opfers Hand ist jetzt leer ->
+  // ueberspringen, Warteschlange raeumt sich ab. discardRest greift ins
+  // Leere (nichts mehr da), OHNE HIPPOGREIFs laengst abgeschlossene Runde
+  // erneut zu beruehren.
+  assert.strictEqual(room.pendingCardAction, null, 'beide Warteschlangen sauber nacheinander abgearbeitet');
+  assert.strictEqual(opfer.hand.length, 0);
+
+  done(room);
+}
+
+console.log('OK - Schlimme Dinge mit Fremdbeteiligung: HIPPOGREIF/ANWALT/LEPRACHAUN/NETZ-TROLL/VERSICHERUNGSVERTRETER/SCHNECKEN AUF SPEED/FLUCH! EINKOMMENSSTEUER ueber die Aktions-Warteschlange, plus VERLIERE-1-GROSSEN-GEGENSTAND-Zwergwahl, plus Backlog-Regression bei mehreren Warteschlangen-Monstern in einem Kampf.');

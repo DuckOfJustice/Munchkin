@@ -1096,8 +1096,7 @@ function applyPrimitiveAction(room, player, action) {
         if (!opfer.hand.length) return null; // nichts mehr zu holen: ueberspringen
         return { kind: 'chooseCard', prompt: `Eine Karte von ${opfer.name} nehmen`,
           candidateIds: opfer.hand.slice(), takeFrom: opfer.id };
-      });
-      if (action.discardRest) room._discardRestAfterQueue = opfer.id;
+      }, action.discardRest ? opfer.id : null);
       return `${queue.length} Mitspieler nehmen je 1 Handkarte`;
     }
     case 'queuedTakeItem': {
@@ -1115,6 +1114,12 @@ function applyPrimitiveAction(room, player, action) {
     case 'discardItemsWorthGold': {
       // VERSICHERUNGSVERTRETER: "Verliere Gegenstaende im Wert von 1.000
       // Goldstuecken. Hast du nicht genug, verlierst du alles, was du hast."
+      // ponytail: pickItemsWorthGold waehlt gierig (teuerste zuerst) ohne
+      // Spielerwahl, welche Gegenstaende genau gehen - bei einem exakten
+      // Grenzfall (z.B. zwei Gegenstaende reichen, aber ein anderes Paar
+      // waere guenstiger) trifft der Server die Wahl statt der Person.
+      // Aufruestweg: eine chooseCard-Runde wie bei 'curseIncomeTax', sobald
+      // dafuer eine Anzeige existiert.
       const { summe, weg } = pickItemsWorthGold(player, action.gold);
       weg.forEach((id) => {
         if (player.hand.includes(id)) removeFromHand(player, id); else unequipSlotCard(player, id);
@@ -1340,9 +1345,25 @@ const {
 
 // Eine Aktion, die mehrere Personen NACHEINANDER betrifft. specFor(playerId)
 // liefert je Person den Inhalt (kind/options/prompt/candidateIds) - so kann
-// jede Person aus ihrer eigenen Hand waehlen.
-function openQueuedCardAction(room, cardName, queue, specFor) {
-  room._queuedCardAction = { cardName, queue: queue.slice(), specFor };
+// jede Person aus ihrer eigenen Hand waehlen. `discardRestPlayerId` (ANWALT)
+// haengt am jeweiligen Eintrag selbst, nicht an einem losen Raum-Feld - sonst
+// koennte er beim naechsten Eintrag im Backlog faelschlich mitlaufen.
+//
+// Ist bereits eine Warteschlange aktiv, wird die neue HINTEN angehaengt statt
+// die laufende zu ueberschreiben: eine verlorene Kampfrunde mit zwei oder
+// mehr "Schlimme Dinge"-Monstern (z.B. durch WANDERNDES MONSTER, Task 8, oder
+// schlicht zwei aufgedeckte Monster) ruft applyPrimitiveAction synchron fuer
+// JEDE Quelle auf (siehe autoApplyLossConsequence) - ohne Backlog wuerde die
+// zweite Karte die erste Warteschlange kommentarlos verschlucken, noch bevor
+// irgendwer sie zu Gesicht bekommt.
+function openQueuedCardAction(room, cardName, queue, specFor, discardRestPlayerId) {
+  const entry = { cardName, queue: queue.slice(), specFor, discardRestPlayerId: discardRestPlayerId || null };
+  if (room._queuedCardAction) {
+    room._queuedCardActionBacklog = room._queuedCardActionBacklog || [];
+    room._queuedCardActionBacklog.push(entry);
+    return;
+  }
+  room._queuedCardAction = entry;
   advanceCardActionQueue(room);
 }
 
@@ -1358,16 +1379,20 @@ function advanceCardActionQueue(room) {
     room._queuedCardAction = null;
     room.pendingCardAction = null;
     room._pendingCardActionResolvers = null;
-    // ANWALT: "Lege alle uebrigen Karten ab." - erst wenn die ganze
-    // Warteschlange durch ist, geht der Rest der Opfer-Hand weg (siehe
-    // queuedTakeFromHand/action.discardRest).
-    if (room._discardRestAfterQueue) {
-      const opfer = findPlayer(room, room._discardRestAfterQueue);
-      room._discardRestAfterQueue = null;
+    // ANWALT: "Lege alle uebrigen Karten ab." - erst wenn DIESE Warteschlange
+    // durch ist, geht der Rest der Opfer-Hand weg (siehe
+    // queuedTakeFromHand/action.discardRest). Gebunden an q, nicht an room.
+    if (q.discardRestPlayerId) {
+      const opfer = findPlayer(room, q.discardRestPlayerId);
       if (opfer && opfer.hand.length) {
         const desc = applyPrimitiveAction(room, opfer, { type: 'discardWholeHand' });
         log(room, `${opfer.name}: uebrige Handkarten abgelegt (${desc}).`);
       }
+    }
+    // Naechste wartende Warteschlange (Backlog) jetzt erst starten.
+    if (room._queuedCardActionBacklog && room._queuedCardActionBacklog.length) {
+      room._queuedCardAction = room._queuedCardActionBacklog.shift();
+      return advanceCardActionQueue(room);
     }
     return;
   }
@@ -3692,4 +3717,5 @@ module.exports = {
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurse, curseCombatModifier, curseSuppressesItemBonuses,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
+  autoApplyLossConsequence,
 };
