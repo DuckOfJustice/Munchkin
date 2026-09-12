@@ -15,10 +15,13 @@ nachgebildet werden - inklusive eines komplett neuen dritten Charakter-Merkmals
 ("Machtgruppe", Pathfinder-Set). Das ist über mehrere Runden passiert; diese
 Datei ist der Stand nach der Runde vom **2026-09-11**.
 
-**Wer hier neu anfängt, liest zuerst Abschnitt 7.** Dort steht die
-Kartenauswertung der letzten Runde (Dauerwirkungen von Karten) - sie deckt
-bisher **nur das Basis-Set** ab, und Abschnitt 7 sagt genau, was für die
-übrigen Sets noch fehlt und in welcher Reihenfolge man es angeht.
+**Wer hier neu anfängt, liest zuerst Abschnitt 8.** Dort steht der Stand der
+Runde vom 2026-09-12 (fehlende Basis-Set-Kartenkräfte), die zur Hälfte fertig
+ist: acht von dreizehn Aufgaben sind erledigt und geprüft, fünf sind offen,
+und Abschnitt 8 sagt genau, wie man sie zu Ende bringt.
+
+Abschnitt 7 ist weiterhin gültig und beschreibt die Runde davor
+(Dauerwirkungen von Karten, nur Basis-Set).
 
 Stand der vorherigen Runde (2026-09-10): Verifikation des
 Basis-Set-Fluch-Nachtrags, ALUFOLIE-Gleichstand behoben, die passiven
@@ -712,3 +715,174 @@ Repo (Einmalwerkzeug). Kurzform zum Nachbauen: `data/cards.json` laden,
 `server.js` requiren, Kartentexte normalisieren
 (`\n`, `<br>`, `<i>` entfernen), pro Muster-Regex über alle Karten laufen und
 gegen die jeweilige Tabelle prüfen.
+
+## 8. Fehlende Basis-Set-Kartenkräfte (Runde vom 2026-09-12) - **zur Hälfte fertig**
+
+Diese Runde begann mit einem Audit aller 147 Basis-Set-Karten gegen den Code.
+Ergebnis: 12 Karten waren **vollständig wirkungslos** (kein Ausspielweg,
+nur "Ablegen"), 2 Klassenkräfte fehlten ganz, mehrere funktionierende Karten
+hatten stillschweigend fallengelassene Teilwirkungen, und es gab 2 echte
+Regelabweichungen.
+
+**Acht von dreizehn Aufgaben sind erledigt und geprüft. Fünf sind offen.**
+
+### 8.1 Die maßgeblichen Dokumente
+
+Lies sie in dieser Reihenfolge. Sie sind vollständig, dieser Abschnitt ist nur
+die Landkarte:
+
+| Datei | Inhalt |
+|---|---|
+| `docs/superpowers/specs/2026-09-12-basis-set-kartenkraefte-design.md` | Das Design. Die **bindende** Instanz bei Widersprüchen. |
+| `docs/superpowers/plans/2026-09-12-basis-set-kartenkraefte.md` | Der Umsetzungsplan, 13 Aufgaben mit fertigem Code und Tests. |
+| `.superpowers/sdd/2026-09-12-basis-set-kartenkraefte/progress.md` | Das Protokoll: was fertig ist, jede getroffene Entscheidung, jede zurückgestellte Kleinigkeit. **Nicht löschen, solange Tasks offen sind.** |
+
+Im selben Verzeichnis liegen je Aufgabe ein `task-N-brief.md` (die Anforderung)
+und ein `task-N-report.md` (was die umsetzende Session gemacht hat).
+
+### 8.2 Was fertig ist (Tasks 1-8)
+
+14 Commits, `10641fc..b66feb1`. `npm test` = **13/13 grün**, Server startet
+sauber. Jede Aufgabe wurde nach der Umsetzung von einer zweiten, unabhängigen
+Instanz geprüft; drei Prüfungen fanden echte Fehler, die in einer Fix-Runde
+behoben und erneut geprüft wurden.
+
+| # | Was | Commits |
+|---|---|---|
+| 1 | Kartentabellen nach `src/cards/*.js` ausgelagert (verhaltensneutral, `server.js` von 3340 auf 2860 Zeilen) | `a4c9f7d`, `44a2cd9`, `11be45e` |
+| 2 | **Große Gegenstände**: kuratierte 8er-Liste, Traglimit 1 für Nicht-Zwerge, schaltet GALLERT-OKTAEDER, VERLIERE 1 GROSSEN GEGENSTAND, GRÜNSCHLEIM und die Zwergen-Rassenkraft frei | `e72fd07`, `7542a21` |
+| 3 | **Aktions-Warteschlange**: Karten, die mehrere Spieler nacheinander handeln lassen, plus der generische Bot-Auflöser | `23f9efe`, `5a230da` |
+| 4 | **Reaktionsfenster**: GEZINKTER WÜRFEL, KLEBERFLÄSCHCHEN, MAGISCHE LAMPE | `91b6add` |
+| 5 | **Siegregel**: Verkaufen gewinnt nicht mehr, GOTTLICHE INTERVENTION wird die gedruckte Ausnahme | `365ef1d` |
+| 6 | **Kartenanhänge**: SCHUMMELN!, KNIESCHÜTZER DER VERLOCKUNG | `ebb76e9`, `35f027b` |
+| 7 | **Fluch-Tracker**: MIESER SPIEGEL, GESCHLECHTSUMWANDLUNG, HUHN AUF DEINEM KOPF, WINZIGE HÄNDE, WUNSCHRING | `1279897` |
+| 8 | **Kampfreaktionen**: KUMPEL, WANDERNDES MONSTER, ILLUSION, HILF MIR, ÜBERFALLTRANK | `4b0306d`, `b66feb1` |
+
+### 8.3 Was noch offen ist (Tasks 9-13)
+
+Der Plan enthält für jede dieser Aufgaben den vollständigen Code und die
+Tests. Reihenfolge einhalten - 9 braucht die Warteschlange aus 3, 12 braucht
+das Reaktionsfenster aus 4 **und** muss nach 7 und 8 laufen, weil alle drei in
+`combatTotals` rechnen.
+
+- **Task 9 - Schlimme Dinge mit Fremdbeteiligung.** HIPPOGREIF, ANWALT,
+  LEPRACHAUN, NETZ-TROLL, VERSICHERUNGSVERTRETER, SCHNECKEN AUF SPEED,
+  FLUCH! EINKOMMENSSTEUER. Nutzt `playerQueueFrom` + `openQueuedCardAction`
+  aus Task 3.
+- **Task 10 - Kampf-Alternativen.** MÖCHTEGERN-VAMPIR, LAUFENDE NASE,
+  PIT BULL (Wahl bei Kampfbeginn, gleiche Bauform wie BEKIFFTER GOLEM) und
+  ZUNGENDÄMON (erzwungenes Ablegen vor dem Kampf).
+- **Task 11 - Kleinkram.** SUPER MUNCHKIN / HALB-BLUT zweite Hälfte ("alle
+  Vorteile, keine Nachteile") und VERSTÜMMLE DIE LEICHEN nur nach einem Kampf.
+  Unabhängig von 9, 10 und 12, kann jederzeit laufen.
+- **Task 12 - Klassenkräfte.** DIEB ("In den Rücken fallen", "Diebstahl") und
+  PRIESTER ("Auferstehung").
+- **Task 13 - Abnahme.** Volle Testsuite, Abdeckung neu messen, Durchlauf im
+  Browser, README-Abschnitt "Was automatisiert ist" nachziehen.
+
+### 8.4 Fünf Dinge, die eine neue Session vorher wissen muss
+
+Das sind Entscheidungen und Fallen aus den ersten acht Aufgaben. Wer sie nicht
+kennt, verliert Zeit oder baut Fehler ein.
+
+1. **Der Plan enthält zwei Fehler im Test-Gerüst.** Jedes `makeRoom` im Plan
+   benutzt `log: []`. Das echte Feld heißt `logs: []` (`server.js:172`), und
+   `log()` schreibt dorthin - mit `log` stürzt der Server beim ersten
+   Logeintrag ab. Außerdem **müssen** Tests `clearTimeout(room.cleanupTimer)`
+   (und `botTimer`) aufrufen, sonst hängt der Testlauf: `touchRoom` setzt einen
+   3-Stunden-Timer, der Node am Leben hält. Vorbild ist der `done(room)`-Helfer
+   in `tests/card-reactions.test.js`.
+
+2. **Die Abdeckungs-Schranke in `tests/auto-consequence.test.js:113` reißt in
+   Task 9 - das ist erwartet.** Sie steht auf `manual >= 20`, aktuell sind es
+   27. Der Plan sagt, auf 12 zu senken; **das ist falsch gerechnet.** Der Scan
+   dort zählt nur Karten der Kategorien `monster` und `curse`, `door_other`
+   fällt heraus. Nachgerechnet: Task 9 automatisiert 8 Karten innerhalb des
+   Scans, also 27 - 8 = **19**. Die Schranke reißt um genau eins.
+   **Auf 15 senken, nicht auf 12**, mit einem Kommentar, der die neu
+   automatisierten Karten nennt. Das ist die **einzige** erlaubte Änderung an
+   einer bestehenden Testdatei im ganzen Plan. Wird irgendein *anderer* Test
+   angepasst, um grün zu werden, ist ein echter Fehler versteckt worden.
+
+3. **Die Zeilennummern im Plan sind veraltet.** Task 1 hat `server.js`
+   umgebaut, Tasks 2-8 haben es erweitert. Immer über den Funktionsnamen
+   suchen, nie über die Nummer im Plan.
+
+4. **Alles, was die Kampfstärke verändert, muss durch `combatTotals` laufen.**
+   `combatSignature` bildet `playerStrength`/`monsterStrength` daraus ab und
+   setzt damit den Bereit-Status der Mitspielenden zurück. Wer daneben rechnet,
+   lässt den Bereit-Status veralten, während sich die Zahlen ändern - das fällt
+   in keinem Unittest auf und zeigt sich erst als desynchronisierter Tisch.
+   Nach jeder Änderung an einem laufenden Kampf `refreshCombatReady(room)`
+   aufrufen.
+
+5. **Jede neue Interaktion braucht einen Bot-Pfad.** Ein Bot, der auf einen
+   Dialog warten muss, lässt die Partie stehen. Task 3 hat dafür den
+   generischen Auflöser gebaut (`resolveBotCardAction`); `combatReadyRequired`
+   schließt Bots ohnehin aus. Getrennte Spieler werden übersprungen, nie
+   abgewartet.
+
+### 8.5 Bewusst zurückgestellte Kleinigkeiten
+
+Keine davon blockiert etwas. Sie stehen hier, damit sie nicht als neue
+Entdeckungen noch einmal Zeit kosten.
+
+- **MAGISCHE LAMPE** ist an `c.fleeRerollOffer` gebunden, wirkt also nur nach
+  einem verpatzten Weglaufwurf. Die Karte sagt "Nur in deiner Runde spielbar" -
+  der Rahmen ist der ganze Zug, und "selbst wenn dein Weglaufenwurf verpatzt
+  wurde" ist eine Zusicherung für den schlimmsten Fall, keine Einschränkung
+  darauf. Ein weiteres Fenster wäre ein eigener Ausspielweg plus UI. **Die
+  auffälligste der zurückgestellten Sachen - hier zuerst nachbessern, falls
+  jemand es im Spiel vermisst.**
+- **VERLIERE 1 GROSSEN GEGENSTAND** legt *alle* Großen Gegenstände ab statt
+  einen zur Wahl. Für Nicht-Zwerge gleichwertig (sie tragen höchstens einen),
+  falsch nur für Zwerge. Task 9 baut ohnehin die "such dir eine Karte
+  aus"-Mechanik - dort mitnehmen.
+- **GOTTLICHE INTERVENTION** muss laut Karte sofort beim Erhalten gespielt
+  werden; umgesetzt ist sie als freiwillige Sonderkraft.
+- **`combatConditionalBonusFields`** ist nicht durch
+  `curseSuppressesItemBonuses` gefiltert. Unter MIESER SPIEGEL könnte dort ein
+  bedingter Bonus veröffentlicht werden, den `combatTotals` gar nicht zählt.
+  Aktuell harmlos, weil `public/client.js` diese beiden Felder nirgends
+  anzeigt - relevant erst, wenn sie in die Oberfläche wandern.
+- **`public/client.js` spiegelt Kartennamen in fest verdrahteten Sets**
+  (`DOOR_POWER_NAMES`, `TREASURE_POWER_NAMES`, `GUARANTEED_FLEE_NAMES`,
+  `TRAIT_CAP_CARD_NAMES`). Die müssen von Hand mit den Servertabellen
+  synchron gehalten werden. Altes Muster, nicht in dieser Runde entstanden,
+  aber eine dauerhafte Driftquelle.
+- **ILLUSION** setzt `monsterModifier` auf 0. Exakt bei einem Monster im
+  Kampf; bei mehreren würde es auch fremde Boni löschen. `startCombat` nimmt
+  seit jeher ein Array, zwei Monster sind also ohne jede neue Karte
+  erreichbar. Eine saubere Lösung braucht einen Modifikator **pro Monster**.
+
+### 8.6 Weiterhin nicht umsetzbar
+
+Unverändert gegenüber der Design-Spec, Abschnitt 5:
+
+- **AMAZONE** - Geschlecht wird nicht erfasst und soll es nicht.
+- **ANWALT, Dieb-Tauschoption** - toter Code: `MONSTER_REFUSES` verhindert den
+  Angriff auf Diebe schon, die Alternative tritt nie ein.
+- **SCHATZHORT!, verdecktes Ziehen** - es gibt kein Konzept "offen/verdeckt"
+  für Schätze.
+- **34 Basis-Karten ohne `text` in `data/cards.json`** - eigenständiges
+  Datenproblem. Klassen-/Rassen-/Geschlechtsbeschränkungen auf Gegenständen
+  (VERDUNKELUNGSUMHANG nur Dieb, SPITZER HUT DER MACHT nur Zauberer, ...)
+  fehlen dadurch ebenfalls. Für SCHUMMELN! nicht nötig, seit es das
+  Gross-Flag gibt.
+
+### 8.7 Wie man weitermacht
+
+Der Ablauf der ersten acht Aufgaben war: je Aufgabe eine frische Instanz mit
+dem `task-N-brief.md` beauftragen, danach eine **zweite, unabhängige** Instanz
+denselben Diff prüfen lassen, Fehler in einer Fix-Runde beheben, erneut prüfen,
+erst dann weiter. Das hat sich gelohnt - drei der acht Aufgaben hatten echte
+Fehler, die so gefunden wurden, darunter einer, der eine Karte dauerhaft
+unspielbar gemacht hätte, und einer, der eine Karte doppelt in den Stapel
+gelegt hätte.
+
+Wer den Prozess nachbauen will: das Skill `superpowers:subagent-driven-development`
+beschreibt ihn, und `progress.md` ist der Wiederaufsetzpunkt - Aufgaben mit
+einer `complete`-Zeile sind fertig und dürfen nicht erneut vergeben werden.
+
+Nach Task 13 gehört noch eine Gesamtdurchsicht des ganzen Zweigs dazu; die ist
+in dieser Runde noch nicht gelaufen.
