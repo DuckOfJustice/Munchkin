@@ -716,7 +716,7 @@ Repo (Einmalwerkzeug). Kurzform zum Nachbauen: `data/cards.json` laden,
 (`\n`, `<br>`, `<i>` entfernen), pro Muster-Regex über alle Karten laufen und
 gegen die jeweilige Tabelle prüfen.
 
-## 8. Fehlende Basis-Set-Kartenkräfte (Runde vom 2026-09-12) - **10 von 13 fertig**
+## 8. Fehlende Basis-Set-Kartenkräfte (Runde vom 2026-09-12) - **abgeschlossen**
 
 Diese Runde begann mit einem Audit aller 147 Basis-Set-Karten gegen den Code.
 Ergebnis: 12 Karten waren **vollständig wirkungslos** (kein Ausspielweg,
@@ -724,7 +724,7 @@ nur "Ablegen"), 2 Klassenkräfte fehlten ganz, mehrere funktionierende Karten
 hatten stillschweigend fallengelassene Teilwirkungen, und es gab 2 echte
 Regelabweichungen.
 
-**Acht von dreizehn Aufgaben sind erledigt und geprüft. Fünf sind offen.**
+**Alle dreizehn Aufgaben sind erledigt und geprüft** (Stand 2026-09-13).
 
 ### 8.1 Die maßgeblichen Dokumente
 
@@ -889,6 +889,13 @@ Unverändert gegenüber der Design-Spec, Abschnitt 5:
   (VERDUNKELUNGSUMHANG nur Dieb, SPITZER HUT DER MACHT nur Zauberer, ...)
   fehlen dadurch ebenfalls. Für SCHUMMELN! nicht nötig, seit es das
   Gross-Flag gibt.
+
+**`BIG_ITEMS` (`src/cards/bigitems.js`) ist eine kuratierte, vom Nutzer
+bestätigte Liste von acht Karten**, keine aus `data/cards.json` abgeleitete
+Eigenschaft - die Rohdaten kennen kein Gross-Flag. Wer eine Karte ergänzt oder
+streicht, ändert damit Traglimits, GALLERT-OKTAEDER, GRÜNSCHLEIM, VERLIERE 1
+GROSSEN/KLEINEN GEGENSTAND und die Zwergen-Rassenkraft auf einmal. Nicht ohne
+Rückfrage anfassen.
 
 ### 8.7 Wie man weitermacht
 

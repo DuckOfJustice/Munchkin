@@ -308,6 +308,10 @@ button.wide { width: 100%; }
 }
 .equipslot.filled { border-style: solid; border-color: var(--gold); }
 .equipslot .eqimg { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
+/* Getragene Karten sind anklickbar (Grossansicht) - der Ablegen-Knopf darin
+   bleibt ein eigener Klick, siehe stopPropagation im Client. */
+.equipslot.clickable { cursor: pointer; transition: border-color 0.12s ease; }
+.equipslot.clickable:hover { border-color: var(--door-bright); }
 
 select { background: var(--bg-alt); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 7px; }
 
@@ -361,6 +365,16 @@ select { background: var(--bg-alt); color: var(--text); border: 1px solid var(--
   padding: 18px 32px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
 }
 .die-who { color: var(--text-dim); font-size: 0.95em; margin-bottom: 6px; }
+
+/* -------- Gespielte Kampfkarte: dieselbe Buehne wie beim Aufdecken
+   (.reveal-anim), aber mit Namenszeile darueber - alle am Tisch sollen sehen,
+   WER die Karte spielt. Ebenfalls reine Deko (pointer-events: none). -------- */
+.cardplay-box { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.cardplay-who {
+  background: rgba(6, 8, 5, 0.92); border: 2px solid var(--gold); border-radius: var(--radius);
+  padding: 6px 16px; color: var(--text); font-weight: 700; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+.cardplay-note { color: var(--text-dim); font-size: 0.95em; }
 .die-face { font-size: 5em; line-height: 1.05; color: var(--text); }
 .die-sum { font-size: 1.3em; font-weight: 700; color: var(--gold); margin-top: 4px; }
 .die-result { font-size: 1.15em; font-weight: 700; margin-top: 6px; }

@@ -275,6 +275,36 @@ function run() {
     done(room);
   }
 
+  // Jeder Tracker-Eintrag traegt seinen Klartext mit - daraus baut der Client
+  // die Fluch-Marke bei der Figur, im Spieler-Fenster und im Kampf-Panel.
+  {
+    const room = makeRoom();
+    Object.keys(LINGERING_CURSES).forEach((name) => {
+      const p = room.players[0];
+      p.activeCurses = [];
+      addActiveCurse(room, p, name, 'karten-id');
+      assert.strictEqual(p.activeCurses.length, 1, `${name} muss im Tracker landen`);
+      assert.ok(p.activeCurses[0].hinweis && p.activeCurses[0].hinweis.length > 10,
+        `${name} braucht einen lesbaren Hinweis fuer die Anzeige`);
+    });
+    done(room);
+  }
+
+  // Jeder Tracker-Eintrag traegt seinen Klartext mit - daraus baut der Client
+  // die Fluch-Marke bei der Figur, im Spieler-Fenster und im Kampf-Panel.
+  {
+    const room = makeRoom();
+    Object.keys(LINGERING_CURSES).forEach((name) => {
+      const p = room.players[0];
+      p.activeCurses = [];
+      addActiveCurse(room, p, name, 'karten-id');
+      assert.strictEqual(p.activeCurses.length, 1, `${name} muss im Tracker landen`);
+      assert.ok(p.activeCurses[0].hinweis && p.activeCurses[0].hinweis.length > 10,
+        `${name} braucht einen lesbaren Hinweis fuer die Anzeige`);
+    });
+    done(room);
+  }
+
   console.log('OK - Anhaltende Flueche: Tracker, Mieser-Spiegel/Ruestungs-Ausnahme, Geschlechtsumwandlung, Bereit-Invalidierung, Ablauf bei Sieg/Flucht, Wunschring.');
 }
 

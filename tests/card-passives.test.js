@@ -294,6 +294,15 @@ function run() {
   assert.strictEqual(tubaRoom.room.dieRoll.mod, 9 + 3 + 1, 'Tuba (+3) und Goblin (+1) kommen zum manuellen Wert dazu');
   assert.strictEqual(tubaRoom.room.players[0].hand.length, handVorher + 1,
     'nach gelungener Flucht bringt die Tuba eine verdeckte Schatzkarte');
+  // ... und die/der Fliehende soll dieselbe Beute-Animation sehen wie nach
+  // einem Kampfsieg (privat im yourInfo, denn die Karte ist eine Handkarte).
+  const tubaBeute = tubaRoom.room.players[0].lastReward;
+  assert.ok(tubaBeute, 'die mitgenommene Karte wird als Beute gemeldet');
+  assert.strictEqual(tubaBeute.kind, 'flucht');
+  assert.strictEqual(tubaBeute.quelle, tuba.name, 'mit dem Gegenstand, der sie beschert hat');
+  assert.strictEqual(tubaBeute.cardIds.length, 1);
+  assert.ok(tubaRoom.room.players[0].hand.includes(tubaBeute.cardIds[0]), 'es ist genau die gezogene Karte');
+  assert.strictEqual(tubaBeute.levelsGained, 0, 'eine Flucht bringt keine Stufe');
 
   // -------------------------------------------------------------------
   // HALBLING - war komplett wirkungslos: beide Rassenkraefte fehlten, und

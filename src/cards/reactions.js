@@ -25,9 +25,11 @@ module.exports = () => {
   const LINGERING_CURSES = {
     // "(Nur) In deinem naechsten Kampf erhaeltst du keine Boni durch
     // Gegenstaende, die einzige Ausnahme sind Ruestungsboni."
-    'MIESER SPIEGEL': { kind: 'noItemBonusExceptArmor', dauer: 'naechsterKampf' },
+    'MIESER SPIEGEL': { kind: 'noItemBonusExceptArmor', dauer: 'naechsterKampf',
+      hinweis: 'Im nächsten Kampf zählen keine Gegenstandsboni - nur Rüstung.' },
     // "-5 auf deinen naechsten Kampf, weil du abgelenkt bist."
-    'GESCHLECHTSUMWANDLUNG': { kind: 'combatMalus', amount: -5, dauer: 'naechsterKampf' },
+    'GESCHLECHTSUMWANDLUNG': { kind: 'combatMalus', amount: -5, dauer: 'naechsterKampf',
+      hinweis: '-5 im nächsten Kampf.' },
     // "-1 auf alle Wuerfe. Jeder Fluch oder alle Schlimmen Dinge, die deine
     // Kopfbedeckung entfernen, nehmen das Huhn mit."
     // ponytail: der zweite Satz (Huhn faellt weg, wenn die Kopfbedeckung
@@ -35,9 +37,11 @@ module.exports = () => {
     // slot:'head' in applyPrimitiveAction dieses activeCurses-Eintrag mit
     // entfernen. Bis dahin bleibt das Huhn auch nach Kopfbedeckungsverlust
     // aktiv (seltener Fall, nur per WUNSCHRING beendbar).
-    'HUHN AUF DEINEM KOPF': { kind: 'rollMalus', amount: -1, dauer: 'dauerhaft' },
+    'HUHN AUF DEINEM KOPF': { kind: 'rollMalus', amount: -1, dauer: 'dauerhaft',
+      hinweis: '-1 auf alle Würfe, bis der Fluch endet (z.B. Wunschring).' },
     // "Du kannst keine Gegenstaende tragen, die mehr als eine Hand benoetigen."
-    'WINZIGE HÄNDE': { kind: 'noTwoHandedItems', dauer: 'dauerhaft' },
+    'WINZIGE HÄNDE': { kind: 'noTwoHandedItems', dauer: 'dauerhaft',
+      hinweis: 'Keine Gegenstände, die zwei Hände brauchen, bis der Fluch endet.' },
   };
 
   // Karten, die einen LAUFENDEN Kampf veraendern. Sie reiten auf der

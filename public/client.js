@@ -222,17 +222,28 @@
     $('btnStart').disabled = state.players.length < 1;
   }
 
+  // Sequenz-Animationen (Tuer aufdecken, Wuerfel, Beute) laufen nur bei einem
+  // NEUEN Ereignis. Beim ersten Zustand nach dem Laden oder Wiederverbinden
+  // wird der Stand nur uebernommen, damit ein laengst vergangenes Ereignis
+  // nicht nachtraeglich abgespielt wird.
+  //
+  // Der Merker muss dabei auch dann gesetzt werden, wenn es noch GAR kein
+  // Ereignis gibt (Feld null): sonst gilt das erste echte Ereignis der Partie
+  // als "erstes Sehen" und wird geschluckt - genau das liess die Beute nach
+  // dem ersten besiegten Monster ausfallen (und ebenso das erste Aufdecken
+  // und den ersten Weglaufwurf).
+  const animSeq = {};
+  function istNeuesEreignis(schluessel, ereignis) {
+    const vorher = animSeq[schluessel];
+    animSeq[schluessel] = ereignis ? ereignis.seq : 0;
+    return vorher !== undefined && !!ereignis && ereignis.seq !== vorher;
+  }
+
   // Aufdeck-Animation: spielt genau einmal pro neu aufgedeckter Tuerkarte.
-  // Beim (Wieder-)Einsteigen wird der zuletzt gesehene seq nur uebernommen,
-  // ohne ein laengst vergangenes Aufdecken nachtraeglich zu animieren.
-  let lastRevealSeq = null;
   let revealAnimTimer = null;
   function playDoorReveal() {
     const r = state.doorReveal;
-    if (!r || r.seq === lastRevealSeq) return;
-    const first = lastRevealSeq === null;
-    lastRevealSeq = r.seq;
-    if (first) return;
+    if (!istNeuesEreignis('reveal', r)) return;
     const box = $('revealAnim');
     box.innerHTML = '';
     box.appendChild(cardTile(r.cardId, {}));
@@ -247,15 +258,41 @@
   // genau einmal pro neuem seq, beim (Wieder-)Einstieg nur den seq uebernehmen.
   // Alle am Tisch sehen sie, deshalb steht der Name der wuerfelnden Person dabei.
   const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-  let lastDieSeq = null;
   let dieAnimTimer = null;
   let dieTickTimer = null;
+  // Gespielte Kampfkarte: kurz gross in der Mitte, mit dem Namen der Person,
+  // die sie spielt (siehe announceCardPlay im Server). Alle am Tisch sehen
+  // sie - anders als die Beute ist eine gespielte Karte oeffentlich.
+  let cardPlayTimer = null;
+  function playCardPlay() {
+    const e = state.cardPlay;
+    if (!istNeuesEreignis('cardPlay', e)) return;
+    const box = $('cardPlayAnim');
+    box.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cardplay-box';
+    const who = document.createElement('div');
+    who.className = 'cardplay-who';
+    who.textContent = `${e.playerName} spielt:`;
+    wrap.appendChild(who);
+    wrap.appendChild(cardTile(e.cardId, {}));
+    if (e.hinweis) {
+      const note = document.createElement('div');
+      note.className = 'cardplay-note';
+      note.textContent = e.hinweis;
+      wrap.appendChild(note);
+    }
+    box.appendChild(wrap);
+    box.classList.remove('hidden', 'play');
+    void box.offsetWidth; // Reflow erzwingen, sonst startet die Animation bei schneller Folge nicht neu
+    box.classList.add('play');
+    clearTimeout(cardPlayTimer);
+    cardPlayTimer = setTimeout(() => { box.classList.add('hidden'); box.classList.remove('play'); box.innerHTML = ''; }, 1800);
+  }
+
   function playDieRoll() {
     const d = state.dieRoll;
-    if (!d || d.seq === lastDieSeq) return;
-    const first = lastDieSeq === null;
-    lastDieSeq = d.seq;
-    if (first) return;
+    if (!istNeuesEreignis('die', d)) return;
     const box = $('dieAnim');
     const modText = `${d.mod >= 0 ? '+' : ''}${d.mod}`;
     box.innerHTML = '';
@@ -301,7 +338,6 @@
   // Beute-Animation nach einem Kampfsieg: nur die/der Siegende bekommt sie zu
   // sehen, denn die gezogenen Schatzkarten sind Handkarten und damit geheim -
   // deshalb haengt sie an myInfo (privates yourInfo-Event), nicht am State.
-  let lastRewardSeq = null;
   let rewardAnimTimer = null;
   let rewardFlyTimer = null;
 
@@ -322,10 +358,7 @@
   }
   function playReward() {
     const r = myInfo.lastReward;
-    if (!r || r.seq === lastRewardSeq) return;
-    const first = lastRewardSeq === null;
-    lastRewardSeq = r.seq;
-    if (first) return;
+    if (!istNeuesEreignis('reward', r)) return;
     const box = $('rewardAnim');
     box.innerHTML = '';
     const wrap = document.createElement('div');
@@ -334,9 +367,13 @@
     head.className = 'reward-head';
     // Ohne Stufengewinn wurde das Monster nicht besiegt, sondern hat seinen
     // Schatz zurueckgelassen (Polly-Trank & Co.) - dann passt "besiegt" nicht.
-    head.textContent = r.levelsGained
-      ? `⚔️ ${r.monsterNames.join(' + ')} besiegt!`
-      : `🪙 ${r.monsterNames.join(' + ')} liess den Schatz zurueck!`;
+    // Dieselbe Animation fuer drei Anlaesse, nur mit anderer Ueberschrift:
+    // Kampfsieg, Raum pluendern (kind 'loot') und der Schatz, den ein
+    // Gegenstand auf dem Weg aus einem Kampf heraus mitbringt ('flucht').
+    if (r.kind === 'loot') head.textContent = '📦 Raum geplündert!';
+    else if (r.kind === 'flucht') head.textContent = `🏃 Entkommen - "${r.quelle}" bringt noch etwas mit!`;
+    else if (r.levelsGained) head.textContent = `⚔️ ${r.monsterNames.join(' + ')} besiegt!`;
+    else head.textContent = `🪙 ${r.monsterNames.join(' + ')} liess den Schatz zurueck!`;
     wrap.appendChild(head);
     if (r.levelsGained) {
       const lvl = document.createElement('div');
@@ -347,7 +384,10 @@
     if (r.cardIds.length) {
       const label = document.createElement('div');
       label.className = 'reward-label';
-      label.textContent = `Deine Beute: ${r.cardIds.length} Schatzkarte${r.cardIds.length === 1 ? '' : 'n'}`;
+      const n = r.cardIds.length;
+      if (r.kind === 'loot') label.textContent = `Verdeckt gezogen: ${n} Türkarte${n === 1 ? '' : 'n'}`;
+      else if (r.kind === 'flucht') label.textContent = `Auf dem Weg nach draußen: ${n} Schatzkarte${n === 1 ? '' : 'n'}`;
+      else label.textContent = `Deine Beute: ${n} Schatzkarte${n === 1 ? '' : 'n'}`;
       wrap.appendChild(label);
       const row = document.createElement('div');
       row.className = 'reward-cards';
@@ -395,6 +435,7 @@
 
     playDoorReveal();
     playDieRoll();
+    playCardPlay();
     playReward();
     renderPlayerList();
     renderDiscardPeek();
@@ -467,6 +508,7 @@
   // ---------------------------------------------------------------------
 
   function openPlayerModal(playerId) {
+    offenerAblagestapel = null;
     const p = state.players.find((pl) => pl.id === playerId);
     if (!p) return;
     const body = $('cardModalBody');
@@ -480,6 +522,13 @@
     (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
     if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
     body.appendChild(badges);
+    if ((p.activeCurses || []).length) {
+      const flueche = document.createElement('div');
+      flueche.className = 'row gap wrap';
+      flueche.style.marginBottom = '12px';
+      curseTags(p, flueche);
+      body.appendChild(flueche);
+    }
 
     const equip = document.createElement('div');
     equip.className = 'row gap wrap';
@@ -681,12 +730,54 @@
     });
   }
 
+  // Beide Ablagestapel liegen offen: ein Klick zeigt ALLE Karten darin
+  // (oberste zuerst), wie das Durchblaettern am echten Tisch.
   function renderDiscardPeek() {
+    // Ein offenes Stapel-Modal mitwachsen lassen: waehrend man blaettert,
+    // legen die anderen weiter ab.
+    if (offenerAblagestapel && !$('cardModal').classList.contains('hidden')) {
+      const merk = offenerAblagestapel;
+      openDiscardModal(merk);
+    }
     const box = $('discardPeek');
-    let html = '<h3>Ablagestapel</h3>';
-    html += `<div class="hint">Tür (${state.doorDiscardCount}): ${state.doorDiscardTop ? escapeHtml(card(state.doorDiscardTop).name) : '-'}</div>`;
-    html += `<div class="hint">Schatz (${state.treasureDiscardCount}): ${state.treasureDiscardTop ? escapeHtml(card(state.treasureDiscardTop).name) : '-'}</div>`;
-    box.innerHTML = html;
+    box.innerHTML = '<h3>Ablagestapel</h3>';
+    [['door', 'Tür', state.doorDiscard || []], ['treasure', 'Schatz', state.treasureDiscard || []]]
+      .forEach(([pile, label, ids]) => {
+        const oben = ids.length ? card(ids[ids.length - 1]) : null;
+        const btn = document.createElement('button');
+        btn.className = 'small wide';
+        btn.style.marginTop = '4px';
+        btn.textContent = `${label} (${ids.length}): ${oben ? oben.name : '-'}`;
+        btn.disabled = !ids.length;
+        btn.title = 'Alle Karten in diesem Ablagestapel ansehen';
+        btn.onclick = () => openDiscardModal(pile);
+        box.appendChild(btn);
+      });
+  }
+
+  let offenerAblagestapel = null; // 'door' | 'treasure', solange sein Modal offen ist
+
+  function openDiscardModal(pile) {
+    offenerAblagestapel = pile;
+    const ids = (pile === 'door' ? state.doorDiscard : state.treasureDiscard) || [];
+    const body = $('cardModalBody');
+    body.innerHTML = `<h3>${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel (${ids.length})</h3>`;
+    if (!ids.length) {
+      body.appendChild(textNode('Dieser Ablagestapel ist leer.'));
+    } else {
+      body.appendChild(textNode('Oberste Karte zuerst. Klick auf eine Karte zeigt ihren Text.'));
+      const grid = document.createElement('div');
+      grid.className = 'row gap wrap';
+      grid.style.marginTop = '10px';
+      // Neueste zuerst - so liegt der Stapel auch auf dem Tisch.
+      [...ids].reverse().forEach((id) => {
+        const tile = cardTile(id, { slim: true });
+        tile.onclick = () => openCardModal(id);
+        grid.appendChild(tile);
+      });
+      body.appendChild(grid);
+    }
+    $('cardModal').classList.remove('hidden');
   }
 
   function renderReveal() {
@@ -752,6 +843,13 @@
     if (c.ignoresLevel) notes.push('Gegen dieses Monster zählt eure Stufe nicht - nur eure Boni.');
     if (c.forbidsHelp) notes.push('Gegen dieses Monster darf niemand helfen.');
     if (c.doubleActor) notes.push('Doppelgänger: eure Kampfstärke zählt doppelt.');
+    // Anhaltende Flueche der Kaempfenden stecken schon in der Rechnung
+    // (combatTotals) - ohne Hinweis wundert man sich nur ueber die Zahl.
+    [actor, c.helperId ? state.players.find((p) => p.id === c.helperId) : null]
+      .filter(Boolean)
+      .forEach((p) => (p.activeCurses || []).forEach((f) => {
+        notes.push(`🌀 ${p.name} steht unter "${f.name}"${f.hinweis ? ` - ${f.hinweis}` : ''}`);
+      }));
     // Ohne Hinweis sähe die Monsterstärke 0 wie ein Anzeigefehler aus.
     (c.autoKilledMonsters || []).forEach((name) => {
       notes.push(`${name}: von Halblingen einfach eingestampft - zählt mit Stärke 0, Stufe und Schatz gibt es trotzdem.`);
@@ -1108,6 +1206,7 @@
     if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)'));
     if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)'));
     if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)'));
+    curseTags(p, badges);
 
     const equip = $('myEquip');
     equip.innerHTML = '';
@@ -1130,9 +1229,15 @@
         el.innerHTML = `<b>${label}</b>`;
         el.appendChild(img);
         el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`));
+        // Getragene Karte gross ansehen - wie in der Ausruestung anderer
+        // Spieler:innen (openPlayerModal) und an den Handkarten.
+        el.classList.add('clickable');
+        el.title = 'Karte groß ansehen';
+        el.onclick = () => openCardModal(cardId);
         const btn = document.createElement('button');
         btn.className = 'small'; btn.textContent = 'ablegen';
-        btn.onclick = () => socket.emit('unequipItem', { cardId });
+        // stopPropagation: sonst oeffnet das Ablegen zugleich die Grossansicht.
+        btn.onclick = (e) => { e.stopPropagation(); socket.emit('unequipItem', { cardId }); };
         el.appendChild(btn);
       } else {
         el.innerHTML = `<b>${label}</b><span class="hint">leer</span>`;
@@ -1554,6 +1659,7 @@
   }
 
   function openCardModal(id) {
+    offenerAblagestapel = null;
     const c = card(id);
     const img = new Image();
     img.className = 'modalimg';
@@ -1568,7 +1674,27 @@
     $('cardModalBody').prepend(img);
     $('cardModal').classList.remove('hidden');
   }
-  $('cardModalClose').addEventListener('click', () => $('cardModal').classList.add('hidden'));
+  $('cardModalClose').addEventListener('click', () => {
+    offenerAblagestapel = null;
+    $('cardModal').classList.add('hidden');
+  });
+
+  // Anhaltende Flueche als Marke mit Klartext - der Text kommt vom Server
+  // (LINGERING_CURSES.hinweis), damit die Wirkung nur an einer Stelle
+  // beschrieben ist.
+  function curseTags(p, ziel) {
+    (p.activeCurses || []).forEach((f) => {
+      const tag = smallTag(`🌀 ${f.name}`, '#7b3fa0');
+      tag.title = f.hinweis || 'Anhaltender Fluch';
+      ziel.appendChild(tag);
+      if (f.hinweis) {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = f.hinweis;
+        ziel.appendChild(hint);
+      }
+    });
+  }
 
   function smallTag(text, color) {
     const span = document.createElement('span');

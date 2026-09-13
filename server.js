@@ -178,6 +178,7 @@ function createRoom() {
     revealedDoorCard: null,
     doorReveal: null, // {cardId, seq} - nur fuer die Aufdeck-Animation im Client
     dieRoll: null, // {seq, roll, mod, total, success, playerId, playerName} - nur fuer die Wuerfel-Animation im Client
+    cardPlay: null, // {seq, cardId, playerName, hinweis} - nur fuer die Kartenanimation im Client
     combat: null,
     pendingConsequence: null,
     pendingCardAction: null,
@@ -455,14 +456,17 @@ function publicState(room) {
     turnPlayerId: room.players[room.turnIndex] ? room.players[room.turnIndex].id : null,
     turnPhase: room.turnPhase,
     doorDeckCount: room.doorDeck.length,
-    doorDiscardTop: room.doorDiscard.length ? room.doorDiscard[room.doorDiscard.length - 1] : null,
-    doorDiscardCount: room.doorDiscard.length,
+    // Ablagestapel komplett: sie liegen am echten Tisch offen, jede:r darf sie
+    // durchsehen (der Client zeigt sie auf Klick). Reihenfolge alt -> neu, die
+    // letzte Karte ist also die oberste.
+    doorDiscard: room.doorDiscard,
     treasureDeckCount: room.treasureDeck.length,
-    treasureDiscardTop: room.treasureDiscard.length ? room.treasureDiscard[room.treasureDiscard.length - 1] : null,
-    treasureDiscardCount: room.treasureDiscard.length,
+    treasureDiscard: room.treasureDiscard,
     revealedDoorCard: room.revealedDoorCard,
     doorReveal: room.doorReveal,
     dieRoll: room.dieRoll,
+    // Gespielte Kampfkarte (Anzeige-Ereignis, siehe announceCardPlay).
+    cardPlay: room.cardPlay || null,
     combat: room.combat ? Object.assign({}, room.combat, combatConditionalBonusFields(room)) : null,
     pendingConsequence: room.pendingConsequence,
     // onResolve ist eine Funktion und darf nicht serialisiert werden -
@@ -1855,6 +1859,13 @@ function handleLootRoom(room, playerId) {
   const id = drawDoor(room);
   if (id) {
     player.hand.push(id);
+    // Gleiche Beute-Animation wie nach einem Kampfsieg - privat im yourInfo,
+    // denn die gezogene Karte ist eine Handkarte und damit geheim (kind
+    // unterscheidet nur die Ueberschrift im Client).
+    player.lastReward = {
+      seq: (player.lastReward ? player.lastReward.seq : 0) + 1,
+      cardIds: [id], levelsGained: 0, monsterNames: [], kind: 'loot',
+    };
     log(room, `${player.name} plündert den Raum: 1 verdeckte Türkarte auf die Hand.`);
   }
   room.turnPhase = 'gabe';
@@ -1934,6 +1945,9 @@ function addActiveCurse(room, player, cardName, cardId) {
   if (!player.activeCurses) player.activeCurses = [];
   player.activeCurses.push({
     cardId, name: cardName, kind: regel.kind, amount: regel.amount || 0, dauer: regel.dauer,
+    // Klartext fuer die Anzeige - steht bei der Regel selbst (src/cards/
+    // reactions.js), damit der Client die Wirkung nicht nachbauen muss.
+    hinweis: regel.hinweis || '',
   });
   log(room, `${player.name} steht unter dem Fluch "${cardName}".`);
 }
@@ -2285,6 +2299,7 @@ function handleUseClassCombatDiscard(room, playerId, cardId) {
   } else {
     c.actorModifier += power.bonus;
     log(room, `${player.name} (${power.className}) legt "${card(cardId).name}" ab - ${power.label}: +${power.bonus} im Kampf.`, [cardId]);
+    announceCardPlay(room, player, cardId, `${power.label}: +${power.bonus} im Kampf`);
   }
   touchRoom(room);
 }
@@ -2782,6 +2797,18 @@ function munchkinBonusWirkungslos(room, player, spec) {
   return spec.side === 'actor' || spec.side === 'either';
 }
 
+// Gespielte Kampfkarte als Anzeige-Ereignis: alle am Tisch sollen kurz sehen,
+// WER WAS spielt ("URALT" auf das Monster, ein Trank auf die Munchkins, eine
+// Klassenkraft). Gleiche Bauform wie doorReveal/dieRoll - ein Zaehler, damit
+// der Client die Animation genau einmal abspielt und beim Wiederverbinden
+// nichts nachholt.
+function announceCardPlay(room, player, cardId, hinweis) {
+  room.cardPlay = {
+    seq: (room.cardPlay ? room.cardPlay.seq : 0) + 1,
+    cardId, playerName: player.name, hinweis: hinweis || '',
+  };
+}
+
 function handlePlayCombatCard(room, playerId, cardId) {
   if (!room.combat || room.combat.mustFlee) return;
   const player = findPlayer(room, playerId);
@@ -2814,6 +2841,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     if (delta) room.combat.treasureDelta = (room.combat.treasureDelta || 0) + delta;
     room.doorDiscard.push(cardId);
     log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
+    announceCardPlay(room, player, cardId, `${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster`);
     touchRoom(room);
     return;
   }
@@ -2833,6 +2861,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     discardCard(room, cardId);
     const desc = applyCombatPotionAction(room, player, doorSpec, c);
     log(room, `${player.name} spielt "${c.name}" im Kampf: ${desc}.`, [cardId]);
+    announceCardPlay(room, player, cardId, desc);
     touchRoom(room);
     return;
   }
@@ -2865,6 +2894,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     openCardChoice(room, player, c.name, seiten);
     room.pendingCardAction.sourceCardId = cardId;
     log(room, `${player.name} spielt "${c.name}" im Kampf - Seite nötig.`, [cardId]);
+    announceCardPlay(room, player, cardId, 'Seite wird noch gewählt');
     touchRoom(room);
     return;
   }
@@ -2872,11 +2902,13 @@ function handlePlayCombatCard(room, playerId, cardId) {
     openCardChoice(room, player, c.name, spec.options);
     room.pendingCardAction.sourceCardId = cardId;
     log(room, `${player.name} spielt "${c.name}" im Kampf - Wahl nötig.`, [cardId]);
+    announceCardPlay(room, player, cardId, 'Wahl steht noch aus');
     touchRoom(room);
     return;
   }
   const desc = applyCombatPotionAction(room, player, spec, c);
   log(room, `${player.name} spielt "${c.name}" im Kampf: ${desc}.`, [cardId]);
+  announceCardPlay(room, player, cardId, desc);
   touchRoom(room);
 }
 
@@ -2885,6 +2917,11 @@ function handlePlayCombatCard(room, playerId, cardId) {
 function applyCombatReaction(room, player, cardId, regel) {
   const c = room.combat;
   const karte = card(cardId);
+  // Kampfreaktionen (Kumpel, Wanderndes Monster, Illusion, Hilf mir,
+  // Ueberfalltrank) greifen tief in den Kampf ein - erst recht soll der Tisch
+  // sehen, wer sie spielt. Erst NACH den Bedingungen unten: eine Karte, die
+  // liegen bleibt, darf keine Animation ausloesen.
+  const zeigen = () => announceCardPlay(room, player, cardId, 'Kampfreaktion');
   if (regel.kind === 'duplicateMonster') {
     // Dieselbe Karten-ID ein zweites Mal in den Kampf: Stufe, Schatzzahl und
     // alle Dauerwirkungen gelten damit automatisch doppelt (siehe
@@ -2895,6 +2932,7 @@ function applyCombatReaction(room, player, cardId, regel) {
     c.monsterIds.push(erstes);
     removeFromHand(player, cardId);
     discardCard(room, cardId);
+    zeigen();
     log(room, `${player.name} spielt "${karte.name}": "${card(erstes).name}" taucht ein zweites Mal auf.`, [cardId]);
     refreshCombatReady(room);
     touchRoom(room);
@@ -2909,6 +2947,7 @@ function applyCombatReaction(room, player, cardId, regel) {
     }
     removeFromHand(player, cardId);
     discardCard(room, cardId);
+    zeigen();
     openCardChoice(room, player, karte.name, eigene.map((id) => ({
       id: `mon-${id}`,
       label: card(id).name,
@@ -2923,6 +2962,7 @@ function applyCombatReaction(room, player, cardId, regel) {
   if (regel.kind === 'takeItemFromPlayer') {
     removeFromHand(player, cardId);
     discardCard(room, cardId);
+    zeigen();
     openCardTarget(room, player, karte.name, 'Von wem einen Gegenstand nehmen?', { type: 'takeAnyItem' });
     log(room, `${player.name} spielt "${karte.name}" - Ziel nötig.`, [cardId]);
     touchRoom(room);
@@ -2931,6 +2971,7 @@ function applyCombatReaction(room, player, cardId, regel) {
   if (regel.kind === 'handOverCombat') {
     removeFromHand(player, cardId);
     discardCard(room, cardId);
+    zeigen();
     openCardTarget(room, player, karte.name, 'Wer soll stattdessen kämpfen?', { type: 'handOverCombat' });
     log(room, `${player.name} spielt "${karte.name}" - Ziel nötig.`, [cardId]);
     touchRoom(room);
@@ -3099,6 +3140,7 @@ function resolveCombatWin(room) {
 function handleAttemptFlee(room, playerId, modifier) {
   if (!room.combat || !room.combat.mustFlee) return;
   if (room.combat.fleeRerollOffer) return; // erst das Halbling-Angebot beantworten
+  if (room.combat.escapeReactionOffer) return; // erst das Kleberflaeschchen-Fenster beantworten
   const c = room.combat;
   if (c.actorId !== playerId) return;
   const actor = findPlayer(room, c.actorId);
@@ -3195,9 +3237,20 @@ function finishFleeSuccess(room, actor, c) {
     setLevel(actor, actor.level - penalty);
     log(room, `Trotz Flucht: ${actor.name} verliert ${penalty} Stufe(n) -> jetzt Stufe ${actor.level}.`);
   }
-  if (equippedItemIds(actor).some((id) => FLEE_TREASURE_ITEMS.has((card(id) || {}).name))) {
+  const tuba = equippedItemIds(actor).find((id) => FLEE_TREASURE_ITEMS.has((card(id) || {}).name));
+  if (tuba) {
     const t = drawTreasure(room);
-    if (t) { actor.hand.push(t); log(room, `${actor.name} nimmt auf dem Weg nach draussen noch 1 verdeckte Schatzkarte mit.`); }
+    if (t) {
+      actor.hand.push(t);
+      // Gleiche Beute-Animation wie nach einem Kampfsieg - privat im yourInfo,
+      // denn die gezogene Karte ist eine Handkarte (kind/quelle steuern nur
+      // die Ueberschrift im Client).
+      actor.lastReward = {
+        seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
+        cardIds: [t], levelsGained: 0, monsterNames: [], kind: 'flucht', quelle: card(tuba).name,
+      };
+      log(room, `${actor.name} nimmt auf dem Weg nach draussen noch 1 verdeckte Schatzkarte mit.`);
+    }
   }
   discardMonsterIds(room.doorDiscard, c.monsterIds);
   room.combat = null;
@@ -3297,6 +3350,15 @@ function halblingRerollPossible(room, actor) {
   if (!c || c.halblingRerollUsed) return false;
   if (combatHasMonster(room, FLEE_IMPOSSIBLE)) return false;
   return hasRace(actor, 'HALBLING') && actor.hand.length > 0;
+}
+
+// Was ein Bot im Fluchtentscheidungsfenster mitgibt. Das Fenster geht auch
+// ohne Halbling auf, sobald jemand eine Rettungskarte oder die Magische Lampe
+// haelt - wer dann trotzdem eine Karte mitgibt, wird von handleFleeReroll
+// abgelehnt, OHNE dass das Fenster zugeht. Der Bot lief danach im Sekundentakt
+// gegen dieselbe Wand und die Partie stand (Abnahme-Durchlauf, Task 13).
+function botFleeRerollCard(room, actor) {
+  return room.combat && room.combat.canReroll ? (actor.hand[0] || null) : null;
 }
 
 // Antwort auf das Halbling-Angebot: mit Karte nochmal wuerfeln, ohne Karte
@@ -3743,11 +3805,39 @@ function randomDelay(min = BOT_DELAY_MIN, max = BOT_DELAY_MAX) { return min + Ma
 // geplanten, noch nicht ausgelösten Timer, statt zusätzliche parallele
 // Timer für denselben Bot-Zug anzuhäufen. Verhindert doppelt/mehrfach
 // ausgeführte Bot-Aktionen bei schneller Aktionsfolge.
+// Woran die naechste Bot-Aktion haengt. Der Timer wurde frueher bei JEDEM
+// Broadcast neu gesetzt - wer schnell hintereinander handelte (mehrere
+// Spieler:innen, eine Karte nach der anderen ablegen, ein Testskript),
+// verschob die Bot-Aktion damit immer weiter nach hinten, und sie kam nie.
+// Solange sich an dieser Lage nichts aendert, bleibt ein laufender Timer also
+// stehen; aendert sich etwas, wird neu geplant.
+function botSituation(room) {
+  const c = room.combat;
+  return JSON.stringify([
+    room.phase, room.turnIndex, room.turnPhase, !!room.pendingRoll,
+    room.pendingCardAction ? room.pendingCardAction.playerId : null,
+    room.pendingConsequence ? room.pendingConsequence.playerId : null,
+    c ? [c.actorId, c.helperId, c.helperPending ? c.helperPending.targetId : null, c.monsterIds,
+      c.mustFlee, !!c.fleeRerollOffer, !!c.escapeReactionOffer, combatAllReady(room)] : null,
+  ]);
+}
+
 function scheduleBotActionsIfNeeded(room) {
+  const lage = botSituation(room);
+  if (room.botTimer && room.botTimerLage === lage) return; // laeuft bereits fuer genau diese Lage
   if (room.botTimer) { clearTimeout(room.botTimer); room.botTimer = null; }
+  room.botTimerLage = lage;
   if (room.phase !== 'playing') return;
   const actor = currentPlayer(room);
   if (!actor) return;
+
+  // Solange ein Wurf-Reaktionsfenster offen ist, gehoert der Zug den Menschen
+  // mit der passenden Karte (Gezinkter Wuerfel). reactionHolders laesst Bots
+  // und Getrennte ohnehin nicht hinein, es wartet also immer auf jemanden, der
+  // wirklich antworten kann - und die Antwort loest den naechsten Broadcast
+  // und damit die naechste Planung aus. Ein Bot, der hier trotzdem plant,
+  // laeuft im Sekundentakt gegen Handler, die ihn abweisen.
+  if (room.pendingRoll) return;
 
   // Eine an einen Bot gerichtete Kartenaktion muss der Server selbst
   // beantworten - sonst wartet die Partie ewig auf einen Dialog, den niemand
@@ -3758,7 +3848,7 @@ function scheduleBotActionsIfNeeded(room) {
     if (p && p.isBot) {
       const snapshot = room.pendingCardAction;
       room.botTimer = setTimeout(() => {
-        room.botTimer = null;
+        room.botTimer = null; room.botTimerLage = null;
         if (!rooms.has(room.code) || room.pendingCardAction !== snapshot) return;
         resolveBotCardAction(room);
         broadcastState(room);
@@ -3774,7 +3864,7 @@ function scheduleBotActionsIfNeeded(room) {
     if (p && p.isBot) {
       const snapshot = room.pendingConsequence;
       room.botTimer = setTimeout(() => {
-        room.botTimer = null;
+        room.botTimer = null; room.botTimerLage = null;
         if (!rooms.has(room.code) || room.pendingConsequence !== snapshot) return;
         handleAckConsequence(room, p.id);
         broadcastState(room);
@@ -3789,7 +3879,7 @@ function scheduleBotActionsIfNeeded(room) {
       const helper = findPlayer(room, c.helperPending.targetId);
       if (helper && helper.isBot) {
         room.botTimer = setTimeout(() => {
-          room.botTimer = null;
+          room.botTimer = null; room.botTimerLage = null;
           if (!rooms.has(room.code) || !room.combat || !room.combat.helperPending) return;
           handleRespondHelp(room, helper.id, false); // Bots helfen aktuell nicht (Vereinfachung)
           broadcastState(room);
@@ -3797,6 +3887,7 @@ function scheduleBotActionsIfNeeded(room) {
       }
       return;
     }
+    if (c.escapeReactionOffer) return; // erst das Kleberflaeschchen-Fenster
     if (actor.isBot) {
       // Solange noch jemand bestätigen muss, gar nicht erst einplanen -
       // handleEvaluateCombat würde nur wirkungslos abprallen und der Bot
@@ -3805,11 +3896,11 @@ function scheduleBotActionsIfNeeded(room) {
       if (!c.mustFlee && !combatAllReady(room)) return;
       const snapshotCombat = c;
       room.botTimer = setTimeout(() => {
-        room.botTimer = null;
+        room.botTimer = null; room.botTimerLage = null;
         if (!rooms.has(room.code) || room.combat !== snapshotCombat) return;
         // Ein Bot-Halbling muss das Wiederholungsangebot selbst beantworten,
         // sonst wartet die Partie ewig auf eine Entscheidung.
-        if (room.combat.fleeRerollOffer) handleFleeReroll(room, actor.id, actor.hand[0] || null);
+        if (room.combat.fleeRerollOffer) handleFleeReroll(room, actor.id, botFleeRerollCard(room, actor));
         else if (room.combat.mustFlee) handleAttemptFlee(room, actor.id, 0);
         else handleEvaluateCombat(room, actor.id);
         broadcastState(room);
@@ -3822,7 +3913,7 @@ function scheduleBotActionsIfNeeded(room) {
 
   const snapshotPhase = room.turnPhase;
   room.botTimer = setTimeout(() => {
-    room.botTimer = null;
+    room.botTimer = null; room.botTimerLage = null;
     if (!rooms.has(room.code) || room.phase !== 'playing') return;
     if (currentPlayer(room) !== actor || room.turnPhase !== snapshotPhase) return;
     if (room.turnPhase === 'tuer') {
@@ -4077,7 +4168,7 @@ module.exports = {
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
   POWER_GROUP_NAMES, GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
-  handleFleeReroll, handleFleeEscape, handleEnchantMonster, enchantInfo,
+  handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, endTurn,
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee, handlePlayCurseFromHand,
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,

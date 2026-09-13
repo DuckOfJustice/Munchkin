@@ -20,11 +20,21 @@ Munchkin hat hunderte Karten mit jeweils **individuellem** Regeltext (Sondermons
 - Rasse/Klasse/Machtgruppe spielen (max. 1 von jeder, max. 2 mit Halb-Blut/Super Munchkin/Doppelleben)
 - „Schlimme Dinge" und Flüche: für die meisten Monster- und Fluch-Texte (inkl. der ca. 45 fehlkategorisierten Flüche aus Basis-Set und Erweiterungen, die in den Rohdaten als normale Türkarte statt als Fluch geführt werden - siehe `DOOR_OTHER_AS_CURSE` in `server.js`) wird die Stufen-/Ausrüstungs-/Handkonsequenz automatisch berechnet und angewendet; bietet die Karte eine echte Wahl, gibt es zwei Buttons statt Rechnerei (siehe `tests/auto-consequence.test.js`)
 - Ein großer Teil der Schatzkarten-Sonderkräfte: einfache „Steige eine Stufe auf"-Karten und Kampf-Tränke (+N für eine Seite) lassen sich per Klick einsetzen, dazu einzelne kuratierte Sonderfälle (Klaue eine Stufe, Schatzhort!, Wünschelstab, ...) - siehe `tests/card-abilities.test.js`
-- Sieg bei Stufe 10
+- Sieg bei Stufe 10 - aber **nur durch einen Kampf oder eine Karte, die es ausdrücklich erlaubt**: Verkaufen bringt auf Stufe 10, gewinnt aber nicht (Göttliche Intervention ist die gedruckte Ausnahme)
+- **Große Gegenstände**: kuratierte Liste (`src/cards/bigitems.js`), Traglimit 1 für Nicht-Zwerge - schaltet Gallert-Oktaeder, Verliere 1 Großen/Kleinen Gegenstand, Grünschleim und die Zwergen-Rassenkraft frei
+- **Anhaltende Flüche** mit laufendem Tracker: Mieser Spiegel, Geschlechtsumwandlung, Huhn auf deinem Kopf, Winzige Hände - und der Wunschring, der sie beendet
+- **Karten, die andere handeln lassen** (Hippogreif, Anwalt, Leprachaun, Netz-Troll, Versicherungsvertreter, Schnecken auf Speed, Fluch! Einkommenssteuer): eine Warteschlange fragt die Betroffenen der Reihe nach, Bots antworten selbst
+- **Reaktionsfenster** auf einen Wurf oder eine gelungene Flucht: Gezinkter Würfel, Kleberfläschchen, Magische Lampe
+- **Kampfreaktionskarten**: Kumpel, Wanderndes Monster, Illusion, Hilf mir, Überfalltrank
+- **Kartenanhänge**: Schummeln! (hebt die Anlege-Regel für einen Gegenstand auf), Knieschützer der Verlockung
+- **Alternativen statt Kampf** bei Möchtegern-Vampir, Laufende Nase, Pit Bull, plus der erzwungene Preis des Zungendämons
+- **Rassen- und Klassenkräfte**: Super Munchkin / Halb-Blut ("alle Vorteile, keine Nachteile"), Zauberer (Verzauberung, Flugzauber), Krieger (Berserken), Priester (Vertreiben, Auferstehung), Dieb (In den Rücken fallen, Diebstahl), Halbling-Wiederholungswurf, Zwergen-Handlimit
 
-**Manuell (mit Werkzeug-Unterstützung):** der genaue Effekt der übrigen, sehr individuellen Sonderkräfte (Wanderndes Monster/Kumpel, die meisten Rassen-/Klassen-/Machtgruppen-Sonderkräfte, Boni gegen bestimmte Rassen/Klassen/Machtgruppen auf Monsterkarten), Handeln zwischen Spieler:innen. Der **Original-Kartentext wird immer angezeigt** (Klick auf eine Karte). Bei Konsequenzen, die nicht automatisch erkannt werden, gibt es ein generisches Werkzeug (±1 Stufe, Gegenstand ablegen, „ich bin gestorben"), mit dem ihr die Auswirkung wie am echten Tisch selbst nachvollzieht. Kampf-Boni/Mali aus Karteneffekten, die nicht automatisch erkannt werden, tragt ihr im Kampf-Panel als Zahl ein.
+Die Liste oben gilt in dieser Tiefe für das **Basis-Set** - dort ist inzwischen praktisch jede Karte anklickbar. In den vier Erweiterungen sind die Stufen-/Ausrüstungs-Konsequenzen und die Kampf-Mathematik ebenso automatisiert, einzelne Sonderkräfte aber weiterhin nicht.
 
-Bewusst **außerhalb des Umfangs** bleiben Karten, die einen Datenpunkt bräuchten, den `data/cards.json` nicht enthält (ein „Großer Gegenstand"-Flag, eine „Untot"-/Feuerimmunitäts-Kennzeichnung auf Monsterkarten, welche Machtgruppe ein Monster „hasst"), einen dauerhaften Fluch-/Status-Tracker, den dieser Server nicht führt (z. B. Wunschring - es gibt schlicht keinen laufenden Fluch-Zustand zum Beenden), oder eine echte freie Auswahl mit Wertgrenze aus dem gesamten Ablagestapel (Flohmarkt, Einheitsgröße). Die vollständige, kommentierte Liste steht direkt im Code bei `CONSEQUENCE_OVERRIDES`, `DOOR_OTHER_AS_CURSE`, `TREASURE_POWER_OVERRIDES` und `COMBAT_POTION_OVERRIDES` in `server.js`.
+**Manuell (mit Werkzeug-Unterstützung):** der genaue Effekt der übrigen, sehr individuellen Sonderkräfte aus den Erweiterungen, und Boni gegen Machtgruppen auf Monsterkarten. Der **Original-Kartentext wird immer angezeigt** (Klick auf eine Karte). Bei Konsequenzen, die nicht automatisch erkannt werden, gibt es ein generisches Werkzeug (±1 Stufe, Gegenstand ablegen, „ich bin gestorben"), mit dem ihr die Auswirkung wie am echten Tisch selbst nachvollzieht. Kampf-Boni/Mali aus Karteneffekten, die nicht automatisch erkannt werden, tragt ihr im Kampf-Panel als Zahl ein.
+
+Bewusst **außerhalb des Umfangs** bleiben Karten, die einen Datenpunkt bräuchten, den `data/cards.json` nicht enthält, oder eine Tischabsprache statt einer Regel sind: Amazone (Geschlecht wird nicht erfasst), die Dieb-Tauschoption des Anwalts (toter Code - das Monster greift Diebe ohnehin nicht an), das verdeckte Ziehen bei Schatzhort! (es gibt kein "offen/verdeckt" für Schätze) und 34 Basis-Karten, die in `data/cards.json` gar keinen Text haben. Die vollständige, kommentierte Liste steht im Code bei `CONSEQUENCE_OVERRIDES` und `DOOR_OTHER_AS_CURSE` (`src/cards/consequences.js`), `TREASURE_POWER_OVERRIDES` und `COMBAT_POTION_OVERRIDES` (`src/cards/treasures.js`) sowie in `HANDOVER.md` §8.
 
 ## Warum keine Kartenbilder?
 
@@ -62,6 +72,8 @@ Soll das Spiel wie die anderen über `games.oualid.de/munchkin/` erreichbar sein
 ```
 Munchkin/
 ├── server.js            Spiel-Server (Node.js, Express + Socket.IO)
+├── src/cards/            Kartentabellen (Große Gegenstände, Konsequenzen, Schätze, Dauerwirkungen, Reaktionen)
+├── tools/                coverage-scan.js (welche Karte hat keinen Ausspielweg?), smoke-run.js (Partie gegen den laufenden Server)
 ├── data/cards.json       504 Karten (Name, Text, Stufe, Bonus, Goldwert, Körperteil, ...)
 ├── package.json
 ├── Dockerfile
@@ -70,14 +82,14 @@ Munchkin/
 │   ├── index.html
 │   ├── style.css
 │   └── client.js
-├── tests/                Integrationstest (siehe unten)
+├── tests/                17 Testdateien (siehe unten)
 ├── .github/workflows/    GitHub-Actions-CI, läuft bei jedem Push automatisch
 └── README.md
 ```
 
 ## Automatisierte Tests
 
-Unter `tests/` liegt ein Integrationstest, der den Server als echten Prozess startet und über `socket.io-client` eine Partie mit 2 Bots antreibt (inkl. automatischer Kampf-/Konsequenz-Reaktion für den menschlichen Test-Spieler). Er prüft, dass der Server dabei nicht abstürzt, Stufen/Handkartenzahlen immer plausibel bleiben und mindestens ein Kampf stattfindet.
+Unter `tests/` liegen 17 Testdateien, die `tests/run.js` automatisch einsammelt. Zwei davon starten den Server als echten Prozess und treiben ihn über `socket.io-client` an (kompletter Spielablauf mit Bots, fehlerhafte Events), die übrigen bauen ein Raum-Objekt im Speicher und rufen die Handler direkt auf - eine Datei je Kartenmechanismus (Warteschlange, Reaktionsfenster, Flüche, Kampfreaktionen, Anhänge, Große Gegenstände, Klassenkräfte, ...).
 
 ```bash
 npm install
@@ -95,8 +107,7 @@ Bei jedem Push nach GitHub läuft das automatisch über eine GitHub Action (`.gi
 
 ## Bekannte Einschränkungen
 
-- Rassen-/Klassen-Sonderkräfte, Wanderndes Monster/Kumpel, Handeln zwischen Spieler:innen: nicht automatisiert (siehe oben).
-- Super Munchkin / Halb-Blut (zweite Rasse/Klasse): aktuell nicht automatisiert – Karte landet in der Hand, kann aber nicht "zusätzlich" gespielt werden. Bei Bedarf gerne nachrüsten.
+- Einzelne Karten bleiben absichtlich manuell (Amazone, Schatzhort!-Ziehen, Anwalt-Tauschoption) - siehe oben und `HANDOVER.md` §8.
 - Bots sind bewusst simpel gehalten (kein Ausrüsten, kein Kämpfen aus der Hand, keine Hilfe) – gedacht zum Testen des Ablaufs, nicht als vollwertige Mitspieler.
 - Pathfinder-Set: 145 Karten ohne numerische Werte (Stufe/Bonus/Goldwert) in den Original-Spieldaten gefunden – falls das im Spiel auffällt, gerne Bescheid geben, dann schaue ich nach einer anderen Datenquelle für dieses Set.
 

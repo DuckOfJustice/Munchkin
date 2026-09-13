@@ -11,6 +11,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, reactionHolders, rollWithWindow, ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS,
   newEquipped, handleAttemptFlee, handlePlayReactionCard, handlePassReaction, handleUseLamp,
+  handleFleeReroll, botFleeRerollCard,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -243,6 +244,53 @@ function run() {
     handleUseLamp(raum2, 'p2', lampe.id, goblin.id);
     assert.ok(raum2.combat, 'nur die kaempfende Person darf die Lampe spielen');
     done(raum2);
+  }
+
+  // Der Bot im Fluchtentscheidungsfenster. Regression aus dem Abnahme-
+  // Durchlauf (Task 13): das Fenster geht auch ohne Halbling auf, sobald der
+  // Bot eine Rettungskarte oder die Magische Lampe haelt. Der Bot gab dann
+  // trotzdem seine erste Handkarte mit, handleFleeReroll lehnte das ab, ohne
+  // das Fenster zu schliessen - und die ganze Partie drehte sich endlos im
+  // Kreis (ca. jeder zehnte Durchlauf).
+  {
+    const lampe = findCard('MAGISCHE LAMPE');
+    const room = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id], isBot: true },
+      { fleeRerollOffer: true, canReroll: false });
+    const actor = room.players[0];
+    assert.strictEqual(botFleeRerollCard(room, actor), null,
+      'ohne Halbling-Wiederholung gibt der Bot keine Karte mit');
+    handleFleeReroll(room, actor.id, botFleeRerollCard(room, actor));
+    assert.strictEqual(room.combat, null, 'das Fenster ist beantwortet, der Kampf vorbei');
+    done(room);
+  }
+  {
+    // Halbling: derselbe Weg, aber MIT Karte - der Wiederholungswurf ist ihm
+    // erlaubt, und die Karte ist sein Preis dafuer.
+    const halbling = findCard('HALBLING', 'race');
+    const lampe = findCard('MAGISCHE LAMPE');
+    const room = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id], races: [halbling.id], isBot: true },
+      { fleeRerollOffer: true, canReroll: true });
+    const actor = room.players[0];
+    assert.strictEqual(botFleeRerollCard(room, actor), lampe.id, 'als Halbling legt der Bot eine Karte ab');
+    handleFleeReroll(room, actor.id, botFleeRerollCard(room, actor));
+    assert.ok(!actor.hand.includes(lampe.id), 'die Karte ist der Preis fuer den zweiten Wurf');
+    assert.ok(!room.combat || room.combat.fleeRerollOffer !== true,
+      'auch hier bleibt das Fenster nicht offen stehen');
+    done(room);
+  }
+
+  // Solange das Kleberflaeschchen-Fenster offen ist, darf niemand noch einmal
+  // weglaufen. Zweite Regression aus dem Abnahme-Durchlauf (Task 13): der Bot
+  // wuerfelte im Sekundentakt weiter, jeder gelungene Wurf oeffnete dasselbe
+  // Fenster erneut, und die Partie kam nie an der Antwort vorbei.
+  {
+    const room = fleeRoom(['LAHMER GOBLIN'], { isBot: true },
+      { mustFlee: true, escapeReactionOffer: ['p2'] });
+    const logsVorher = room.logs.length;
+    handleAttemptFlee(room, 'p1', 0);
+    assert.strictEqual(room.logs.length, logsVorher, 'kein neuer Wurf, solange das Fenster offen ist');
+    assert.deepStrictEqual(room.combat.escapeReactionOffer, ['p2'], 'das Fenster bleibt unveraendert stehen');
+    done(room);
   }
 
   console.log('OK - Reaktionsfenster: synchron ohne Karte, Fenster mit Karte, Bots/Getrennte aus, ' +
