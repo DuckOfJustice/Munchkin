@@ -2,7 +2,7 @@
 // viele. Verhaltenstest - baut einen echten Raum und ruft die Handler auf.
 const assert = require('assert');
 const {
-  ALL_CARDS, isBigItem, handleEquipItem, equippedItemIds, newEquipped, hasRace,
+  ALL_CARDS, isBigItem, handleEquipItem, equippedItemIds, newEquipped, hasRace, baseStrength,
 } = require('../server.js');
 
 function byName(name) {
@@ -72,6 +72,22 @@ erwartet.forEach((n) => assert.ok(isBigItem(byName(n)), `${n} muesste gross sein
   const room = makeRoom([p]);
   handleEquipItem(room, p.id, leder.id);
   assert.ok(equippedItemIds(p).includes(leder.id), 'kleine Gegenstaende bleiben unbeschraenkt');
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+}
+
+// 5) Zweihaendige Gegenstaende zaehlen EINMAL. Sie belegen beide Handslots
+// (equipped.hands = [id, id]) - wer die Slots einfach einsammelt, zaehlt die
+// Karte doppelt: der Bogen mit bunten Baendern gab +8 statt +4, und ebenso
+// verdoppelten sich Goldwert, Gegenstandszahl und Ablagestapel-Eintraege.
+{
+  const bogen = byName('BOGEN MIT BUNTEN BÄNDERN'); // 2 Haende, +4
+  const p = makePlayer({ hand: [bogen.id] });
+  const room = makeRoom([p]);
+  const stufeVorher = p.level;
+  handleEquipItem(room, p.id, bogen.id);
+  assert.deepStrictEqual(p.equipped.hands, [bogen.id, bogen.id], 'er belegt weiterhin beide Haende');
+  assert.deepStrictEqual(equippedItemIds(p), [bogen.id], 'aber er ist nur EIN getragener Gegenstand');
+  assert.strictEqual(baseStrength(p), stufeVorher + bogen.bonus, 'Bonus zaehlt einfach, nicht doppelt');
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
 }
 

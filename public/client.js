@@ -1052,9 +1052,12 @@
     });
   }
 
+  // Wie equippedItemIds im Server: ein zweihaendiger Gegenstand steht in
+  // beiden Handslots und darf trotzdem nur einmal gezaehlt/angezeigt werden.
   function equippedIdsOf(p) {
     if (!p) return [];
-    return [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands, ...specialSlotIds(p)].filter(Boolean);
+    return [...new Set([p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands,
+      ...specialSlotIds(p)].filter(Boolean))];
   }
 
   function renderPhaseActions() {

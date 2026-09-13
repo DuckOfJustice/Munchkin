@@ -299,9 +299,17 @@ function specialSlotRule(c) {
   return (c && SPECIAL_SLOT_ITEMS[c.name]) || null;
 }
 
+// Jede getragene Karte GENAU EINMAL. Ein zweihaendiger Gegenstand steht in
+// beiden Handslots (siehe handleEquipItem: hands = [id, id]) - ohne das
+// Entdoppeln zaehlt er doppelt, und zwar ueberall auf einmal: Kampfbonus
+// (BOGEN MIT BUNTEN BAENDERN gab +8 statt +4), Goldwert beim Verkaufen,
+// Gegenstandszahl, und beim Ablegen landete dieselbe Karte zweimal im
+// Ablagestapel. Die Slots selbst bleiben doppelt belegt - die "wie viele
+// Haende sind frei"-Rechnung liest player.equipped.hands direkt.
 function equippedItemIds(player) {
-  return [player.equipped.head, player.equipped.armor, player.equipped.feet, ...player.equipped.hands,
-    ...SPECIAL_SLOT_KEYS.flatMap((k) => specialSlotCards(player, k))].filter(Boolean);
+  return [...new Set([player.equipped.head, player.equipped.armor, player.equipped.feet,
+    ...player.equipped.hands,
+    ...SPECIAL_SLOT_KEYS.flatMap((k) => specialSlotCards(player, k))].filter(Boolean))];
 }
 
 // ZWERG: "Du kannst eine beliebige Anzahl Grosser Gegenstaende tragen und
