@@ -51,6 +51,11 @@ h1 .sub { font-weight: 400; color: var(--text-dim); font-size: 0.6em; }
 hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .hidden { display: none !important; }
 .hint { color: var(--text-dim); font-size: 0.9em; }
+/* Werte-Zeile in der Kartengrossansicht (Stufe, Slot, Bonus, Gold, "Gross") */
+.cardvalues {
+  background: var(--panel-alt); border-radius: 8px; padding: 6px 10px;
+  font-size: 0.92em; margin: 6px 0;
+}
 .error { color: var(--danger); min-height: 1.2em; }
 .code, .room-code {
   font-family: monospace; letter-spacing: 0.12em; background: var(--panel-alt);
@@ -303,6 +308,10 @@ button.wide { width: 100%; }
 }
 .equipslot.filled { border-style: solid; border-color: var(--gold); }
 .equipslot .eqimg { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
+/* Getragene Karten sind anklickbar (Grossansicht) - der Ablegen-Knopf darin
+   bleibt ein eigener Klick, siehe stopPropagation im Client. */
+.equipslot.clickable { cursor: pointer; transition: border-color 0.12s ease; }
+.equipslot.clickable:hover { border-color: var(--door-bright); }
 
 select { background: var(--bg-alt); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 7px; }
 
@@ -356,6 +365,16 @@ select { background: var(--bg-alt); color: var(--text); border: 1px solid var(--
   padding: 18px 32px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
 }
 .die-who { color: var(--text-dim); font-size: 0.95em; margin-bottom: 6px; }
+
+/* -------- Gespielte Kampfkarte: dieselbe Buehne wie beim Aufdecken
+   (.reveal-anim), aber mit Namenszeile darueber - alle am Tisch sollen sehen,
+   WER die Karte spielt. Ebenfalls reine Deko (pointer-events: none). -------- */
+.cardplay-box { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.cardplay-who {
+  background: rgba(6, 8, 5, 0.92); border: 2px solid var(--gold); border-radius: var(--radius);
+  padding: 6px 16px; color: var(--text); font-weight: 700; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+.cardplay-note { color: var(--text-dim); font-size: 0.95em; }
 .die-face { font-size: 5em; line-height: 1.05; color: var(--text); }
 .die-sum { font-size: 1.3em; font-weight: 700; color: var(--gold); margin-top: 4px; }
 .die-result { font-size: 1.15em; font-weight: 700; margin-top: 6px; }
@@ -408,6 +427,16 @@ select { background: var(--bg-alt); color: var(--text); border: 1px solid var(--
 .reward-cards .cardtile { cursor: default; }
 
 .reward-anim.play { animation: rewardFade 3.4s ease-out forwards; }
+/* Beute fliegt in die Hand: Rahmen und Texte verblassen, die Karten ziehen
+   per Inline-transform (siehe flyRewardCardsToHand) zur Handleiste. */
+.reward-anim.fly { animation-duration: 2.4s; }
+.reward-anim.fly .reward-box {
+  background: transparent; border-color: transparent; box-shadow: none;
+  transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+}
+.reward-anim.fly .reward-head, .reward-anim.fly .reward-level, .reward-anim.fly .reward-label {
+  opacity: 0; transition: opacity 0.35s ease;
+}
 .reward-anim.play .reward-level { animation: rewardPop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) backwards; }
 .reward-anim.play .cardtile { animation: rewardCardIn 0.5s ease-out backwards; }
 

@@ -16,7 +16,11 @@ const {
   MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
   FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
   MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
-  combatTotals, handLimit,
+  combatTotals, handLimit, handlePlayCombatCard,
+  handleEquipItem, handleUnequipItem, equippedItemIds, newEquipped,
+  SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
+  handleEnchantMonster, enchantInfo, handleFleeEscape, handleFleeReroll,
+  DOOR_COMBAT_CARDS, POST_FLEE_ESCAPE_CARDS,
 } = require('../server.js');
 
 function makePlayer(overrides) {
@@ -51,7 +55,7 @@ function run() {
   const sinnierenLong = TREASURE_POWER_OVERRIDES['SINNIEREN'](makePlayer({ hand: ['a', 'b', 'c'] }));
   assert.strictEqual(sinnierenLong.options.length, 2, 'SINNIEREN bietet bei >=3 Handkarten beide Optionen an');
 
-  assert.strictEqual(TREASURE_POWER_OVERRIDES['TÖTE DEN MIETLING'](), null, 'TÖTE DEN MIETLING bleibt bewusst manuell (Mietling-in-Spiel wird nicht getrackt)');
+  assert.strictEqual(TREASURE_POWER_OVERRIDES['ENTE DER VIELEN SACHEN'](), null, 'ENTE DER VIELEN SACHEN bleibt bewusst manuell ("nach einem beliebigen Kampf" ist keine gepruefte Zeitbedingung)');
 
   // -------------------------------------------------------------------
   // Kampf-Tränke
@@ -242,6 +246,337 @@ function run() {
   assert.strictEqual(reward.cardIds.length, monster.treasureCount || 0, 'Beute muss genau die Schaetze des Monsters enthalten');
   reward.cardIds.forEach((id) => assert.ok(tieWithCard.players[0].hand.includes(id), 'jede angezeigte Beutekarte muss auch wirklich auf der Hand liegen'));
   assert.deepStrictEqual(reward.monsterNames, [monster.name], 'Beute-Animation nennt das besiegte Monster');
+
+  // -------------------------------------------------------------------
+  // Kampf-Tränke, die den Kampf beenden: "lässt seinen Schatz zurück"
+  // (POLLYVERWANDLUNGSTRANK, TRANK DER IRRELEVANZ) muss die Schätze des
+  // Monsters bringen - aber keine Stufe, das Monster wird nicht besiegt.
+  // Gegenprobe FREUNDSCHAFTSTRANK: "Du erhältst keinen Schatz".
+  // -------------------------------------------------------------------
+  const lootMonster = ALL_CARDS.find((c) => c.category === 'monster' && (c.treasureCount || 0) >= 2);
+  function potionRoom(potionName) {
+    const potion = findCard(potionName, 'treasure_other');
+    const actor = makePlayer({ id: 'p1', name: 'A', level: 3, hand: [potion.id] });
+    return {
+      room: {
+        code: 'TEST', players: [actor, makePlayer({ id: 'p2', name: 'B' })],
+        turnIndex: 0, turnPhase: 'kampf', combatHappenedThisTurn: true,
+        doorDeck: [], doorDiscard: [], treasureDeck: filler.slice(), treasureDiscard: [],
+        revealedDoorCard: null, pendingConsequence: null, pendingCardAction: null,
+        winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+        settings: { sets: {} },
+        combat: { actorId: 'p1', helperId: null, monsterIds: [lootMonster.id], actorModifier: 0, monsterModifier: 0, mustFlee: false },
+      },
+      potionId: potion.id,
+    };
+  }
+
+  const polly = potionRoom('POLLYVERWANDLUNGSTRANK');
+  handlePlayCombatCard(polly.room, 'p1', polly.potionId);
+  if (polly.room.cleanupTimer) clearTimeout(polly.room.cleanupTimer);
+  const pollyActor = polly.room.players[0];
+  assert.strictEqual(polly.room.combat, null, 'POLLYVERWANDLUNGSTRANK beendet den Kampf');
+  assert.ok(polly.room.doorDiscard.includes(lootMonster.id), 'das weggeflogene Monster liegt im Ablagestapel');
+  assert.ok(!pollyActor.hand.includes(polly.potionId), 'der Trank wird verbraucht');
+  assert.strictEqual(pollyActor.hand.length, lootMonster.treasureCount, 'der zurückgelassene Schatz landet auf der Hand (Anzahl = treasureCount)');
+  assert.strictEqual(pollyActor.level, 3, 'das Monster wurde nicht besiegt - keine Stufe');
+  assert.ok(pollyActor.lastReward, 'zurückgelassener Schatz muss in der Beute-Animation auftauchen');
+  assert.strictEqual(pollyActor.lastReward.levelsGained, 0, 'Beute-Animation zeigt 0 Stufen');
+  assert.strictEqual(pollyActor.lastReward.cardIds.length, lootMonster.treasureCount, 'Beute-Animation zeigt genau die zurückgelassenen Schätze');
+  pollyActor.lastReward.cardIds.forEach((id) => assert.ok(pollyActor.hand.includes(id), 'jede Beutekarte liegt auch wirklich auf der Hand'));
+  assert.ok(
+    polly.room.logs.some((l) => l.text.includes('Schatzkarte(n)') && l.text.includes('keine Stufe')),
+    'der Verlauf muss Schatz ohne Stufe nennen'
+  );
+  // Auch der verbrauchte Trank muss auf dem Stapel seines eigenen Typs landen:
+  // Kampf-Tränke sind Schatzkarten und wurden beim Neumischen des Türstapels
+  // sonst zu Türkarten (siehe Tod-Test weiter unten).
+  assert.ok(polly.room.treasureDiscard.includes(polly.potionId), 'der verbrauchte Kampf-Trank ist eine Schatzkarte und gehört auf den Schatz-Ablagestapel');
+  assert.ok(!polly.room.doorDiscard.includes(polly.potionId), 'der verbrauchte Kampf-Trank darf nicht auf dem Tür-Ablagestapel landen');
+  polly.room.doorDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'door', 'auf dem Tür-Ablagestapel darf nur type=door liegen'));
+  polly.room.treasureDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'treasure', 'auf dem Schatz-Ablagestapel darf nur type=treasure liegen'));
+
+  const irrelevanz = potionRoom('TRANK DER IRRELEVANZ');
+  handlePlayCombatCard(irrelevanz.room, 'p1', irrelevanz.potionId);
+  if (irrelevanz.room.cleanupTimer) clearTimeout(irrelevanz.room.cleanupTimer);
+  assert.strictEqual(irrelevanz.room.players[0].hand.length, lootMonster.treasureCount, 'TRANK DER IRRELEVANZ lässt den Schatz ebenfalls zurück');
+  assert.strictEqual(irrelevanz.room.players[0].level, 3, 'TRANK DER IRRELEVANZ bringt keine Stufe');
+
+  const freundschaft = potionRoom('FREUNDSCHAFTSTRANK');
+  handlePlayCombatCard(freundschaft.room, 'p1', freundschaft.potionId);
+  if (freundschaft.room.cleanupTimer) clearTimeout(freundschaft.room.cleanupTimer);
+  assert.strictEqual(freundschaft.room.combat, null, 'FREUNDSCHAFTSTRANK beendet den Kampf');
+  assert.strictEqual(freundschaft.room.players[0].hand.length, 0, '"Du erhältst keinen Schatz" - die Hand bleibt leer');
+  assert.strictEqual(freundschaft.room.players[0].level, 3, 'FREUNDSCHAFTSTRANK bringt keine Stufe');
+  assert.ok(!freundschaft.room.players[0].lastReward, 'ohne Schatz keine Beute-Animation');
+  assert.strictEqual(freundschaft.room.turnPhase, 'pluendern', 'FREUNDSCHAFTSTRANK erlaubt danach das Plündern');
+
+  // VERZAUBERARMBAND: "ein Monster aus dem Kampf entfernen, indem du 3 Karten
+  // ablegst und seinen Schatz zurücklässt. Verzauberte Monster gewähren keine
+  // Stufen!" - Schatz ja, Stufe nein. Die 3 Karten werden nur als Bedingung
+  // geprüft (bewusst manuell abgelegt), bleiben hier also auf der Hand.
+  const armbandPay = ALL_CARDS.filter((c) => c.type === 'door').slice(0, 3).map((c) => c.id);
+  const armband = potionRoom('VERZAUBERARMBAND');
+  armband.room.players[0].hand.push(...armbandPay);
+  handlePlayCombatCard(armband.room, 'p1', armband.potionId);
+  if (armband.room.cleanupTimer) clearTimeout(armband.room.cleanupTimer);
+  const armbandActor = armband.room.players[0];
+  assert.strictEqual(armband.room.combat, null, 'VERZAUBERARMBAND beendet den Kampf gegen das verzauberte Monster');
+  assert.ok(armband.room.doorDiscard.includes(lootMonster.id), 'das verzauberte Monster liegt im Tür-Ablagestapel');
+  assert.ok(!armbandActor.hand.includes(armband.potionId), 'das Armband wird hier immer verbraucht (Würfelwurf bewusst manuell)');
+  assert.strictEqual(armbandActor.hand.length, armbandPay.length + lootMonster.treasureCount, 'zurückgelassener Schatz auf der Hand (Anzahl = treasureCount), Kostenkarten bleiben liegen');
+  assert.strictEqual(armbandActor.level, 3, 'verzauberte Monster gewähren keine Stufen');
+  assert.strictEqual(armbandActor.lastReward.levelsGained, 0, 'Beute-Animation zeigt 0 Stufen');
+  assert.strictEqual(armbandActor.lastReward.cardIds.length, lootMonster.treasureCount, 'Beute-Animation zeigt genau die zurückgelassenen Schätze');
+
+  // Bedingungen des Armbands: nur im eigenen Zug, nur bei genau einem Monster
+  // im Kampf, und nur mit 3 weiteren Karten auf der Hand.
+  const armbandCheck = potionRoom('VERZAUBERARMBAND');
+  armbandCheck.room.players[0].hand.push(...armbandPay);
+  const armbandSpec = () => COMBAT_POTION_OVERRIDES['VERZAUBERARMBAND'](armbandCheck.room.players[0], armbandCheck.room);
+  assert.deepStrictEqual(armbandSpec(), { type: 'endCombatNoLevel', leavesTreasure: true }, 'im eigenen Zug mit einem Monster und 3 Kostenkarten einsetzbar');
+  armbandCheck.room.turnIndex = 1;
+  assert.strictEqual(armbandSpec(), null, 'nicht im Zug eines anderen Spielers einsetzbar');
+  armbandCheck.room.turnIndex = 0;
+  armbandCheck.room.combat.monsterIds = [lootMonster.id, monster.id];
+  assert.strictEqual(armbandSpec(), null, 'bei mehreren Monstern bewusst nicht einsetzbar (Schatz wäre nicht zuordenbar)');
+  armbandCheck.room.combat.monsterIds = [lootMonster.id];
+  armbandCheck.room.players[0].hand = [armbandCheck.potionId, armbandPay[0]];
+  assert.strictEqual(armbandSpec(), null, 'ohne 3 ablegbare Karten nicht einsetzbar');
+
+  // Kartennamen in den Sonderfall-Tabellen muessen es wirklich geben - ein
+  // Tippfehler (die Karte heisst "UNSICHTSBARKEITSTRANK", mit S) macht den
+  // Eintrag sonst stillschweigend wirkungslos.
+  [
+    ['POST_FLEE_ESCAPE_CARDS', [...POST_FLEE_ESCAPE_CARDS]],
+    ['DOOR_COMBAT_CARDS', Object.keys(DOOR_COMBAT_CARDS)],
+    ['COMBAT_POTION_OVERRIDES', Object.keys(COMBAT_POTION_OVERRIDES)],
+    ['SPECIAL_SLOT_ITEMS', Object.keys(SPECIAL_SLOT_ITEMS)],
+  ].forEach(([tabelle, namen]) => {
+    namen.forEach((name) => {
+      assert.ok(ALL_CARDS.some((c) => c.name === name), `${tabelle}: "${name}" ist kein Kartenname`);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // ZAUBERER "Verzauberung": ganze Hand (mind. 3 Karten) gegen Monster und
+  // seinen Schatz, aber keine Stufe. Mechanisch dasselbe wie das
+  // VERZAUBERARMBAND - hier zaehlt vor allem die Bedingungspruefung.
+  // -------------------------------------------------------------------
+  const ZAUBERER = findCard('ZAUBERER', 'class').id;
+  // Eigener Nachziehstapel: filler (10 Karten) steckt hier in der Hand, der
+  // Stapel muss davon unabhaengig genug Schaetze fuer den Monsterschatz haben.
+  const enchantDeck = ALL_CARDS.filter((c) => c.type === 'treasure').slice(20, 40).map((c) => c.id);
+  function enchantRoom(handSize, playerOverrides, monsterIds) {
+    const hand = filler.slice(0, handSize);
+    const actor = makePlayer(Object.assign({
+      id: 'p1', name: 'A', level: 3, hand, classes: [ZAUBERER], equipped: newEquipped(),
+    }, playerOverrides || {}));
+    return {
+      code: 'TEST', players: [actor, makePlayer({ id: 'p2', name: 'B', equipped: newEquipped() })],
+      turnIndex: 0, turnPhase: 'kampf', combatHappenedThisTurn: true,
+      doorDeck: [], doorDiscard: [], treasureDeck: enchantDeck.slice(), treasureDiscard: [],
+      revealedDoorCard: null, pendingConsequence: null, pendingCardAction: null,
+      winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+      settings: { sets: {} },
+      combat: {
+        actorId: 'p1', helperId: null, monsterIds: monsterIds || [lootMonster.id],
+        actorModifier: 0, monsterModifier: 0, mustFlee: false,
+      },
+    };
+  }
+
+  const zaubern = enchantRoom(4);
+  const zaubernActor = zaubern.players[0];
+  assert.ok(enchantInfo(zaubern, zaubernActor), 'Zauberer mit 4 Handkarten gegen ein Monster darf verzaubern');
+  handleEnchantMonster(zaubern, 'p1');
+  if (zaubern.cleanupTimer) clearTimeout(zaubern.cleanupTimer);
+  assert.strictEqual(zaubern.combat, null, 'die Verzauberung beendet den Kampf');
+  assert.strictEqual(zaubernActor.level, 3, '"erhalte aber keine Stufe"');
+  assert.strictEqual(zaubernActor.hand.length, lootMonster.treasureCount,
+    'die ganze Hand ist weg, dafuer liegt der Schatz des Monsters da');
+  assert.strictEqual(zaubernActor.lastReward.levelsGained, 0, 'Beute-Animation ohne Stufe');
+  assert.ok(zaubern.doorDiscard.includes(lootMonster.id), 'das verzauberte Monster liegt im Tuer-Ablagestapel');
+
+  assert.strictEqual(enchantInfo(enchantRoom(2), makePlayer({ id: 'p1', classes: [ZAUBERER], hand: ['a', 'b'] })), null,
+    'unter 3 Handkarten keine Verzauberung');
+  const zweiMonster = enchantRoom(4, null, [lootMonster.id, monster.id]);
+  assert.strictEqual(enchantInfo(zweiMonster, zweiMonster.players[0]), null,
+    'bei mehreren Monstern muss normal gekaempft werden');
+  const keinZauberer = enchantRoom(4, { classes: [] });
+  assert.strictEqual(enchantInfo(keinZauberer, keinZauberer.players[0]), null, 'nur Zauberer duerfen verzaubern');
+  const zauberFlucht = enchantRoom(4);
+  zauberFlucht.combat.mustFlee = true;
+  assert.strictEqual(enchantInfo(zauberFlucht, zauberFlucht.players[0]), null,
+    'wer schon fliehen muss, verzaubert nicht mehr');
+  handleEnchantMonster(zauberFlucht, 'p1');
+  if (zauberFlucht.cleanupTimer) clearTimeout(zauberFlucht.cleanupTimer);
+  assert.ok(zauberFlucht.combat, 'und der Aufruf prallt dann wirkungslos ab');
+
+  // -------------------------------------------------------------------
+  // MAHLZEIT!: "Der kaempfende Spieler legt alle ihn angreifenden Monster ab
+  // und zieht sofort 2 Schaetze." - feste 2 Schaetze, keine Stufe, und jede:r
+  // am Tisch darf die Karte spielen.
+  // -------------------------------------------------------------------
+  const mahlzeit = findCard('MAHLZEIT!', 'door_other');
+  assert.ok(DOOR_COMBAT_CARDS[mahlzeit.name], 'MAHLZEIT! muss als Kampf-Tuerkarte bekannt sein');
+  const mzRoom = enchantRoom(0, { classes: [] });
+  mzRoom.players[1].hand = [mahlzeit.id]; // nicht die kaempfende Person
+  handlePlayCombatCard(mzRoom, 'p2', mahlzeit.id);
+  if (mzRoom.cleanupTimer) clearTimeout(mzRoom.cleanupTimer);
+  assert.strictEqual(mzRoom.combat, null, 'MAHLZEIT! beendet den Kampf');
+  assert.strictEqual(mzRoom.players[0].hand.length, 2,
+    'die kaempfende Person zieht genau 2 Schaetze - nicht den treasureCount des Monsters');
+  assert.strictEqual(mzRoom.players[0].level, 3, 'kein Monster besiegt, also keine Stufe');
+  assert.strictEqual(mzRoom.players[1].hand.length, 0, 'die gespielte Karte ist verbraucht');
+  assert.ok(mzRoom.doorDiscard.includes(mahlzeit.id), 'MAHLZEIT! ist eine Tuerkarte und gehoert auf deren Ablagestapel');
+
+  // -------------------------------------------------------------------
+  // DOPPELGAENGER: "Verdopple deine Kampfstaerke" - nur allein im Kampf.
+  // -------------------------------------------------------------------
+  const doppel = potionRoom('DOPPELGÄNGER');
+  const vorher = combatTotals(doppel.room).playerStrength;
+  handlePlayCombatCard(doppel.room, 'p1', doppel.potionId);
+  if (doppel.room.cleanupTimer) clearTimeout(doppel.room.cleanupTimer);
+  assert.strictEqual(doppel.room.combat.doubleActor, true, 'der Doppelgaenger merkt sich die Verdopplung');
+  assert.strictEqual(combatTotals(doppel.room).playerStrength, vorher * 2, 'die Kampfstaerke zaehlt doppelt');
+
+  const doppelHelfer = potionRoom('DOPPELGÄNGER');
+  doppelHelfer.room.combat.helperId = 'p2';
+  handlePlayCombatCard(doppelHelfer.room, 'p1', doppelHelfer.potionId);
+  if (doppelHelfer.room.cleanupTimer) clearTimeout(doppelHelfer.room.cleanupTimer);
+  assert.ok(!doppelHelfer.room.combat.doubleActor, 'mit Helfer:in im Kampf wirkt der Doppelgaenger nicht');
+  assert.ok(doppelHelfer.room.players[0].hand.includes(doppelHelfer.potionId),
+    'und die Karte bleibt dann auf der Hand');
+
+  // -------------------------------------------------------------------
+  // Spezialausrüstung: Schatzkarten mit Kampfbonus, die auf keinen der
+  // klassischen Plätze gehören (Kopf/Rüstung/Schuhe/Hände). Vorher waren
+  // sie gar nicht anlegbar und ihr Bonus damit wirkungslos.
+  // -------------------------------------------------------------------
+  const HALBLING_ID = findCard('HALBLING', 'race').id;
+  const schwert = findCard('SINGENDES & TANZENDES SCHWERT');
+  const strumpfhose = findCard('STRUMPFHOSE DER RIESENSTÄRK');
+  const sandwich = findCard('LIMBURGER UND SARDELLEN-SANDWICH');
+  const knie = findCard('SPIESSIGE KNIE');
+
+  function equipRoom(handIds, playerOverrides) {
+    const actor = makePlayer(Object.assign({ id: 'p1', name: 'A', level: 1, hand: handIds.slice(), equipped: newEquipped() }, playerOverrides || {}));
+    return {
+      code: 'TEST', players: [actor, makePlayer({ id: 'p2', name: 'B', equipped: newEquipped() })],
+      turnIndex: 0, turnPhase: 'tuer', doorDeck: [], doorDiscard: [], treasureDeck: [], treasureDiscard: [],
+      revealedDoorCard: null, combat: null, pendingConsequence: null, pendingCardAction: null,
+      winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null, settings: { sets: {} },
+    };
+  }
+
+  const eqRoom = equipRoom([schwert.id, strumpfhose.id, knie.id]);
+  [schwert.id, strumpfhose.id, knie.id].forEach((id) => handleEquipItem(eqRoom, 'p1', id));
+  if (eqRoom.cleanupTimer) clearTimeout(eqRoom.cleanupTimer);
+  const eqActor = eqRoom.players[0];
+  assert.deepStrictEqual(eqActor.equipped.special, [schwert.id, strumpfhose.id, knie.id],
+    'Spezialausrüstung ist ein Sammelplatz - alle drei Karten liegen gleichzeitig an');
+  assert.strictEqual(eqActor.equipped.armor, null, 'Spießige Knie belegen ausdrücklich NICHT den Rüstungsplatz');
+  assert.strictEqual(eqActor.equipped.legs, undefined, 'einen eigenen Beine-Platz gibt es nicht mehr');
+  assert.strictEqual(eqActor.hand.length, 0, 'angelegte Karten sind von der Hand weg');
+  assert.strictEqual(baseStrength(eqActor), 1 + schwert.bonus + strumpfhose.bonus + knie.bonus,
+    'die Boni der Spezialausrüstung zählen in der Kampfstärke');
+  [schwert.id, strumpfhose.id, knie.id].forEach((id) => assert.ok(equippedItemIds(eqActor).includes(id),
+    'Spezialplätze müssen in equippedItemIds auftauchen (Verkauf, Handel, Tod, Flüche)'));
+
+  // Wieder ablegen räumt den Sammelplatz korrekt auf.
+  handleUnequipItem(eqRoom, 'p1', schwert.id);
+  if (eqRoom.cleanupTimer) clearTimeout(eqRoom.cleanupTimer);
+  assert.deepStrictEqual(eqActor.equipped.special, [strumpfhose.id, knie.id], 'abgelegte Karte verschwindet aus dem Sammelplatz');
+  assert.ok(eqActor.hand.includes(schwert.id), 'und liegt wieder auf der Hand');
+  assert.strictEqual(baseStrength(eqActor), 1 + strumpfhose.bonus + knie.bonus, 'der Bonus fällt mit weg');
+
+  // "aber nur für Halblinge"
+  const sandwichNein = equipRoom([sandwich.id]);
+  handleEquipItem(sandwichNein, 'p1', sandwich.id);
+  if (sandwichNein.cleanupTimer) clearTimeout(sandwichNein.cleanupTimer);
+  assert.ok(sandwichNein.players[0].hand.includes(sandwich.id), 'ohne Halbling bleibt das Sandwich auf der Hand');
+  assert.deepStrictEqual(sandwichNein.players[0].equipped.special, [], 'und liegt nicht an');
+
+  const sandwichJa = equipRoom([sandwich.id], { races: [HALBLING_ID] });
+  handleEquipItem(sandwichJa, 'p1', sandwich.id);
+  if (sandwichJa.cleanupTimer) clearTimeout(sandwichJa.cleanupTimer);
+  assert.deepStrictEqual(sandwichJa.players[0].equipped.special, [sandwich.id], 'Halblinge dürfen das Sandwich anlegen');
+
+  // Jede Karte in der Tabelle muss es auch wirklich geben und einen Bonus
+  // haben - sonst wäre der Platz sinnlos.
+  Object.keys(SPECIAL_SLOT_ITEMS).forEach((name) => {
+    const c = findCard(name);
+    assert.ok(typeof c.bonus === 'number' && c.bonus !== 0, `${name}: Spezialausrüstung ohne Kampfbonus`);
+    assert.ok(SPECIAL_SLOTS[SPECIAL_SLOT_ITEMS[name].slot], `${name}: verweist auf einen unbekannten Platz`);
+  });
+
+  // MIETLING wurde aus dem Spiel genommen.
+  ['MIETLING', 'TÖTE DEN MIETLING'].forEach((name) => {
+    assert.strictEqual(ALL_CARDS.filter((c) => c.name === name).length, 0,
+      `${name} wurde aus dem Spiel genommen und darf in keinem Set mehr auftauchen`);
+  });
+  assert.strictEqual(TREASURE_POWER_OVERRIDES['TÖTE DEN MIETLING'], undefined,
+    'und auch keinen Eintrag mehr in den Schatzkraft-Sonderfaellen haben');
+
+  // -------------------------------------------------------------------
+  // Monster-Verstärker verändern auch die Beute: "Wird das Monster besiegt,
+  // ziehe 2 zusätzliche Schätze" (GIGANTISCH, URALT) bzw. "ziehe 1 Schatz
+  // weniger (mindestens 1)" (BABY). Der Wert steht in treasureCount der
+  // Verstärkerkarte und wurde vorher ignoriert - der Bonus/Malus auf die
+  // Kampfstärke wirkte, die Beute blieb unverändert.
+  // -------------------------------------------------------------------
+  const tc1Monster = ALL_CARDS.find((c) => c.category === 'monster' && c.treasureCount === 1);
+  function enhancerRoom(enhancerName, monsterId) {
+    const r = potionRoom('POLLYVERWANDLUNGSTRANK'); // gleicher Testraum, der Trank bleibt ungespielt
+    const enh = findCard(enhancerName, 'door_other');
+    r.room.players[0].hand = [enh.id];
+    r.room.players[0].level = 1;
+    r.room.combat.actorModifier = 40; // Sieg garantieren, ohne an der Stufe zu drehen
+    if (monsterId) r.room.combat.monsterIds = [monsterId];
+    return { room: r.room, enhancerId: enh.id, enh };
+  }
+
+  const gigantisch = enhancerRoom('GIGANTISCH');
+  handlePlayCombatCard(gigantisch.room, 'p1', gigantisch.enhancerId);
+  assert.strictEqual(gigantisch.room.combat.monsterModifier, gigantisch.enh.bonus,
+    'GIGANTISCH verstärkt das Monster wie bisher');
+  assert.strictEqual(gigantisch.room.combat.treasureDelta, gigantisch.enh.treasureCount,
+    'der Schatzbonus des Verstärkers wird für die Auswertung gemerkt');
+  handleEvaluateCombat(gigantisch.room, 'p1');
+  if (gigantisch.room.cleanupTimer) clearTimeout(gigantisch.room.cleanupTimer);
+  assert.strictEqual(gigantisch.room.players[0].hand.length, lootMonster.treasureCount + gigantisch.enh.treasureCount,
+    '"ziehe 2 zusätzliche Schätze" muss sich in der Beute niederschlagen');
+
+  // BABY: "ziehe 1 Schatz weniger (mindestens 1)" - an einem Monster mit nur
+  // einem Schatz greift ausdrücklich die Untergrenze.
+  const baby = enhancerRoom('BABY', tc1Monster.id);
+  handlePlayCombatCard(baby.room, 'p1', baby.enhancerId);
+  assert.strictEqual(baby.room.combat.treasureDelta, -1, 'BABY merkt sich den Schatzmalus');
+  handleEvaluateCombat(baby.room, 'p1');
+  if (baby.room.cleanupTimer) clearTimeout(baby.room.cleanupTimer);
+  assert.strictEqual(baby.room.players[0].hand.length, 1,
+    'BABY zieht einen Schatz ab, aber "mindestens 1" bleibt');
+
+  // -------------------------------------------------------------------
+  // Kampf-Tränke, die der Textparser vorher nicht erkannt hat: "+5 für egal
+  // welche Seite" (für VOR egal) und "+5, egal für welche Seite" (Komma),
+  // dazu ein Spielbarkeits-Satz ohne "spielen"/"einsetzen".
+  // -------------------------------------------------------------------
+  ['ELEKTRISCHRADIOAKTIVER SAURETRANK', 'MAGISCHES GESCHOSS', 'HÜBSCHE LUFTBALLONS'].forEach((name) => {
+    const c = findCard(name, 'treasure_other');
+    assert.deepStrictEqual(parseCombatPotion(c.text), { side: 'either', amount: 5 },
+      `${name}: +5 für eine frei wählbare Seite muss aus dem Text gelesen werden`);
+    assert.ok(isCombatPotionCard(c), `${name} muss als Kampf-Trank spielbar sein`);
+  });
+
+  const geschoss = potionRoom('MAGISCHES GESCHOSS');
+  handlePlayCombatCard(geschoss.room, 'p1', geschoss.potionId);
+  if (geschoss.room.cleanupTimer) clearTimeout(geschoss.room.cleanupTimer);
+  assert.ok(geschoss.room.pendingCardAction && geschoss.room.pendingCardAction.kind === 'choice',
+    'bei "egal für welche Seite" muss die Seite abgefragt werden');
+  assert.strictEqual(geschoss.room.pendingCardAction.options.length, 2,
+    'genau zwei Seiten zur Wahl: Munchkins oder Monster');
 
   // Gegenprobe: ALUFOLIE darf einen echten Rückstand nicht in einen Sieg drehen.
   const behind = combatRoomTie([alufolie.id]);

@@ -43,8 +43,8 @@
 
   // -- Handel (Trading) --
   let tradeComposeTargetId = null; // gerade ein neues Angebot an diese Person zusammenstellen
-  let tradeComposeSelection = new Set(); // eigene Handkarten, die dabei angeboten werden
-  let tradeCounterForId = null; // gerade ein Gegenangebot für dieses eingehende Angebot zusammenstellen
+  let tradeComposeSelection = new Set(); // eigene Karten/angelegte Gegenstände, die dabei angeboten werden
+  let tradeCounterForId = null; // gerade die eigene Gegenleistung für dieses eingehende Angebot zusammenstellen
   let tradeCounterSelection = new Set();
 
   function startTradeCompose(targetId) {
@@ -222,17 +222,28 @@
     $('btnStart').disabled = state.players.length < 1;
   }
 
+  // Sequenz-Animationen (Tuer aufdecken, Wuerfel, Beute) laufen nur bei einem
+  // NEUEN Ereignis. Beim ersten Zustand nach dem Laden oder Wiederverbinden
+  // wird der Stand nur uebernommen, damit ein laengst vergangenes Ereignis
+  // nicht nachtraeglich abgespielt wird.
+  //
+  // Der Merker muss dabei auch dann gesetzt werden, wenn es noch GAR kein
+  // Ereignis gibt (Feld null): sonst gilt das erste echte Ereignis der Partie
+  // als "erstes Sehen" und wird geschluckt - genau das liess die Beute nach
+  // dem ersten besiegten Monster ausfallen (und ebenso das erste Aufdecken
+  // und den ersten Weglaufwurf).
+  const animSeq = {};
+  function istNeuesEreignis(schluessel, ereignis) {
+    const vorher = animSeq[schluessel];
+    animSeq[schluessel] = ereignis ? ereignis.seq : 0;
+    return vorher !== undefined && !!ereignis && ereignis.seq !== vorher;
+  }
+
   // Aufdeck-Animation: spielt genau einmal pro neu aufgedeckter Tuerkarte.
-  // Beim (Wieder-)Einsteigen wird der zuletzt gesehene seq nur uebernommen,
-  // ohne ein laengst vergangenes Aufdecken nachtraeglich zu animieren.
-  let lastRevealSeq = null;
   let revealAnimTimer = null;
   function playDoorReveal() {
     const r = state.doorReveal;
-    if (!r || r.seq === lastRevealSeq) return;
-    const first = lastRevealSeq === null;
-    lastRevealSeq = r.seq;
-    if (first) return;
+    if (!istNeuesEreignis('reveal', r)) return;
     const box = $('revealAnim');
     box.innerHTML = '';
     box.appendChild(cardTile(r.cardId, {}));
@@ -247,15 +258,41 @@
   // genau einmal pro neuem seq, beim (Wieder-)Einstieg nur den seq uebernehmen.
   // Alle am Tisch sehen sie, deshalb steht der Name der wuerfelnden Person dabei.
   const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-  let lastDieSeq = null;
   let dieAnimTimer = null;
   let dieTickTimer = null;
+  // Gespielte Kampfkarte: kurz gross in der Mitte, mit dem Namen der Person,
+  // die sie spielt (siehe announceCardPlay im Server). Alle am Tisch sehen
+  // sie - anders als die Beute ist eine gespielte Karte oeffentlich.
+  let cardPlayTimer = null;
+  function playCardPlay() {
+    const e = state.cardPlay;
+    if (!istNeuesEreignis('cardPlay', e)) return;
+    const box = $('cardPlayAnim');
+    box.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cardplay-box';
+    const who = document.createElement('div');
+    who.className = 'cardplay-who';
+    who.textContent = `${e.playerName} spielt:`;
+    wrap.appendChild(who);
+    wrap.appendChild(cardTile(e.cardId, {}));
+    if (e.hinweis) {
+      const note = document.createElement('div');
+      note.className = 'cardplay-note';
+      note.textContent = e.hinweis;
+      wrap.appendChild(note);
+    }
+    box.appendChild(wrap);
+    box.classList.remove('hidden', 'play');
+    void box.offsetWidth; // Reflow erzwingen, sonst startet die Animation bei schneller Folge nicht neu
+    box.classList.add('play');
+    clearTimeout(cardPlayTimer);
+    cardPlayTimer = setTimeout(() => { box.classList.add('hidden'); box.classList.remove('play'); box.innerHTML = ''; }, 1800);
+  }
+
   function playDieRoll() {
     const d = state.dieRoll;
-    if (!d || d.seq === lastDieSeq) return;
-    const first = lastDieSeq === null;
-    lastDieSeq = d.seq;
-    if (first) return;
+    if (!istNeuesEreignis('die', d)) return;
     const box = $('dieAnim');
     const modText = `${d.mod >= 0 ? '+' : ''}${d.mod}`;
     box.innerHTML = '';
@@ -301,29 +338,56 @@
   // Beute-Animation nach einem Kampfsieg: nur die/der Siegende bekommt sie zu
   // sehen, denn die gezogenen Schatzkarten sind Handkarten und damit geheim -
   // deshalb haengt sie an myInfo (privates yourInfo-Event), nicht am State.
-  let lastRewardSeq = null;
   let rewardAnimTimer = null;
+  let rewardFlyTimer = null;
+
+  // Zum Schluss fliegen die Beutekarten in die eigene Handleiste, damit
+  // sichtbar ist, wo der Schatz landet. FLIP-Prinzip: einmal die Zielposition
+  // messen, dann pro Karte genau ein transform - kein Reflow pro Frame.
+  function flyRewardCardsToHand(box) {
+    const target = $('myHand').getBoundingClientRect();
+    if (!target.width) return; // Handleiste nicht sichtbar - dann nur ausblenden
+    box.querySelectorAll('.cardtile').forEach((tile, i) => {
+      const r = tile.getBoundingClientRect();
+      tile.style.animation = 'none'; // Einflug-Keyframes abschalten, sonst kaempfen sie mit dem transform
+      tile.style.transition = `transform 0.6s cubic-bezier(0.4, 0, 0.7, 1) ${i * 0.07}s, opacity 0.6s ease-in ${i * 0.07}s`;
+      void tile.offsetWidth;
+      tile.style.transform = `translate(${target.left + target.width / 2 - (r.left + r.width / 2)}px, ${target.top + target.height / 2 - (r.top + r.height / 2)}px) scale(0.25)`;
+      tile.style.opacity = '0';
+    });
+  }
   function playReward() {
     const r = myInfo.lastReward;
-    if (!r || r.seq === lastRewardSeq) return;
-    const first = lastRewardSeq === null;
-    lastRewardSeq = r.seq;
-    if (first) return;
+    if (!istNeuesEreignis('reward', r)) return;
     const box = $('rewardAnim');
     box.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.className = 'reward-box';
     const head = document.createElement('div');
     head.className = 'reward-head';
-    head.textContent = `⚔️ ${r.monsterNames.join(' + ')} besiegt!`;
-    const lvl = document.createElement('div');
-    lvl.className = 'reward-level';
-    lvl.textContent = `+${r.levelsGained} Stufe${r.levelsGained === 1 ? '' : 'n'}`;
-    wrap.append(head, lvl);
+    // Ohne Stufengewinn wurde das Monster nicht besiegt, sondern hat seinen
+    // Schatz zurueckgelassen (Polly-Trank & Co.) - dann passt "besiegt" nicht.
+    // Dieselbe Animation fuer drei Anlaesse, nur mit anderer Ueberschrift:
+    // Kampfsieg, Raum pluendern (kind 'loot') und der Schatz, den ein
+    // Gegenstand auf dem Weg aus einem Kampf heraus mitbringt ('flucht').
+    if (r.kind === 'loot') head.textContent = '📦 Raum geplündert!';
+    else if (r.kind === 'flucht') head.textContent = `🏃 Entkommen - "${r.quelle}" bringt noch etwas mit!`;
+    else if (r.levelsGained) head.textContent = `⚔️ ${r.monsterNames.join(' + ')} besiegt!`;
+    else head.textContent = `🪙 ${r.monsterNames.join(' + ')} liess den Schatz zurueck!`;
+    wrap.appendChild(head);
+    if (r.levelsGained) {
+      const lvl = document.createElement('div');
+      lvl.className = 'reward-level';
+      lvl.textContent = `+${r.levelsGained} Stufe${r.levelsGained === 1 ? '' : 'n'}`;
+      wrap.appendChild(lvl);
+    }
     if (r.cardIds.length) {
       const label = document.createElement('div');
       label.className = 'reward-label';
-      label.textContent = `Deine Beute: ${r.cardIds.length} Schatzkarte${r.cardIds.length === 1 ? '' : 'n'}`;
+      const n = r.cardIds.length;
+      if (r.kind === 'loot') label.textContent = `Verdeckt gezogen: ${n} Türkarte${n === 1 ? '' : 'n'}`;
+      else if (r.kind === 'flucht') label.textContent = `Auf dem Weg nach draußen: ${n} Schatzkarte${n === 1 ? '' : 'n'}`;
+      else label.textContent = `Deine Beute: ${n} Schatzkarte${n === 1 ? '' : 'n'}`;
       wrap.appendChild(label);
       const row = document.createElement('div');
       row.className = 'reward-cards';
@@ -337,11 +401,20 @@
       wrap.appendChild(textNode('Dieses Monster liess keinen Schatz zurueck.'));
     }
     box.appendChild(wrap);
-    box.classList.remove('hidden', 'play');
+    box.classList.remove('hidden', 'play', 'fly');
     void box.offsetWidth; // Reflow erzwingen, sonst startet die Animation bei schneller Folge nicht neu
     box.classList.add('play');
     clearTimeout(rewardAnimTimer);
-    rewardAnimTimer = setTimeout(() => { box.classList.add('hidden'); box.innerHTML = ''; }, 3400);
+    clearTimeout(rewardFlyTimer);
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduced) {
+      rewardFlyTimer = setTimeout(() => { box.classList.add('fly'); flyRewardCardsToHand(box); }, 1400);
+    }
+    rewardAnimTimer = setTimeout(() => {
+      box.classList.add('hidden');
+      box.classList.remove('play', 'fly');
+      box.innerHTML = '';
+    }, reduced ? 3400 : 2400);
   }
 
   function renderGame() {
@@ -362,6 +435,7 @@
 
     playDoorReveal();
     playDieRoll();
+    playCardPlay();
     playReward();
     renderPlayerList();
     renderDiscardPeek();
@@ -388,20 +462,33 @@
     }
   }
 
+  // Eine Zeile pro Karte auf dem Spezialplatz; ohne Karten bleibt der Platz
+  // mit einer leeren Zeile sichtbar.
+  function specialSlotRows(p) {
+    const cfg = state.specialSlots || {};
+    return Object.keys(cfg).flatMap((key) => {
+      const label = cfg[key].label || key;
+      const v = p.equipped[key];
+      const ids = Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
+      if (!ids.length) return [[key, label, null]];
+      return ids.map((id, i) => [`${key}${i}`, ids.length > 1 ? `${label} ${i + 1}` : label, id]);
+    });
+  }
+
   function renderPlayerList() {
     const box = $('playerList');
     box.innerHTML = '<h3>Spieler:innen</h3>';
     state.players.forEach((p) => {
       const row = document.createElement('div');
       row.className = 'prow clickable' + (p.id === state.turnPlayerId ? ' active-turn' : '');
-      const equip = [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands]
-        .filter(Boolean).length;
+      const equip = equippedIdsOf(p).length;
       row.innerHTML = `<span>${escapeHtml(p.name)}${p.isBot ? ' 🤖' : ''}</span>` +
         `<span>` +
         (p.id === state.turnPlayerId ? '<span class="tag turn">Zug</span> ' : '') +
         (p.id === myInfo.playerId ? '<span class="tag you">Du</span> ' : '') +
         (!p.connected ? '<span class="tag off">offline</span> ' : '') +
         `<span class="tag">Stufe ${p.level}</span> <span class="tag">⚔ ${p.strength}</span> <span class="tag">🎒 ${equip}</span>` +
+        (p.activeCurses && p.activeCurses.length ? ` <span class="tag">🌀 Fluch x${p.activeCurses.length}</span>` : '') +
         `</span>`;
       row.title = 'Klicken für Ausrüstung';
       row.addEventListener('click', () => openPlayerModal(p.id));
@@ -421,6 +508,7 @@
   // ---------------------------------------------------------------------
 
   function openPlayerModal(playerId) {
+    offenerAblagestapel = null;
     const p = state.players.find((pl) => pl.id === playerId);
     if (!p) return;
     const body = $('cardModalBody');
@@ -434,12 +522,20 @@
     (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
     if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
     body.appendChild(badges);
+    if ((p.activeCurses || []).length) {
+      const flueche = document.createElement('div');
+      flueche.className = 'row gap wrap';
+      flueche.style.marginBottom = '12px';
+      curseTags(p, flueche);
+      body.appendChild(flueche);
+    }
 
     const equip = document.createElement('div');
     equip.className = 'row gap wrap';
     const slotDefs = [
       ['Kopf', p.equipped.head], ['Rüstung', p.equipped.armor], ['Schuhe', p.equipped.feet],
       ['Hand 1', p.equipped.hands[0]], ['Hand 2', p.equipped.hands[1]],
+      ...specialSlotRows(p).map(([, label, cardId]) => [label, cardId]),
     ];
     slotDefs.forEach(([label, cardId]) => {
       const el = document.createElement('div');
@@ -467,7 +563,22 @@
   // Handel (Trading) - jederzeit möglich, nicht an den eigenen Zug gebunden.
   // ---------------------------------------------------------------------
 
+  // Handelbar sind eigene Handkarten UND eigene angelegte Gegenstände
+  // (letztere sind öffentlich sichtbar und stehen im state).
+  function myEquippedIds() {
+    const me = state && state.players.find((p) => p.id === myInfo.playerId);
+    if (!me) return [];
+    return [...new Set(equippedIdsOf(me))];
+  }
+  function myTradableIds() {
+    return [...new Set([...(myInfo.hand || []), ...myEquippedIds()])];
+  }
+  function goldSum(ids) {
+    return (ids || []).reduce((sum, id) => sum + (typeof card(id).gold === 'number' ? card(id).gold : 0), 0);
+  }
+
   function tradePickGrid(ids, selection) {
+    const equipped = myEquippedIds();
     const grid = document.createElement('div');
     grid.className = 'row gap wrap tradegrid';
     ids.forEach((id) => {
@@ -481,11 +592,36 @@
         renderTradeArea();
       };
       label.appendChild(cb);
-      label.appendChild(document.createTextNode(` ${c.name}${typeof c.gold === 'number' ? ` (${c.gold} GS)` : ''}`));
+      label.appendChild(document.createTextNode(
+        ` ${c.name}${typeof c.gold === 'number' ? ` (${c.gold} GS)` : ''}${equipped.includes(id) ? ' • angelegt' : ''}`
+      ));
       grid.appendChild(label);
     });
-    if (!ids.length) grid.appendChild(textNode('Keine Karten auf der Hand.'));
+    if (!ids.length) grid.appendChild(textNode('Nichts Tauschbares vorhanden.'));
     return grid;
+  }
+
+  // Anklickbare Kartenverweise (wie im Verlauf) für eine Handelshälfte.
+  function tradeChips(ids) {
+    const row = document.createElement('div');
+    row.className = 'row gap wrap';
+    (ids || []).forEach((id) => {
+      const c = card(id);
+      const chip = document.createElement('a');
+      chip.href = '#'; chip.className = 'logcardlink';
+      chip.textContent = `[${c.name}${typeof c.gold === 'number' ? ` ${c.gold} GS` : ''}]`;
+      chip.onclick = (e) => { e.preventDefault(); openCardModal(id); };
+      row.appendChild(chip);
+    });
+    if (!(ids || []).length) row.appendChild(textNode('(nichts)'));
+    return row;
+  }
+
+  // "300 vs. 400 Goldstücke" - Wert gegen Wert abwägen. Gold ist im Spiel
+  // keine Währung, sondern nur der Verkaufswert der Karten (Verkauf ab 1.000
+  // Goldstücken über handleSellItems) - hier also reine Entscheidungshilfe.
+  function tradeVsLine(giveIds, getIds) {
+    return textNode(`Du gibst ${goldSum(giveIds)} GS  vs.  du bekommst ${goldSum(getIds)} GS`);
   }
 
   function renderTradeArea() {
@@ -494,6 +630,7 @@
     box.innerHTML = '';
     if (!state || state.phase !== 'playing') return;
 
+    // 1. Eigenes Angebot zusammenstellen
     if (tradeComposeTargetId) {
       const target = state.players.find((p) => p.id === tradeComposeTargetId);
       if (!target || !target.connected) {
@@ -502,8 +639,11 @@
         const panel = document.createElement('div');
         panel.className = 'tradebox';
         panel.innerHTML = `<h3>🤝 Handel anbieten an ${escapeHtml(target.name)}</h3>` +
-          `<p class="hint">Wähle Karten aus deiner Hand, die du anbietest (Gold- oder andere Karten). ${target.name} entscheidet dann, was sie/er im Gegenzug gibt.</p>`;
-        panel.appendChild(tradePickGrid(myInfo.hand, tradeComposeSelection));
+          `<p class="hint">Wähle, was du hergeben willst - Handkarten oder angelegte Gegenstände. ` +
+          `${escapeHtml(target.name)} legt dann die Gegenleistung fest, die du anschließend bestätigen musst.</p>`;
+        panel.appendChild(tradePickGrid(myTradableIds(), tradeComposeSelection));
+        const selected = Array.from(tradeComposeSelection);
+        panel.appendChild(textNode(`Dein Angebot: ${selected.length} Karte(n), ${goldSum(selected)} Goldstücke`));
         const actions = document.createElement('div');
         actions.className = 'row gap'; actions.style.marginTop = '10px';
         const sendBtn = mkBtn('Angebot senden', () => {
@@ -521,60 +661,123 @@
       }
     }
 
+    // 2. Angebote an mich - ich lege meine Hälfte fest
     (myInfo.incomingTrades || []).forEach((t) => {
       const panel = document.createElement('div');
       panel.className = 'tradebox';
-      panel.innerHTML = `<h3>🤝 Handelsangebot von ${escapeHtml(t.fromName)}</h3><p>Bietet an:</p>`;
-      const preview = document.createElement('div');
-      preview.className = 'row gap wrap';
-      t.offerCardIds.forEach((id) => {
-        const chip = document.createElement('a');
-        chip.href = '#'; chip.className = 'logcardlink';
-        chip.textContent = `[${card(id).name}]`;
-        chip.onclick = (e) => { e.preventDefault(); openCardModal(id); };
-        preview.appendChild(chip);
-      });
-      panel.appendChild(preview);
+      panel.innerHTML = `<h3>🤝 Handelsangebot von ${escapeHtml(t.fromName)}</h3><p>Bietet dir an:</p>`;
+      panel.appendChild(tradeChips(t.offerCardIds));
+
+      if (t.status === 'countered') {
+        panel.appendChild(textNode('Du verlangst dafür:'));
+        panel.appendChild(tradeChips(t.counterCardIds));
+        panel.appendChild(tradeVsLine(t.counterCardIds, t.offerCardIds));
+        panel.appendChild(textNode(`Wartet auf Bestätigung von ${t.fromName}...`));
+        box.appendChild(panel);
+        return;
+      }
 
       const actions = document.createElement('div');
       actions.className = 'row gap wrap'; actions.style.marginTop = '10px';
-      const acceptBtn = mkBtn('Annehmen', () => socket.emit('respondTrade', { tradeId: t.id, accept: true, counterCardIds: [] }));
-      acceptBtn.className = 'primary';
-      const counterBtn = mkBtn('Annehmen + selbst etwas geben...', () => { tradeCounterForId = t.id; tradeCounterSelection = new Set(); renderTradeArea(); });
+      const counterBtn = mkBtn('Gegenleistung festlegen...', () => { tradeCounterForId = t.id; tradeCounterSelection = new Set(); renderTradeArea(); });
+      counterBtn.className = 'primary';
+      const giftBtn = mkBtn('Annehmen, ohne etwas zu geben', () => socket.emit('respondTrade', { tradeId: t.id, accept: true, counterCardIds: [] }));
       const declineBtn = mkBtn('Ablehnen', () => socket.emit('respondTrade', { tradeId: t.id, accept: false }));
       declineBtn.className = 'danger';
-      actions.appendChild(acceptBtn); actions.appendChild(counterBtn); actions.appendChild(declineBtn);
+      actions.appendChild(counterBtn); actions.appendChild(giftBtn); actions.appendChild(declineBtn);
       panel.appendChild(actions);
 
       if (tradeCounterForId === t.id) {
-        panel.appendChild(tradePickGrid(myInfo.hand, tradeCounterSelection));
-        const confirmBtn = mkBtn('Gegenangebot bestätigen & annehmen', () => {
+        panel.appendChild(tradePickGrid(myTradableIds(), tradeCounterSelection));
+        const mine = Array.from(tradeCounterSelection);
+        panel.appendChild(tradeVsLine(mine, t.offerCardIds));
+        const confirmBtn = mkBtn('Gegenleistung verlangen', () => {
+          if (!tradeCounterSelection.size) return;
           socket.emit('respondTrade', { tradeId: t.id, accept: true, counterCardIds: Array.from(tradeCounterSelection) });
           tradeCounterForId = null; tradeCounterSelection = new Set();
         });
         confirmBtn.className = 'primary'; confirmBtn.style.marginTop = '6px';
+        confirmBtn.disabled = !tradeCounterSelection.size;
         panel.appendChild(confirmBtn);
       }
       box.appendChild(panel);
     });
 
+    // 3. Meine eigenen Angebote - warten bzw. Gegenleistung bestätigen
     (myInfo.outgoingTrades || []).forEach((t) => {
       const panel = document.createElement('div');
       panel.className = 'tradebox';
-      const names = t.offerCardIds.map((id) => card(id).name).join(', ');
-      panel.innerHTML = `<h3>🤝 Dein Angebot an ${escapeHtml(t.toName)}</h3><p>Du bietest an: <b>${escapeHtml(names)}</b> - wartet auf Antwort...</p>`;
-      const cancelBtn = mkBtn('Zurückziehen', () => socket.emit('cancelTrade', { tradeId: t.id }));
-      panel.appendChild(cancelBtn);
+      panel.innerHTML = `<h3>🤝 Dein Angebot an ${escapeHtml(t.toName)}</h3><p>Du bietest:</p>`;
+      panel.appendChild(tradeChips(t.offerCardIds));
+
+      const actions = document.createElement('div');
+      actions.className = 'row gap wrap'; actions.style.marginTop = '10px';
+      if (t.status === 'countered') {
+        panel.appendChild(textNode(`${t.toName} verlangt dafür:`));
+        panel.appendChild(tradeChips(t.counterCardIds));
+        panel.appendChild(tradeVsLine(t.offerCardIds, t.counterCardIds));
+        const okBtn = mkBtn('Tausch bestätigen', () => socket.emit('respondTrade', { tradeId: t.id, accept: true }));
+        okBtn.className = 'primary';
+        const noBtn = mkBtn('Gegenleistung ablehnen', () => socket.emit('respondTrade', { tradeId: t.id, accept: false }));
+        noBtn.className = 'danger';
+        actions.appendChild(okBtn); actions.appendChild(noBtn);
+      } else {
+        panel.appendChild(textNode(`Wert: ${goldSum(t.offerCardIds)} Goldstücke - wartet auf Antwort von ${t.toName}...`));
+        actions.appendChild(mkBtn('Zurückziehen', () => socket.emit('cancelTrade', { tradeId: t.id })));
+      }
+      panel.appendChild(actions);
       box.appendChild(panel);
     });
   }
 
+  // Beide Ablagestapel liegen offen: ein Klick zeigt ALLE Karten darin
+  // (oberste zuerst), wie das Durchblaettern am echten Tisch.
   function renderDiscardPeek() {
+    // Ein offenes Stapel-Modal mitwachsen lassen: waehrend man blaettert,
+    // legen die anderen weiter ab.
+    if (offenerAblagestapel && !$('cardModal').classList.contains('hidden')) {
+      const merk = offenerAblagestapel;
+      openDiscardModal(merk);
+    }
     const box = $('discardPeek');
-    let html = '<h3>Ablagestapel</h3>';
-    html += `<div class="hint">Tür (${state.doorDiscardCount}): ${state.doorDiscardTop ? escapeHtml(card(state.doorDiscardTop).name) : '-'}</div>`;
-    html += `<div class="hint">Schatz (${state.treasureDiscardCount}): ${state.treasureDiscardTop ? escapeHtml(card(state.treasureDiscardTop).name) : '-'}</div>`;
-    box.innerHTML = html;
+    box.innerHTML = '<h3>Ablagestapel</h3>';
+    [['door', 'Tür', state.doorDiscard || []], ['treasure', 'Schatz', state.treasureDiscard || []]]
+      .forEach(([pile, label, ids]) => {
+        const oben = ids.length ? card(ids[ids.length - 1]) : null;
+        const btn = document.createElement('button');
+        btn.className = 'small wide';
+        btn.style.marginTop = '4px';
+        btn.textContent = `${label} (${ids.length}): ${oben ? oben.name : '-'}`;
+        btn.disabled = !ids.length;
+        btn.title = 'Alle Karten in diesem Ablagestapel ansehen';
+        btn.onclick = () => openDiscardModal(pile);
+        box.appendChild(btn);
+      });
+  }
+
+  let offenerAblagestapel = null; // 'door' | 'treasure', solange sein Modal offen ist
+
+  function openDiscardModal(pile) {
+    offenerAblagestapel = pile;
+    const ids = (pile === 'door' ? state.doorDiscard : state.treasureDiscard) || [];
+    const body = $('cardModalBody');
+    body.innerHTML = `<h3>${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel (${ids.length})</h3>`;
+    if (!ids.length) {
+      body.appendChild(textNode('Dieser Ablagestapel ist leer.'));
+    } else {
+      body.appendChild(textNode('Oberste Karte zuerst. Klick auf eine Karte zeigt ihren Text.'));
+      const grid = document.createElement('div');
+      grid.className = 'row gap wrap';
+      grid.style.marginTop = '10px';
+      // Neueste zuerst - so liegt der Stapel auch auf dem Tisch.
+      [...ids].reverse().forEach((id) => {
+        const tile = cardTile(id, { slim: true });
+        tile.onclick = () => openCardModal(id);
+        grid.appendChild(tile);
+      });
+      body.appendChild(grid);
+    }
+    $('cardModal').classList.remove('hidden');
   }
 
   function renderReveal() {
@@ -636,9 +839,21 @@
     // willkürlich.
     const notes = [];
     if (c.monsterTraitBonus) notes.push(`Kartenbonus des Monsters gegen eure Rasse/Klasse: +${c.monsterTraitBonus}`);
-    if (c.ignoresBonuses) notes.push('Gegen dieses Monster zählt nur eure Charakterstufe - keine Gegenstände, keine Boni.');
+    if (c.ignoresBonuses) notes.push('Gegen dieses Monster zählt nur eure Charakterstufe - keine Gegenstände, keine Boni. Karten und Klassenkräfte, die nur der Munchkin-Seite helfen, nimmt der Server deshalb gar nicht erst an - sie bleiben auf der Hand.');
     if (c.ignoresLevel) notes.push('Gegen dieses Monster zählt eure Stufe nicht - nur eure Boni.');
     if (c.forbidsHelp) notes.push('Gegen dieses Monster darf niemand helfen.');
+    if (c.doubleActor) notes.push('Doppelgänger: eure Kampfstärke zählt doppelt.');
+    // Anhaltende Flueche der Kaempfenden stecken schon in der Rechnung
+    // (combatTotals) - ohne Hinweis wundert man sich nur ueber die Zahl.
+    [actor, c.helperId ? state.players.find((p) => p.id === c.helperId) : null]
+      .filter(Boolean)
+      .forEach((p) => (p.activeCurses || []).forEach((f) => {
+        notes.push(`🌀 ${p.name} steht unter "${f.name}"${f.hinweis ? ` - ${f.hinweis}` : ''}`);
+      }));
+    // Ohne Hinweis sähe die Monsterstärke 0 wie ein Anzeigefehler aus.
+    (c.autoKilledMonsters || []).forEach((name) => {
+      notes.push(`${name}: von Halblingen einfach eingestampft - zählt mit Stärke 0, Stufe und Schatz gibt es trotzdem.`);
+    });
     const power = myInfo.classCombatPower;
     if (power && power.remaining > 0) {
       notes.push(`Deine Klassenkraft "${power.label}": bis zu ${power.remaining} weitere Handkarte(n) ablegen für je +${power.bonus} ` +
@@ -650,6 +865,26 @@
       el.textContent = t;
       div.appendChild(el);
     });
+
+    // Bedingtes Reaktionsfenster: GEZINKTER WÜRFEL (auf den Weglaufwurf) und
+    // KLEBERFLÄSCHCHEN (auf eine gelungene Flucht). Beide Felder kommen
+    // direkt vom Server - das eigentliche Ausspielen passiert an der
+    // jeweiligen Handkarte (siehe handActionsFor), hier nur Hinweis + Passen.
+    if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId)) {
+      const row = document.createElement('div');
+      row.className = 'row gap wrap';
+      const werfer = state.players.find((p) => p.id === state.pendingRoll.playerId);
+      row.appendChild(textNode(`${werfer ? werfer.name : '?'} hat ${state.pendingRoll.roll} gewürfelt - du darfst noch mit "GEZINKTER WÜRFEL" reagieren.`));
+      row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
+      div.appendChild(row);
+    }
+    if (c.escapeReactionOffer && c.escapeReactionOffer.includes(myInfo.playerId)) {
+      const row = document.createElement('div');
+      row.className = 'row gap wrap';
+      row.appendChild(textNode(`${actor.name} ist entkommen - du darfst noch ein "KLEBERFLÄSCHCHEN" spielen und die Flucht wiederholen lassen.`));
+      row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
+      div.appendChild(row);
+    }
 
     // Jede:r am Tisch darf hier eingreifen - nicht nur Angreifer:in/Helfer:in -
     // um z.B. einen Fluch oder eine Hilfskarte zu verrechnen, die nicht
@@ -740,7 +975,44 @@
       div.appendChild(ask);
     }
 
-    if (iAmActor && c.mustFlee) {
+    // HALBLING: nach dem verpatzten ersten Wurf noch eine Entscheidung -
+    // 1 Handkarte ablegen und nochmal würfeln (Knopf an der Karte) oder das
+    // Miese Zeug hinnehmen. Solange das offen ist, kein neuer Wurf.
+    // ZAUBERER "Verzauberung": ganze Hand gegen Monster+Schatz, keine Stufe.
+    const enchant = myInfo.classEnchant;
+    if (enchant && !c.mustFlee) {
+      const btn = mkBtn(`✨ Verzauberung: ganze Hand ablegen (${enchant.handCount} Karten) und "${enchant.monsterName}" verzaubern - Schatz ja, Stufe nein`,
+        () => socket.emit('enchantMonster', {}));
+      btn.className = 'primary';
+      div.appendChild(btn);
+    }
+
+    if (iAmActor && c.fleeRerollOffer) {
+      const escapeIds = myInfo.fleeEscapeCardIds || [];
+      const wege = [];
+      if (c.canReroll) wege.push('als Halbling 1 Handkarte ablegen (Knopf unter der Karte) und noch einmal würfeln');
+      if (escapeIds.length) wege.push('eine Rettungskarte ablegen und automatisch entkommen');
+      const lampIds = myInfo.lampCardIds || [];
+      if (lampIds.length) wege.push('die Magische Lampe nutzen und ein Monster verschwinden lassen');
+      div.appendChild(textNode(`Der Wurf ist misslungen - du kannst noch ${wege.join(' oder ')}. Oder du stellst dich dem Miesen Zeug.`));
+      escapeIds.forEach((escId) => {
+        const btn = mkBtn(`🫥 "${card(escId).name}" ablegen und automatisch entkommen`, () => socket.emit('fleeEscape', { cardId: escId }));
+        btn.className = 'primary';
+        div.appendChild(btn);
+      });
+      // MAGISCHE LAMPE: pro gehaltener Lampe und pro Monster im Kampf ein
+      // Knopf - war es das einzige Monster, gibt es dafür noch seinen Schatz.
+      lampIds.forEach((lampId) => {
+        c.monsterIds.forEach((monsterId) => {
+          const btn = mkBtn(`🧞 "${card(lampId).name}": "${card(monsterId).name}" verschwinden lassen`,
+            () => socket.emit('useLamp', { cardId: lampId, monsterId }));
+          btn.className = 'primary';
+          div.appendChild(btn);
+        });
+      });
+      const acceptBtn = mkBtn('Miesem Zeug stellen', () => socket.emit('fleeReroll', { cardId: null }));
+      div.appendChild(acceptBtn);
+    } else if (iAmActor && c.mustFlee) {
       div.appendChild(textNode('Ihr verliert diesen Kampf - jetzt fliehen (Würfelwurf ≥ 5 nötig)!'));
       const fleeRow = document.createElement('div');
       fleeRow.className = 'row gap';
@@ -868,9 +1140,22 @@
     box.appendChild(div);
   }
 
+  // Spezialplaetze ("Spezialausruestung", "Beine") kommen als Konfiguration
+  // vom Server (state.specialSlots / state.specialSlotItems) - hier wird
+  // bewusst keine zweite Kartenliste gepflegt.
+  function specialSlotIds(p) {
+    return Object.keys(state.specialSlots || {}).flatMap((k) => {
+      const v = p.equipped[k];
+      return Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
+    });
+  }
+
+  // Wie equippedItemIds im Server: ein zweihaendiger Gegenstand steht in
+  // beiden Handslots und darf trotzdem nur einmal gezaehlt/angezeigt werden.
   function equippedIdsOf(p) {
     if (!p) return [];
-    return [p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands].filter(Boolean);
+    return [...new Set([p.equipped.head, p.equipped.armor, p.equipped.feet, ...p.equipped.hands,
+      ...specialSlotIds(p)].filter(Boolean))];
   }
 
   function renderPhaseActions() {
@@ -921,6 +1206,7 @@
     if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)'));
     if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)'));
     if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)'));
+    curseTags(p, badges);
 
     const equip = $('myEquip');
     equip.innerHTML = '';
@@ -930,6 +1216,7 @@
       ['feet', 'Schuhe', p.equipped.feet],
       ['hand1', 'Hand 1', p.equipped.hands[0]],
       ['hand2', 'Hand 2', p.equipped.hands[1]],
+      ...specialSlotRows(p),
     ];
     slotDefs.forEach(([key, label, cardId]) => {
       const el = document.createElement('div');
@@ -942,9 +1229,15 @@
         el.innerHTML = `<b>${label}</b>`;
         el.appendChild(img);
         el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`));
+        // Getragene Karte gross ansehen - wie in der Ausruestung anderer
+        // Spieler:innen (openPlayerModal) und an den Handkarten.
+        el.classList.add('clickable');
+        el.title = 'Karte groß ansehen';
+        el.onclick = () => openCardModal(cardId);
         const btn = document.createElement('button');
         btn.className = 'small'; btn.textContent = 'ablegen';
-        btn.onclick = () => socket.emit('unequipItem', { cardId });
+        // stopPropagation: sonst oeffnet das Ablegen zugleich die Grossansicht.
+        btn.onclick = (e) => { e.stopPropagation(); socket.emit('unequipItem', { cardId }); };
         el.appendChild(btn);
       } else {
         el.innerHTML = `<b>${label}</b><span class="hint">leer</span>`;
@@ -972,6 +1265,14 @@
   function renderHand(p) {
     const box = $('myHand');
     box.innerHTML = '';
+    // PRIESTER "Auferstehung": nicht an eine einzelne Karte gebunden, also
+    // einmal ueber der Hand. Welche Stapel gehen, sagt der Server.
+    (myInfo.resurrectPiles || []).forEach((pile) => {
+      if (state.pendingCardAction || state.pendingRoll) return;
+      const btn = mkBtn(`✝️ Auferstehung: oberste Karte vom ${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel nehmen (kostet 1 Handkarte)`,
+        () => socket.emit('priestResurrect', { pile }));
+      box.appendChild(btn);
+    });
     if (handSortInput) handSortInput.checked = handSort;
     sortedHand().forEach((id) => {
       const tile = cardTile(id, { hand: true });
@@ -989,9 +1290,30 @@
 
     const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence && !state.pendingCardAction;
 
-    if (c.category === 'item' && myTurn) {
-      const btn = mkBtn('Anlegen', () => socket.emit('equipItem', { cardId: id }));
+    const specialRule = (state.specialSlotItems || {})[c.name];
+    const isBig = (state.bigItems || []).includes(c.name);
+    if ((c.category === 'item' || specialRule) && myTurn) {
+      const label = specialRule
+        ? `Anlegen (${(state.specialSlots[specialRule.slot] || {}).label || specialRule.slot}${specialRule.races ? `, nur ${specialRule.races.join('/')}` : ''}${isBig ? ', Großer Gegenstand' : ''})`
+        : `Anlegen${isBig ? ' (Großer Gegenstand)' : ''}`;
+      const btn = mkBtn(label, () => socket.emit('equipItem', { cardId: id }));
       wrap.appendChild(btn);
+    }
+    // SCHUMMELN!: hebt die Anlege-Regeln fuer GENAU EINEN eigenen Gegenstand
+    // auf (Hand oder angelegt) - Auswahl per Dropdown, der Server prueft den
+    // Rest (Besitz, schon vorhandener Anhang).
+    if (c.name === 'SCHUMMELN!' && myTurn) {
+      const items = myTradableIds().filter((iid) => {
+        const ic = card(iid);
+        return ic && iid !== id && (ic.category === 'item' || (state.specialSlotItems || {})[ic.name]);
+      });
+      const select = document.createElement('select');
+      select.innerHTML = '<option value="">🃏 Auf Gegenstand spielen...</option>' +
+        items.map((iid) => `<option value="${iid}">${escapeHtml(card(iid).name)}</option>`).join('');
+      select.onchange = () => {
+        if (select.value) socket.emit('playCheat', { cheatCardId: id, targetItemId: select.value });
+      };
+      wrap.appendChild(select);
     }
     if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger') {
       const btn = mkBtn('Als Monster spielen', () => socket.emit('playMonsterFromHand', { cardId: id }));
@@ -1011,7 +1333,7 @@
     // Generische "Sonderkraft nutzen"-Aktion für Schatzkarten mit
     // automatisierter Fähigkeit (Sofort-Stufenaufstieg, kuratierte
     // Einzelfälle - siehe TREASURE_POWER_NAMES/isInstantLevelUpText unten).
-    if (myTurn && !state.pendingCardAction && hasTreasurePower(c)) {
+    if (myTurn && !state.pendingCardAction && (hasTreasurePower(c) || hasDoorPower(c))) {
       const btn = mkBtn('✨ Sonderkraft nutzen', () => socket.emit('useCardPower', { cardId: id }));
       wrap.appendChild(btn);
     }
@@ -1041,8 +1363,49 @@
     // "Kampf-Tränke": Schatzkarten mit einem +N-Bonus für eine wählbare
     // Seite, jederzeit während eines laufenden Kampfes spielbar.
     if (state.combat && !state.combat.mustFlee && !state.pendingCardAction && isCombatPotion(c)) {
+      // GEMEINE GHOULE: fuer die Kaempfenden ist ein Munchkin-Bonus wirkungslos,
+      // der Server weist die Karte ab. Welche Seite eine Karte genau bedient,
+      // weiss nur er - deshalb hier nur ein Hinweis am Knopf statt einer
+      // zweiten Regeltabelle im Client.
+      const imKampf = state.combat.actorId === myInfo.playerId || state.combat.helperId === myInfo.playerId;
+      const zwecklos = state.combat.ignoresBonuses && imKampf;
+      const btn = mkBtn(zwecklos ? '⚔️ Im Kampf spielen (Munchkin-Boni wirken hier nicht)' : '⚔️ Im Kampf spielen',
+        () => socket.emit('playCombatCard', { cardId: id }));
+      wrap.appendChild(btn);
+    }
+    // Fluchkarten aus der Hand: "jederzeit gegen eine beliebige Person".
+    // Welche Karten als Fluch gelten, sagt der Server (state.curseCards) -
+    // die Rohdaten fuehren die meisten Flueche als normale Tuerkarte.
+    const istFluch = c.category === 'curse' || (state.curseCards || []).includes(c.name);
+    if (istFluch && !state.pendingCardAction && !state.pendingConsequence && !state.pendingRoll && !state.winner) {
+      const ziele = state.players.filter((p) => p.id !== myInfo.playerId);
+      const select = document.createElement('select');
+      select.innerHTML = '<option value="">💀 Fluch spielen gegen...</option>' +
+        ziele.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+      select.onchange = () => { if (select.value) socket.emit('playCurseFromHand', { cardId: id, targetId: select.value }); };
+      wrap.appendChild(select);
+    }
+    // Türkarten mit eigener Kampfwirkung (MAHLZEIT!) - welche das sind, sagt
+    // der Server (state.doorCombatCards), damit hier keine Namensliste liegt.
+    if (state.combat && !state.combat.mustFlee && (state.doorCombatCards || []).includes(c.name)) {
       const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
       wrap.appendChild(btn);
+    }
+    // Kampfreaktionskarten (Kumpel, Wanderndes Monster, Illusion, Hilf mir,
+    // Ueberfalltrank) - welche das sind, sagt der Server (state.combatReactionCards).
+    if (state.combat && !state.combat.mustFlee && !state.pendingCardAction && (state.combatReactionCards || []).includes(c.name)) {
+      // Zwei Bedingungen, die der Server kennt und der Client nur abfragt:
+      // HILF MIR darf nur spielen, wer selbst im Kampf steht
+      // (combatReactionOnlyInFight), und WANDERNDES MONSTER/ILLUSION brauchen
+      // ein Monster auf der eigenen Hand (combatReactionNeedsMonster).
+      const imKampf = state.combat.actorId === myInfo.playerId || state.combat.helperId === myInfo.playerId;
+      const fehltKampf = (state.combatReactionOnlyInFight || []).includes(c.name) && !imKampf;
+      const fehltMonster = (state.combatReactionNeedsMonster || []).includes(c.name)
+        && !myInfo.hand.some((hid) => (card(hid) || {}).category === 'monster');
+      if (!fehltKampf && !fehltMonster) {
+        const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
+        wrap.appendChild(btn);
+      }
     }
     // Klassenkräfte, die Handkarten kosten (Krieger "Berserken", Priester
     // "Vertreiben", Zauberer "Flugzauber"). Welche gerade nutzbar ist und wie
@@ -1055,10 +1418,51 @@
         () => socket.emit('useClassCombatDiscard', { cardId: id }));
       wrap.appendChild(btn);
     }
+    // DIEB: beide Kraefte kosten genau eine Handkarte - deshalb haengen sie
+    // an jeder Karte. Wer Ziel sein darf, sagt der Server (myInfo.thiefPower).
+    const thief = myInfo.thiefPower;
+    if (thief && thief.backstabTargets.length && !state.pendingCardAction) {
+      const sel = document.createElement('select');
+      sel.innerHTML = '<option value="">🗡️ In den Rücken fallen (-2)...</option>' +
+        thief.backstabTargets.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+      sel.onchange = () => { if (sel.value) socket.emit('thiefBackstab', { cardId: id, targetId: sel.value }); };
+      wrap.appendChild(sel);
+    }
+    if (thief && thief.stealTargets.length && !state.pendingCardAction && !state.pendingRoll) {
+      const sel = document.createElement('select');
+      sel.innerHTML = '<option value="">🗝️ Diebstahl (Wurf ab 4)...</option>' +
+        thief.stealTargets.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+      sel.onchange = () => { if (sel.value) socket.emit('thiefSteal', { cardId: id, targetId: sel.value }); };
+      wrap.appendChild(sel);
+    }
+    // HALBLING-Wiederholungswurf: jede Handkarte kann die Karte sein, die
+    // dafür abgelegt wird.
+    if (state.combat && state.combat.fleeRerollOffer && state.combat.canReroll && state.combat.actorId === myInfo.playerId) {
+      const btn = mkBtn('🎲 Halbling: ablegen und nochmal weglaufen', () => socket.emit('fleeReroll', { cardId: id }));
+      btn.className = 'primary';
+      wrap.appendChild(btn);
+    }
     // Garantierte Flucht-Karten: nur die aktuell kämpfende Person, nur
     // während tatsächlich geflohen werden muss.
     if (guaranteedFleeUsable(c)) {
       const btn = mkBtn(`🛡️ Garantiert entkommen mit "${c.name}"`, () => socket.emit('useGuaranteedFlee', { cardId: id }));
+      btn.className = 'primary';
+      wrap.appendChild(btn);
+    }
+    // GEZINKTER WÜRFEL: nur, solange das Reaktionsfenster für genau diese
+    // Person offen ist (state.pendingRoll.holders).
+    if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId) && c.name === 'GEZINKTER WÜRFEL') {
+      const btn = mkBtn('🎲 Wurf ändern', () => {
+        const v = Number(window.prompt('Neues Würfelergebnis (1-6)?', String(state.pendingRoll.roll)));
+        if (v >= 1 && v <= 6) socket.emit('playReactionCard', { cardId: id, value: v });
+      });
+      btn.className = 'primary';
+      wrap.appendChild(btn);
+    }
+    // KLEBERFLÄSCHCHEN: nur, solange das Fluchtreaktionsfenster für genau
+    // diese Person offen ist (combat.escapeReactionOffer).
+    if (state.combat && (state.combat.escapeReactionOffer || []).includes(myInfo.playerId) && c.name === 'KLEBERFLÄSCHCHEN') {
+      const btn = mkBtn('🧪 Kleberfläschchen: Flucht wiederholen lassen', () => socket.emit('playReactionCard', { cardId: id }));
       btn.className = 'primary';
       wrap.appendChild(btn);
     }
@@ -1099,8 +1503,8 @@
   const TREASURE_POWER_NAMES = new Set([
     'KLAUE EINE STUFE', 'SINNIEREN', 'SINNLOSER AKT DER FREUNDLICHKEIT',
     'JAMMER DEN SPIELLEITER AN', 'CHARAKTERSEITEN WECHSELN',
-    'TÖTE DEN MIETLING', 'ENTE DER VIELEN SACHEN',
-    'SCHATZHORT!', 'WÜNSCHELSTAB', 'GEDENKTAFEL',
+    'ENTE DER VIELEN SACHEN',
+    'SCHATZHORT!', 'WÜNSCHELSTAB', 'GEDENKTAFEL', 'WUNSCHRING',
   ]);
   const INSTANT_LEVEL_UP_RE = /^\s*Steige\s+(?:eine|\d+)\s+Stufen?\s+auf\b/i;
 
@@ -1110,17 +1514,25 @@
     return INSTANT_LEVEL_UP_RE.test(c.text || '');
   }
 
+  // Tuerkarten mit aktiver Sonderkraft (server.js: DOOR_POWER_CARDS) - Namen
+  // muessen dort synchron gehalten werden.
+  const DOOR_POWER_NAMES = new Set(['GOTTLICHE INTERVENTION']);
+
+  function hasDoorPower(c) {
+    return !!c && DOOR_POWER_NAMES.has(c.name);
+  }
+
   const COMBAT_POTION_NAMES = new Set([
     'FREUNDSCHAFTSTRANK', 'POLLYVERWANDLUNGSTRANK', 'TRANK DER IRRELEVANZ',
     'ENTLASSUNGSGLOCKE', 'CYTILLESH-TRANK', 'TRANK DES MUNDGERUCHS',
-    'YUPPIE-WASSER', 'FLÜSSIGKLINGE',
+    'YUPPIE-WASSER', 'FLÜSSIGKLINGE', 'VERZAUBERARMBAND',
   ]);
-  const COMBAT_PLAYABLE_RE = /Im Kampf (spielen|einsetzen)|Während\s+(eines\s+)?beliebige[nm]\s+Kampf(es)?\s+spielen/i;
+  const COMBAT_PLAYABLE_RE = /im\s+Kampf\b|Während\s+(eines\s+)?beliebige[nm]\s+Kampf(es)?\s+spielen/i;
 
   function combatPotionAmountFound(rawText) {
     const t = String(rawText || '').replace(/\\n/g, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<\/?[bi]>/gi, '');
     return /\+\d+\s+für\s+beide\s+Seiten/i.test(t) ||
-      /\+\d+\s+(?:für\s+eine\s+der\s+Parteien,\s+)?egal\s+(?:für\s+welche|welche)\s+Seite/i.test(t) ||
+      /\+\d+[,\s]+(?:für\s+)?(?:eine\s+der\s+Parteien,\s*)?egal[,\s]+(?:für\s+)?welche\s+Seite/i.test(t) ||
       /\+\d+\s+nur\s+für\s+Monster/i.test(t) ||
       /\+\d+\s+für\s+die\s+Munchkin-Seite/i.test(t);
   }
@@ -1229,7 +1641,25 @@
     return div;
   }
 
+  // Werte-Zeile fuer die Grossansicht: zeigt nur, was die Karte wirklich hat -
+  // eine Monsterkarte hat keinen Slot, ein Schatz keine Stufe. "Grosser
+  // Gegenstand" kommt als c.big direkt vom Server mit (siehe ALL_CARDS in
+  // server.js), damit hier keine zweite Namensliste gepflegt werden muss.
+  function cardValuesHtml(c) {
+    const teile = [];
+    if (typeof c.level === 'number') teile.push(`Stufe ${c.level}`);
+    if (typeof c.treasureCount === 'number') teile.push(`🎁 ${c.treasureCount} Schatz/Schaetze`);
+    if (c.slotLabel) teile.push(escapeHtml(c.slotLabel));
+    if (c.handsCost) teile.push(`${c.handsCost} Hand${c.handsCost > 1 ? 'e' : ''}`);
+    if (c.bonus) teile.push(`${c.bonus > 0 ? '+' : ''}${c.bonus} im Kampf`);
+    if (typeof c.gold === 'number' && c.gold > 0) teile.push(`${c.gold} GS`);
+    if (c.big) teile.push('📦 <b>Grosser Gegenstand</b>');
+    if (!teile.length) return '';
+    return `<p class="cardvalues">${teile.join(' &middot; ')}</p>`;
+  }
+
   function openCardModal(id) {
+    offenerAblagestapel = null;
     const c = card(id);
     const img = new Image();
     img.className = 'modalimg';
@@ -1238,12 +1668,33 @@
     img.onerror = () => img.remove();
     $('cardModalBody').innerHTML = `<h3>${escapeHtml(c.name)}</h3>` +
       `<p class="hint">${CATEGORY_LABELS[c.category] || ''} - ${escapeHtml(c.setLabel || '')}</p>` +
+      cardValuesHtml(c) +
       (c.text ? `<p>${formatCardText(c.text)}</p>` : '') +
       (c.badstuff ? `<p><b>Schlimme Dinge:</b> ${formatCardText(c.badstuff)}</p>` : '');
     $('cardModalBody').prepend(img);
     $('cardModal').classList.remove('hidden');
   }
-  $('cardModalClose').addEventListener('click', () => $('cardModal').classList.add('hidden'));
+  $('cardModalClose').addEventListener('click', () => {
+    offenerAblagestapel = null;
+    $('cardModal').classList.add('hidden');
+  });
+
+  // Anhaltende Flueche als Marke mit Klartext - der Text kommt vom Server
+  // (LINGERING_CURSES.hinweis), damit die Wirkung nur an einer Stelle
+  // beschrieben ist.
+  function curseTags(p, ziel) {
+    (p.activeCurses || []).forEach((f) => {
+      const tag = smallTag(`🌀 ${f.name}`, '#7b3fa0');
+      tag.title = f.hinweis || 'Anhaltender Fluch';
+      ziel.appendChild(tag);
+      if (f.hinweis) {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = f.hinweis;
+        ziel.appendChild(hint);
+      }
+    });
+  }
 
   function smallTag(text, color) {
     const span = document.createElement('span');
