@@ -241,7 +241,24 @@ module.exports = (ctx) => {
         })),
       };
     },
-    'VERLIERE 1 KLEINEN GEGENSTAND': () => null,
+    // "Waehle einen kleinen Gegenstand aus und lege ihn ab. Jeder Gegenstand,
+    // der nicht >>Gross<< ist, gilt als klein." Seit isBigItem (Grosse
+    // Gegenstaende) ist "klein" definierbar - vorher musste diese Karte
+    // manuell bleiben. Die Karte nennt keinen Ersatz-Malus, wer nichts
+    // Kleines traegt, kommt also davon.
+    'VERLIERE 1 KLEINEN GEGENSTAND': (player) => {
+      const ids = equippedItemIds(player).filter((id) => !isBigItem(card(id)));
+      if (!ids.length) return { type: 'noEffect' };
+      if (ids.length === 1) return { type: 'discardSpecificItem', itemId: ids[0] };
+      return {
+        type: 'choice',
+        options: ids.map((id) => ({
+          id: `item-${id}`,
+          label: `"${card(id).name}" ablegen`,
+          action: { type: 'discardSpecificItem', itemId: id },
+        })),
+      };
+    },
     // Persistente Mali/Flags ohne laufenden Status-Tracker in diesem Server -
     // bleiben nach dem Einordnen als Fluch bewusst manuell/nur textlich:
     'GESCHLECHTSUMWANDLUNG': () => null,

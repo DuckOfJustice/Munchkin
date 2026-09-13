@@ -375,4 +375,37 @@ const CARD_C = idByName('KLASSE WECHSELN');
   done(room);
 }
 
+// 11) VERLIERE 1 KLEINEN GEGENSTAND: das Gegenstueck zu 9). "Klein" ist seit
+// den Grossen Gegenstaenden (Task 2) definierbar - vorher musste die Karte
+// manuell bleiben. Bei genau einem kleinen Gegenstand keine Wahl noetig, bei
+// mehreren eine echte Wahl, ohne kleinen Gegenstand passiert nichts (die
+// Karte nennt keinen Ersatz-Malus).
+{
+  const ps = [makePlayer('a')];
+  const p1 = ps[0];
+  const room = makeRoom(ps, 0);
+
+  p1.equipped.armor = MITHRIL; // nur ein GROSSER Gegenstand
+  assert.deepStrictEqual(resolveConsequenceSpec('VERLIERE 1 KLEINEN GEGENSTAND', 'x', p1, room),
+    { type: 'noEffect' }, 'ohne kleinen Gegenstand passiert nichts');
+
+  p1.equipped.head = TUCH;
+  assert.deepStrictEqual(resolveConsequenceSpec('VERLIERE 1 KLEINEN GEGENSTAND', 'x', p1, room),
+    { type: 'discardSpecificItem', itemId: TUCH }, 'genau ein kleiner Gegenstand -> keine Wahl noetig');
+
+  p1.equipped.feet = STIEFEL;
+  const spec = resolveConsequenceSpec('VERLIERE 1 KLEINEN GEGENSTAND', 'x', p1, room);
+  assert.strictEqual(spec.type, 'choice');
+  assert.deepStrictEqual(spec.options.map((o) => o.action.itemId).sort(), [TUCH, STIEFEL].sort(),
+    'zur Wahl stehen genau die kleinen Gegenstaende, nicht die Mithril-Ruestung');
+
+  applyPrimitiveAction(room, p1, spec.options[0].action);
+  assert.ok(room.treasureDiscard.includes(spec.options[0].action.itemId), 'der gewaehlte liegt im Ablagestapel');
+  assert.ok(equippedItemIds(p1).includes(MITHRIL), 'der Grosse Gegenstand bleibt');
+  assert.strictEqual(equippedItemIds(p1).filter((id) => !isBigItem(card(id))).length, 1,
+    'nur EIN kleiner Gegenstand ist weg');
+
+  done(room);
+}
+
 console.log('OK - Schlimme Dinge mit Fremdbeteiligung: HIPPOGREIF/ANWALT/LEPRACHAUN/NETZ-TROLL/VERSICHERUNGSVERTRETER/SCHNECKEN AUF SPEED/FLUCH! EINKOMMENSSTEUER ueber die Aktions-Warteschlange, plus VERLIERE-1-GROSSEN-GEGENSTAND-Zwergwahl, plus Backlog-Regression bei mehreren Warteschlangen-Monstern in einem Kampf.');
