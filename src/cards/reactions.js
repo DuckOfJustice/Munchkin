@@ -3,7 +3,17 @@
 module.exports = () => {
   // "Spiel ihn, nachdem du aus einem beliebigen Grund wuerfeln musstest.
   // Aendere das Wuerfelergebnis so wie du willst. Nur einmal einsetzbar."
-  const ROLL_REACTION_CARDS = new Set(['GEZINKTER WÜRFEL']);
+  // KATZENINTERVENTION: "Spielbar, nachdem irgendjemand gewuerfelt hat, aus
+  // welchem Grund auch immer. Die Katze ist auf den Wuerfel gesprungen ... der
+  // Wurf und alle Karten, die gespielt wurden, um ihn zu beeinflussen, sind
+  // verloren. Wuerfel nochmal."
+  // ponytail: "alle Karten, die gespielt wurden, um ihn zu beeinflussen" ist
+  // hier gegenstandslos - das Wurf-Fenster schliesst sich, sobald der
+  // GEZINKTE WÜRFEL gespielt wurde, danach ist die Katze gar nicht mehr
+  // moeglich. Beide Karten reagieren also auf denselben, unberuehrten Wurf.
+  const ROLL_REACTION_CARDS = new Set(['GEZINKTER WÜRFEL', 'KATZENINTERVENTION']);
+  // Wer davon wuerfelt neu, statt den Wert zu setzen.
+  const ROLL_REROLL_CARDS = new Set(['KATZENINTERVENTION']);
 
   // "Einsetzbar, wenn jemand erfolgreich (egal warum) einem Kampf entkommt.
   // Er muss seine Flucht noch einmal wuerfeln, sogar wenn sie das erste Mal
@@ -42,6 +52,14 @@ module.exports = () => {
     // "Du kannst keine Gegenstaende tragen, die mehr als eine Hand benoetigen."
     'WINZIGE HÄNDE': { kind: 'noTwoHandedItems', dauer: 'dauerhaft',
       hinweis: 'Keine Gegenstände, die zwei Hände brauchen, bis der Fluch endet.' },
+    // "-4 fuer deinen naechsten (oder aktuellen) Kampf ... ausser du bist ein
+    // Zwerg ... dann erhaeltst du durch den 'Fluch' stattdessen +4."
+    // amountFuerRasse wird in addActiveCurse EINMAL aufgeloest und als feste
+    // Zahl gespeichert - so bleibt der Eintrag reine Daten und geht
+    // unveraendert ueber publicState an den Client.
+    'ZWERGENBIER': { kind: 'combatMalus', amount: -4, amountFuerRasse: { 'ZWERG': 4 },
+      dauer: 'naechsterKampf',
+      hinweis: '-4 im nächsten Kampf (Zwerge bekommen stattdessen +4).' },
   };
 
   // Karten, die einen LAUFENDEN Kampf veraendern. Sie reiten auf der
@@ -70,7 +88,7 @@ module.exports = () => {
   };
 
   return {
-    ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES,
-    COMBAT_REACTION_CARDS,
+    ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
+    LINGERING_CURSES, COMBAT_REACTION_CARDS,
   };
 };

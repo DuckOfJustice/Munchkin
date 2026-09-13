@@ -19,6 +19,11 @@ const BIG_ITEMS = new Set([
   'GANZKÖRPER-SCHILD',
   'TUBA DER VERZAUBERUNG',
   'TRITTLEITER',
+  // Clerical Errors, am 2026-09-13 mit dem Nutzer gegen die echten Karten
+  // abgeglichen (die uebrigen neun Gegenstaende des Sets sind klein).
+  'ZAUBERCOUCH',
+  'ZWEIHÄNDIGES SCHWERT',
+  'GROSSE, FIESE LEIER',
 ]);
 
 function isBigItem(c) {

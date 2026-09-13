@@ -11,7 +11,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, reactionHolders, rollWithWindow, ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS,
   newEquipped, handleAttemptFlee, handlePlayReactionCard, handlePassReaction, handleUseLamp,
-  handleFleeReroll, botFleeRerollCard,
+  handlePlayCombatCard, handleFleeReroll, botFleeRerollCard,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -194,11 +194,38 @@ function run() {
   }
 
   // -------------------------------------------------------------------
-  // MAGISCHE LAMPE - haengt am bestehenden Fluchtentscheidungsfenster
+  // MAGISCHE LAMPE - im Kampf auf der eigenen Seite, bei der Flucht
+  // oder am Fluchtentscheidungsfenster einsetzbar ("selbst wenn dein
+  // Weglaufenwurf verpatzt wurde").
   // -------------------------------------------------------------------
   {
-    // Einziges Monster: Schatz ja, Stufe nein (Korrektur B: nicht vorher
-    // splicen, sonst zahlt endCombatNoLevel nichts aus).
+    // Normaler Kampf (vor der Flucht): einziges Monster verschwindet,
+    // Schatz ja, Stufe nein.
+    const lampe = findCard('MAGISCHE LAMPE');
+    const goblin = findCard('LAHMER GOBLIN', 'monster');
+    const room = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id], level: 5 }, { mustFlee: false });
+    const handVorher = room.players[0].hand.length;
+    const levelVorher = room.players[0].level;
+    handleUseLamp(room, 'p1', lampe.id, goblin.id);
+    assert.strictEqual(room.combat, null, 'im normalen Kampf verschwindet das Monster -> Kampf vorbei');
+    assert.strictEqual(room.players[0].level, levelVorher, 'keine Stufe fuer die Lampe');
+    assert.strictEqual(room.players[0].hand.length, handVorher - 1 + goblin.treasureCount,
+      'Lampe abgelegt, Schatz des Monsters auf der Hand');
+    assert.ok(room.doorDiscard.includes(goblin.id), 'Monster landet im Tuerablagestapel');
+    done(room);
+  }
+  {
+    // Normaler Kampf: direkt als Kampfkarte via handlePlayCombatCard gespielt.
+    const lampe = findCard('MAGISCHE LAMPE');
+    const goblin = findCard('LAHMER GOBLIN', 'monster');
+    const room = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id], level: 5 }, { mustFlee: false });
+    handlePlayCombatCard(room, 'p1', lampe.id);
+    assert.strictEqual(room.combat, null, 'via handlePlayCombatCard gespielt -> Kampf vorbei');
+    done(room);
+  }
+  {
+    // Fluchtphase (nach verpatztem Wurf): einziges Monster verschwindet,
+    // Schatz ja, Stufe nein.
     const lampe = findCard('MAGISCHE LAMPE');
     const goblin = findCard('LAHMER GOBLIN', 'monster');
     const room = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id], level: 5 }, { fleeRerollOffer: true });
@@ -231,19 +258,19 @@ function run() {
     done(room);
   }
   {
-    // Fremdeingaben duerfen nichts tun: falscher Akteur, kein offenes
-    // Fenster, unbekannte Karte.
+    // Fremdeingaben duerfen nichts tun: falscher Akteur (nur die kaempfende Person),
+    // fremder Zug, kein Kampf.
     const lampe = findCard('MAGISCHE LAMPE');
     const goblin = findCard('LAHMER GOBLIN', 'monster');
-    const raum1 = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id] }, { fleeRerollOffer: false });
-    handleUseLamp(raum1, 'p1', lampe.id, goblin.id);
-    assert.ok(raum1.combat, 'ohne offenes Entscheidungsfenster wirkt die Lampe nicht');
-    done(raum1);
+    const raumFremd = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id] }, { fleeRerollOffer: true });
+    handleUseLamp(raumFremd, 'p2', lampe.id, goblin.id);
+    assert.ok(raumFremd.combat, 'nur die kaempfende Person darf die Lampe spielen');
+    done(raumFremd);
 
-    const raum2 = fleeRoom(['LAHMER GOBLIN'], { hand: [lampe.id] }, { fleeRerollOffer: true });
-    handleUseLamp(raum2, 'p2', lampe.id, goblin.id);
-    assert.ok(raum2.combat, 'nur die kaempfende Person darf die Lampe spielen');
-    done(raum2);
+    const raumKeinKampf = makeRoom({ players: [makePlayer({ id: 'p1', hand: [lampe.id] })] });
+    handleUseLamp(raumKeinKampf, 'p1', lampe.id, goblin.id);
+    assert.strictEqual(raumKeinKampf.combat, null, 'ohne Kampf keine Wirkung');
+    done(raumKeinKampf);
   }
 
   // Der Bot im Fluchtentscheidungsfenster. Regression aus dem Abnahme-

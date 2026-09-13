@@ -7,7 +7,7 @@
 module.exports = (ctx) => {
   const {
     card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
-    equippedItemIds, isBigItem,
+    equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
   } = ctx;
 
   const CONSEQUENCE_OVERRIDES = {
@@ -115,6 +115,46 @@ module.exports = (ctx) => {
     // oder Stufen-Bezug wie bei den Monstern oben).
     'FLUCH! EINKOMMENSSTEUER': () => ({ type: 'curseIncomeTax', mode: 'allOthers' }),
 
+    // --- Clerical Errors: Schlimme Dinge mit freier eigener Auswahl -------
+    // "Du hast den Wurm gegessen! Lege zwei Karten (deiner Wahl) aus deiner
+    // Hand ab."
+    'TEQUILA-LIEDCHEN': () => ({ type: 'queuedDiscardOwn', count: 2, quelle: 'hand',
+      cardName: 'TEQUILA-LIEDCHEN', prompt: 'Eine Handkarte ablegen' }),
+    // "Opfere eine Karte deiner Wahl dem Uebel des Ruesselkaefers."
+    'RÜSSELKÄFER': () => ({ type: 'queuedDiscardOwn', count: 1, quelle: 'hand',
+      cardName: 'RÜSSELKÄFER', prompt: 'Eine Handkarte opfern' }),
+    // "Verliere 2 kleine Gegenstaende deiner Wahl."
+    'DOPPELGANGSTER': () => ({ type: 'queuedDiscardOwn', count: 2, quelle: 'kleineGegenstaende',
+      cardName: 'DOPPELGANGSTER', prompt: 'Einen kleinen Gegenstand ablegen' }),
+    // "Sie explodieren ueberall um dich herum. Du verlierst 2 Gegenstaende
+    // deiner Wahl. Alle anderen verlieren 1 Gegenstand ihrer Wahl."
+    'KAMIKAZE-KOBOLDE': () => ({ type: 'combo', actions: [
+      { type: 'queuedDiscardOwn', count: 2, quelle: 'gegenstaende', cardName: 'KAMIKAZE-KOBOLDE', prompt: 'Einen Gegenstand ablegen' },
+      { type: 'queuedDiscardEachOther', cardName: 'KAMIKAZE-KOBOLDE' },
+    ] }),
+    // "Sie machen dir Schuldgefuehle. Jeder Spieler, dessen Stufe niedriger
+    // ist als deine, steigt eine Stufe auf. Du verlierst dann diese Anzahl an
+    // Stufen."
+    'GOTHYANKI': () => ({ type: 'levelUpLowerPlayersAndLose' }),
+    // "Lass jeden Ork im Spiel eine Karte aus deiner Hand ziehen."
+    'BOBBELKOPF': () => ({ type: 'queuedTakeFromHand', mode: 'after', nurRasse: 'ORK' }),
+    // "Zuckerschock! Du musst in jedem Kampf deine Hilfe anbieten, darfst
+    // keinen Schatz annehmen, bis du einen verlierst." - eine Dauerpflicht
+    // ueber viele Zuege, fuer die es keinen Tracker gibt; bleibt manuell:
+    'GUMMI-GOLEM': () => null,
+    // "Ein Strichmaennchen hat kein Geschlecht, und du jetzt auch nicht. Du
+    // bist weder maennlich noch weiblich, bis ein anderer Spieler das
+    // Geschlecht wechselt ... dann nimmst du dessen Geschlecht an."
+    'STRICHMÄNNCHEN': () => ({ type: 'setGender', value: null }),
+    // "Frauen verlieren ihre Ruestung. Maenner muessen ein Bier mit ihm
+    // teilen, verliere 1 Stufe." (Wer die Freud'schen Slipper traegt, gilt als
+    // keins von beiden - siehe istGeschlecht - und kommt davon.)
+    'CHAUVINISTENSCHWEIN': (player) => {
+      if (istGeschlecht(player, 'w')) return { type: 'discardSlot', slot: 'armor' };
+      if (istGeschlecht(player, 'm')) return { type: 'levelDelta', amount: 1 };
+      return { type: 'noEffect' };
+    },
+
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
     'ENTIKOR': () => ({
       type: 'choice',
@@ -162,7 +202,7 @@ module.exports = (ctx) => {
       : { type: 'levelDelta', amount: 1 }),
     // "VERLIERE 1 GROSSEN GEGENSTAND. Wenn du keinen Großen Gegenstand hast,
     // verliere 1 Stufe."
-    'GRÜNSCHLEIM': (player) => (bigItemCount(player) ? { type: 'discardBigItem' } : { type: 'levelDelta', amount: 1 }),
+    'GRÜNSCHLEIM': (player, room) => (bigItemCount(player, room) ? { type: 'discardBigItem' } : { type: 'levelDelta', amount: 1 }),
     // Betrifft, WELCHE Karte(n) andere Spieler:innen von der eigenen Hand
     // nehmen (freie/zufällige Auswahl, in den Rohdaten nicht festgelegt) -
     // bleibt bewusst manuell:
@@ -229,8 +269,8 @@ module.exports = (ctx) => {
     // getragenem Großen Gegenstand ist discardBigItem (alle ablegen)
     // gleichwertig zu "einen auswählen" - erst ein Zwerg mit mehreren
     // braucht die echte Wahl, siehe 'discardSpecificItem' in server.js.
-    'VERLIERE 1 GROSSEN GEGENSTAND': (player) => {
-      const ids = equippedItemIds(player).filter((id) => isBigItem(card(id)));
+    'VERLIERE 1 GROSSEN GEGENSTAND': (player, room) => {
+      const ids = equippedItemIds(player).filter((id) => istGrosserGegenstand(room, id));
       if (ids.length <= 1) return { type: 'discardBigItem' };
       return {
         type: 'choice',
@@ -246,8 +286,8 @@ module.exports = (ctx) => {
     // Gegenstaende) ist "klein" definierbar - vorher musste diese Karte
     // manuell bleiben. Die Karte nennt keinen Ersatz-Malus, wer nichts
     // Kleines traegt, kommt also davon.
-    'VERLIERE 1 KLEINEN GEGENSTAND': (player) => {
-      const ids = equippedItemIds(player).filter((id) => !isBigItem(card(id)));
+    'VERLIERE 1 KLEINEN GEGENSTAND': (player, room) => {
+      const ids = equippedItemIds(player).filter((id) => !istGrosserGegenstand(room, id));
       if (!ids.length) return { type: 'noEffect' };
       if (ids.length === 1) return { type: 'discardSpecificItem', itemId: ids[0] };
       return {
@@ -261,13 +301,19 @@ module.exports = (ctx) => {
     },
     // Persistente Mali/Flags ohne laufenden Status-Tracker in diesem Server -
     // bleiben nach dem Einordnen als Fluch bewusst manuell/nur textlich:
-    'GESCHLECHTSUMWANDLUNG': () => null,
+    // "-5 auf deinen naechsten Kampf, weil du abgelenkt bist. ... Die
+    // Umwandlung ist jedoch permanent." Der -5-Teil laeuft weiter ueber
+    // LINGERING_CURSES, der Wechsel selbst hier:
+    'GESCHLECHTSUMWANDLUNG': () => ({ type: 'setGender', value: 'wechseln' }),
     'HUHN AUF DEINEM KOPF': () => null,
     'NARRENGOLD': () => null,
     'BLUTSCHLEIER': () => null,
     'RAUSCHPOCKEN': () => null,
     'TOURISTENFALLE': () => null,
     'MIESER SPIEGEL': () => null,
+    // ZWERGENBIER wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES) - kein Sofort-Effekt:
+    'ZWERGENBIER': () => null,
     'STINKER': () => null,
     // Braucht Datenpunkte/Mechaniken, die es hier nicht gibt (freie Handel-
     // Reihenfolge, wiederkehrender Rundenend-Hook, neue Kampfauslösung
@@ -303,7 +349,7 @@ module.exports = (ctx) => {
     'HUHN AUF DEINEM KOPF', 'NARRENGOLD', 'BLUTSCHLEIER', 'RAUSCHPOCKEN',
     'TOURISTENFALLE', 'EDELMUT', 'HUNGRIGER RUCKSACK', 'KLEINER FEHLER',
     'TEMPORÄRE ANMNESIE', 'DU STOLPERST ÜBER DEINE EIGENE TRUHE',
-    'ENTE DES SCHRECKENS', 'MIESER SPIEGEL', 'STINKER',
+    'ENTE DES SCHRECKENS', 'MIESER SPIEGEL', 'STINKER', 'ZWERGENBIER',
   ]);
 
   return { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE };

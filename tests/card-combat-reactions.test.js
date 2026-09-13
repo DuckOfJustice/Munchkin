@@ -9,6 +9,7 @@ const {
   ALL_CARDS, combatTotals, handlePlayCombatCard, handleResolveCardChoice,
   handleResolveCardTarget, handleAttemptFlee, handleAckConsequence, resolveCombatWin,
   newEquipped, handleEquipItem, equippedItemIds, COMBAT_REACTION_CARDS,
+  handleSetCombatReady, scheduleBotActionsIfNeeded,
 } = require('../server.js');
 
 function byName(name) {
@@ -276,10 +277,39 @@ function run() {
     assert.strictEqual(room.players[room.turnIndex].id, 'a', 'currentPlayer ist weiterhin A');
     done(room);
   }
+  {
+    // d) Regression (Bugreport "Ueberfalltrank/Netztroll... Spiel eingefroren"):
+    // wird der Kampf per UEBERFALLTRANK an einen BOT weitergegeben, muss der
+    // Bot-Scheduler den Kampf trotzdem weiterbringen. scheduleBotActionsIfNeeded
+    // ermittelte "wer ist dran" vor dem Fix ueber currentPlayer(room) (= die
+    // Person, die gerade AM ZUG ist - hier weiterhin A), nicht ueber
+    // room.combat.actorId (nach der Uebergabe: der Bot). Ist der Bot in
+    // Wirklichkeit dran, aber "dran" zeigt faelschlich auf den menschlichen
+    // Zuginhaber, wird nie ein Bot-Timer eingeplant - der Kampf haengt fuer
+    // immer (auch die "Schlimme Dinge" eines spaeter besiegten/verlorenen
+    // Monsters wie NETZ-TROLL kommen dadurch nie zustande).
+    const goblin = byName('LAHMER GOBLIN');
+    const trank = byName('ÜBERFALLTRANK');
+    const a = makePlayer('a', { hand: [trank.id] }); // am Zug (turnIndex 0)
+    const bot = makePlayer('bot', { isBot: true });
+    const room = combatRoom([a, bot], [goblin.id]);
+    handlePlayCombatCard(room, 'a', trank.id);
+    handleResolveCardTarget(room, 'a', 'bot');
+    assert.strictEqual(room.combat.actorId, 'bot', 'der Bot kaempft jetzt anstelle von A');
+    assert.strictEqual(room.players[room.turnIndex].id, 'a', 'der Zug bleibt trotzdem bei A');
+
+    // combatReadyRequired verlangt "Bereit" von allen anderen verbundenen,
+    // menschlichen Spieler:innen - hier: A (der Bot ist ja jetzt actorId).
+    handleSetCombatReady(room, 'a', true);
+    scheduleBotActionsIfNeeded(room);
+    assert.ok(room.botTimer, 'ein Bot-Timer muss eingeplant werden - der (neue) Kampf-Akteur ist ein Bot');
+    done(room);
+  }
 
   console.log('OK - Kampfreaktionen: Kumpel verdoppelt (dedupliziert abgelegt), Wanderndes Monster/' +
     'Illusion haengen Handmonster an bzw. tauschen, Hilf mir nimmt einen Gegenstand, ' +
-    'Ueberfalltrank gibt den Kampf weiter und holt die Pluenderphase zur urspruenglichen Person zurueck.');
+    'Ueberfalltrank gibt den Kampf weiter und holt die Pluenderphase zur urspruenglichen Person zurueck, ' +
+    'und uebergibt ihn an einen Bot, ohne dass der Bot-Scheduler haengen bleibt.');
 }
 
 run();

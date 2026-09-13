@@ -4,7 +4,7 @@
 // GUARANTEED_FLEE_MAX_MONSTER_LEVEL). Kuratiert statt per Regex - siehe die
 // Erklärung bei den anderen Kartentabellen.
 module.exports = (ctx) => {
-  const { card, hasRace, findPlayer, currentPlayer, isTopLevel } = ctx;
+  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds } = ctx;
 
   const TREASURE_POWER_OVERRIDES = {
     // --- Ziel-Auswahl (Spieler-Picker) ---
@@ -56,6 +56,14 @@ module.exports = (ctx) => {
     // zaehlt nicht mit. Aufruestweg: ein Zaehler, der erst beim Ausspielen
     // der Karte zurueckgesetzt wird, statt beim Zugwechsel.
     'VERSTÜMMLE DIE LEICHEN': (player, room) => (room.combatHappenedThisTurn ? { type: 'levelUp', amount: 1 } : null),
+    // "Spielen, wenn ein Rivale einen Kampf gewinnt und eine Stufe aufsteigt.
+    // Du tust das auch." - gleiche Bauform wie VERSTÜMMLE DIE LEICHEN, nur
+    // strenger: es muss ein FREMDER Sieg gewesen sein.
+    // ponytail: room.lastCombatWinnerId wird beim Zugwechsel geleert, das
+    // Fenster ist also der laufende Zug - dieselbe Vereinfachung wie oben.
+    'HEIMSE DIE LORBEEREN EIN': (player, room) => (
+      room.lastCombatWinnerId && room.lastCombatWinnerId !== player.id
+        ? { type: 'levelUp', amount: 1 } : null),
 
     // --- Bewusst manuell: hängt von Karten/Zustand ab, den dieser Server
     // nicht separat verfolgt (Mietling "im Spiel" ist keine eigene Zone;
@@ -72,6 +80,49 @@ module.exports = (ctx) => {
     'WÜNSCHELSTAB': () => ({ type: 'chooseDiscardedCard' }),
     'GEDENKTAFEL': (player, room) => (room.combat ? null : { type: 'chooseDiscardedCard' }),
 
+    // "Zu einem beliebigen Zeitpunkt waehrend des Kampfes spielen. Durchsuche
+    // den Schatzabwurfstapel ... und tausche diese Karte gegen den ersten
+    // tragbaren Gegenstand, den du findest."
+    // ponytail: die Kartenwahl (openCardCardChoice) zeigt beide Ablagestapel
+    // und filtert nicht auf "tragbar" - wer die Regel streng nimmt, nimmt den
+    // obersten Gegenstand des Schatzstapels. Ein eigener gefilterter Waehler
+    // waere der Aufruestweg.
+    'EINHEITSGRÖSSE': (player, room) => (room.combat ? { type: 'chooseDiscardedCard' } : null),
+    // "Du kannst ihn auch als Wunschring einsetzen (z.B. um einen Fluch zu
+    // beenden) und hinterher abwerfen." Die Flucht-Seite der Karte laeuft
+    // ueber GUARANTEED_FLEE_CARDS weiter unten.
+    'DER ANDERE RING': (player) => {
+      const flueche = player.activeCurses || [];
+      if (!flueche.length) return null;
+      if (flueche.length === 1) return { type: 'clearCurse', index: 0 };
+      return {
+        type: 'choice',
+        options: flueche.map((f, i) => ({
+          id: `fluch-${i}`, label: `"${f.name}" beenden`, action: { type: 'clearCurse', index: i },
+        })),
+      };
+    },
+    // "Jederzeit spielbar, ausser im Kampf. Nur einmal einsetzbar. Wirf
+    // Gegenstaende im Wert von mindestens 500 Goldstuecken ab und wirf einen
+    // Wuerfel." (Die Wuerfeltabelle steht bei 'dungeonCasino' in server.js.)
+    'DAS DUNGEON-CASINO': (player, room) => {
+      if (room.combat) return null;
+      const wert = equippedItemIds(player).concat(player.hand)
+        .reduce((sum, id) => sum + ((card(id) || {}).gold || 0), 0);
+      return wert >= 500 ? { type: 'dungeonCasino' } : null;
+    },
+    // "Jederzeit spielbar. Der Gegner, auf den du diese Karte spielst, kann
+    // fuer den Rest des Zugs keine Karten gegen dich spielen und muss alle
+    // bereits gespielten Karten auf seine Hand zuruecknehmen."
+    // ponytail: umgesetzt ist die Sperre. Das Zuruecknehmen bereits gespielter
+    // Karten bleibt manuell - dafuer muesste der Server pro Kampf
+    // mitschreiben, wer welche Karte gespielt hat (heute landen sie direkt im
+    // Ablagestapel bzw. in monsterModifier).
+    'EINSTWEILIGE VERFÜGUNG': () => ({
+      type: 'targetPlayer',
+      prompt: 'Wer darf für den Rest des Zugs keine Karten mehr gegen dich spielen?',
+      action: { type: 'kartenSperre' },
+    }),
     // "Beendet jeden Fluch. Jederzeit spielbar. Nur einmal einsetzbar." - mit
     // genau einem aktiven Fluch braucht es keinen Wahldialog dafür.
     'WUNSCHRING': (player) => {
@@ -88,6 +139,57 @@ module.exports = (ctx) => {
   };
 
   const COMBAT_POTION_OVERRIDES = {
+    // --- Clerical Errors ---------------------------------------------------
+    // "+5 fuer beide Seiten. Nur einmal einsetzbar." Der Text nennt keinen
+    // Spielzeitpunkt ("im Kampf"), deshalb greift COMBAT_PLAYABLE_RE nicht
+    // und die Karte braucht diesen kuratierten Eintrag.
+    'MONSTERFUTTER': () => ({ type: 'modifier', side: 'both', amount: 5 }),
+    // "Dieses feurige Gebraeu gewaehrt beiden Seiten +3, oder +6, wenn es zur
+    // Hilfe von Halblingen eingesetzt wird." Die Zahl steht hinter der Seite,
+    // parseCombatPotion findet sie deshalb nicht.
+    'SCHARFE PFEFFERSOSSE': (player, room) => ({
+      type: 'modifier', side: 'both',
+      amount: combatParticipants(room).some((p) => hasRace(p, 'HALBLING')) ? 6 : 3,
+    }),
+    // "Du hast die Goetter erfreut und sie zeigen dir ihre Anerkennung, indem
+    // sie alle Monster auf unschoene Weise toeten. Die Goetter nehmen sich
+    // allerdings auch den Schatz und die Stufen. Du kannst den Raum nicht
+    // pluendern." -> kein Schatz, keine Stufe, kein Pluendern.
+    'DEUS EX MASCHINENGEWEHR': () => ({ type: 'endCombatNoLevel' }),
+    // "Waehrend einem beliebigen Kampf spielen, nachdem jemand entschieden
+    // hat, im Kampf zu helfen. Dieser Munchkin wandert davon und kann nicht
+    // teilnehmen." Gleiche Wirkung wie der CYTILLESH-TRANK.
+    'TRANK DER APATHIE': (player, room) => (room.combat.helperId ? { type: 'removeHelper' } : null),
+    // "Wenn ein Spieler befugt ist, im Kampf um Hilfe zu bitten, spiele diese
+    // Karte, um ihn dazu zu zwingen, deine Hilfe zu akzeptieren. Du kannst
+    // keine Belohnung einfordern."
+    // ponytail: "befugt, um Hilfe zu bitten" heisst hier schlicht "es laeuft
+    // ein Kampf, in dem noch niemand hilft" - eine eigene Befugnis-Pruefung
+    // gibt es in diesem Server nicht. Der zweite Satz der Karte (eine frueher
+    // freiwillige Person bekommt ihre einmaligen Karten zurueck) bleibt
+    // manuell, dafuer muesste der Server pro Kampf mitschreiben, wer was
+    // gespielt hat.
+    'NIMM MICH! NIMM MICH!': (player, room) => (
+      !room.combat.helperId && room.combat.actorId !== player.id
+        ? { type: 'forceSelfAsHelper' } : null),
+    // "Waehle einen Gegenstand, den du verwendest, der nicht 'nur einmal
+    // einsetzbar' ist. Erhalte fuer einen einzigen Kampf 3-Mal den normalen
+    // Bonus dieses Gegenstands."
+    'HALBFINAL-SCHLAG': (player) => {
+      const ids = equippedItemIds(player).filter((id) => {
+        const c = card(id);
+        return c && (c.bonus || 0) > 0 && !/nur\s+einmal\s+einsetzbar/i.test(c.text || '');
+      });
+      if (!ids.length) return null;
+      return {
+        type: 'choice',
+        options: ids.map((id) => ({
+          id: `item-${id}`,
+          label: `"${card(id).name}" dreifach zaehlen lassen (+${(card(id).bonus || 0) * 3})`,
+          action: { type: 'tripleItemBonus', itemId: id },
+        })),
+      };
+    },
     // "Lege alle Monster des Kampfes ab. Du erhältst keinen Schatz, aber du
     // darfst den Raum durchsuchen."
     'FREUNDSCHAFTSTRANK': () => ({ type: 'endCombatNoLevel', thenLoot: true }),
@@ -161,6 +263,22 @@ module.exports = (ctx) => {
     // legt alle ihn angreifenden Monster ab und zieht sofort 2 Schaetze."
     // Feste 2 Schaetze - nicht der treasureCount der Monster.
     'MAHLZEIT!': () => ({ type: 'endCombatNoLevel', leavesTreasure: true, fixedTreasures: 2 }),
+    // "Waehrend beliebigem Kampf spielen. Ein Monster hat einen Tippfehler in
+    // seiner Beschreibung; daher wird es fuer alle Zwecke als Stufe 1
+    // behandelt. Seine Kraefte und sein Schatz bleiben unveraendert."
+    'TYPOGRAFISCHER FEHLER': () => ({ type: 'treatMonsterAsLevel1' }),
+    // "Waehrend beliebigem Kampf spielen. Die Monster sind mit ihrem eigenen
+    // Spiel beschaeftigt; sie werden nicht kaempfen und werden sie
+    // angegriffen, schmeissen sie die Tuer zu."
+    // ponytail: der zweite Absatz (das unterlegene Monster tauscht seine
+    // Schaetze gegen "Steige eine Stufe auf"-Karten, jede davon bringt zwei
+    // Schaetze) ist ein Handel ueber den ganzen Tisch und bleibt manuell -
+    // dafuer braeuchte es eine eigene Angebotsrunde.
+    'MONSTER SIND BESCHÄFTIGT': () => ({ type: 'endCombatNoLevel' }),
+    // "Fuer ein Monster im Kampf spielen. Wird der Schatz erbeutet, koennen
+    // die Spieler, die ihn erhalten, jede Schatzkarte ablegen, nachdem sie
+    // sich diese angesehen haben, und einmalig eine Ersatzkarte ziehen."
+    'UNFASSBAR REICH': () => ({ type: 'schatzUmtauschAnmelden' }),
   };
 
   // "Ablegen, wenn der Weglaufen-Wurf misslingt. Du entkommst automatisch."
