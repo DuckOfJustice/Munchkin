@@ -15,7 +15,7 @@ const {
   DOOR_OTHER_AS_CURSE, handleUseClassCombatDiscard, classCombatPowerInfo,
   UNDEAD_MONSTERS, handleSetCombatReady, combatReadyRequired, combatAllReady,
   refreshCombatReady, handleSetCombatModifier, handleFleeReroll, handleSellItems, endTurn,
-  handleResolveCardChoice, handleFleeEscape,
+  handleResolveCardChoice, handleFleeEscape, handlePlayCombatCard,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -172,6 +172,52 @@ function run() {
   // Gegenprobe an einem Monster ohne Sonderregel: beides zusammen.
   const normal = combatRoom('LAHMER GOBLIN', { level: 7, equipped: equipMithril });
   assert.strictEqual(combatTotals(normal.room).playerStrength, 10, 'normalerweise zählen Stufe UND Boni');
+
+  // GEMEINE GHOULE: "Gegen sie duerfen keine Gegenstaende oder andere Boni
+  // eingesetzt werden." combatTotals laesst jeden Munchkin-Bonus fallen - eine
+  // Karte dafuer waere also verbraucht, ohne zu wirken. Deshalb wird sie gar
+  // nicht erst angenommen, solange die spielende Person selbst im Kampf steht.
+  {
+    const trank = findCard('FLAMMENDER GIFTTRANK'); // "+3, egal welche Seite"
+    const g = combatRoom('GEMEINE GHOULE', { level: 7, hand: [trank.id] });
+    handlePlayCombatCard(g.room, 'p1', trank.id);
+    assert.ok(g.room.players[0].hand.includes(trank.id),
+      'gegen die Ghoule bleibt eine reine Munchkin-Bonuskarte auf der Hand');
+    assert.strictEqual(g.room.pendingCardAction, null, 'und es wird keine Seitenwahl geoeffnet');
+    assert.strictEqual(g.room.combat.actorModifier, 0);
+    done(g.room);
+  }
+  {
+    // Wer NICHT mitkaempft, darf das Monster weiterhin verstaerken - das wirkt.
+    const trank = findCard('FLAMMENDER GIFTTRANK');
+    const g = combatRoom('GEMEINE GHOULE', { level: 7 });
+    g.room.players[1].hand = [trank.id];
+    handlePlayCombatCard(g.room, 'p2', trank.id);
+    assert.ok(g.room.pendingCardAction, 'Zuschauer:innen duerfen die Karte einsetzen');
+    assert.deepStrictEqual(g.room.pendingCardAction.options.map((o) => o.id), ['monster'],
+      'aber nur noch fuer die Monster-Seite - die Munchkin-Seite waere wirkungslos');
+    done(g.room);
+  }
+  {
+    // Dieselbe Karte gegen ein normales Monster: unveraendert beide Seiten.
+    const trank = findCard('FLAMMENDER GIFTTRANK');
+    const n = combatRoom('LAHMER GOBLIN', { level: 7, hand: [trank.id] });
+    handlePlayCombatCard(n.room, 'p1', trank.id);
+    assert.ok(n.room.pendingCardAction, 'normal bleibt die Karte spielbar');
+    assert.deepStrictEqual(n.room.pendingCardAction.options.map((o) => o.id), ['munchkins', 'monster']);
+    done(n.room);
+  }
+  {
+    // Klassenkraft "Berserken" (+1 im Kampf pro abgeworfener Karte) ist gegen
+    // die Ghoule genauso wirkungslos - auch sie kostet dann keine Karte mehr.
+    const krieger = findCard('KRIEGER', 'class');
+    const futter = findCard('FLAMMENDER GIFTTRANK');
+    const g = combatRoom('GEMEINE GHOULE', { level: 7, classes: [krieger.id], hand: [futter.id] });
+    handleUseClassCombatDiscard(g.room, 'p1', futter.id);
+    assert.ok(g.room.players[0].hand.includes(futter.id), 'die abgeworfene Karte bleibt auf der Hand');
+    assert.strictEqual(g.room.combat.actorModifier, 0, 'und der Bonus wird nicht gutgeschrieben');
+    done(g.room);
+  }
 
   // PAVILLON: "Niemand kann dir helfen."
   const pavillon = combatRoom('PAVILLON', { level: 5 });

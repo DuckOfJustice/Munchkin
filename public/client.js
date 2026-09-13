@@ -748,7 +748,7 @@
     // willkürlich.
     const notes = [];
     if (c.monsterTraitBonus) notes.push(`Kartenbonus des Monsters gegen eure Rasse/Klasse: +${c.monsterTraitBonus}`);
-    if (c.ignoresBonuses) notes.push('Gegen dieses Monster zählt nur eure Charakterstufe - keine Gegenstände, keine Boni.');
+    if (c.ignoresBonuses) notes.push('Gegen dieses Monster zählt nur eure Charakterstufe - keine Gegenstände, keine Boni. Karten und Klassenkräfte, die nur der Munchkin-Seite helfen, nimmt der Server deshalb gar nicht erst an - sie bleiben auf der Hand.');
     if (c.ignoresLevel) notes.push('Gegen dieses Monster zählt eure Stufe nicht - nur eure Boni.');
     if (c.forbidsHelp) notes.push('Gegen dieses Monster darf niemand helfen.');
     if (c.doubleActor) notes.push('Doppelgänger: eure Kampfstärke zählt doppelt.');
@@ -1258,7 +1258,14 @@
     // "Kampf-Tränke": Schatzkarten mit einem +N-Bonus für eine wählbare
     // Seite, jederzeit während eines laufenden Kampfes spielbar.
     if (state.combat && !state.combat.mustFlee && !state.pendingCardAction && isCombatPotion(c)) {
-      const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
+      // GEMEINE GHOULE: fuer die Kaempfenden ist ein Munchkin-Bonus wirkungslos,
+      // der Server weist die Karte ab. Welche Seite eine Karte genau bedient,
+      // weiss nur er - deshalb hier nur ein Hinweis am Knopf statt einer
+      // zweiten Regeltabelle im Client.
+      const imKampf = state.combat.actorId === myInfo.playerId || state.combat.helperId === myInfo.playerId;
+      const zwecklos = state.combat.ignoresBonuses && imKampf;
+      const btn = mkBtn(zwecklos ? '⚔️ Im Kampf spielen (Munchkin-Boni wirken hier nicht)' : '⚔️ Im Kampf spielen',
+        () => socket.emit('playCombatCard', { cardId: id }));
       wrap.appendChild(btn);
     }
     // Türkarten mit eigener Kampfwirkung (MAHLZEIT!) - welche das sind, sagt

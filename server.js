@@ -1865,6 +1865,8 @@ const {
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
 } = passivesFactory({ card, hasRace, hasClass, equippedItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
+// Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
+const MONSTER_IGNORES_BONUSES_NAME = [...MONSTER_IGNORES_BONUSES][0];
 
 // --- Fluchschutz -----------------------------------------------------------
 // SCHUTZSANDALEN: siehe CURSE_PROOF_ITEMS in src/cards/passives.js.
@@ -2221,6 +2223,11 @@ function handleUseClassCombatDiscard(room, playerId, cardId) {
   if (playerId !== c.actorId && playerId !== c.helperId) return;
   const power = classDiscardPower(room, player);
   if (!power || power.remaining <= 0) return;
+  if (power.kind === 'combat' && combatHasMonster(room, MONSTER_IGNORES_BONUSES)) {
+    log(room, `"${power.label}" wuerde gegen "${MONSTER_IGNORES_BONUSES_NAME}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
+    touchRoom(room);
+    return;
+  }
   c.classDiscards = c.classDiscards || {};
   c.classDiscards[`${playerId}:${power.kind}`] = power.used + 1;
   removeFromHand(player, cardId);
@@ -2714,6 +2721,20 @@ function handleSetCombatModifier(room, playerId, who, value) {
 // Monster-Verstärker aus der eigenen Hand in den laufenden Kampf spielen -
 // z.B. um das Monster zu stärken (mehr Risiko, mehr Schatz) oder zu
 // schwächen und so der kämpfenden Person zu helfen.
+// GEMEINE GHOULE: "Gegen sie duerfen keine Gegenstaende oder andere Boni
+// eingesetzt werden - kaempfe nur mit deiner Charakterstufe." combatTotals
+// laesst deshalb jeden Munchkin-Bonus fallen (actorModifier eingeschlossen).
+// Eine Karte, die genau das bringen soll, waere also verbraucht, ohne zu
+// wirken - fuer wen sie wirkungslos ist, wird sie hier abgewiesen statt still
+// geschluckt. Wer NICHT mitkaempft, darf weiterhin das Monster verstaerken:
+// diese Seite zaehlt auch gegen die Ghoule.
+function munchkinBonusWirkungslos(room, player, spec) {
+  if (!spec || spec.type !== 'modifier') return false;
+  if (!combatHasMonster(room, MONSTER_IGNORES_BONUSES)) return false;
+  if (!combatParticipants(room).some((p) => p.id === player.id)) return false;
+  return spec.side === 'actor' || spec.side === 'either';
+}
+
 function handlePlayCombatCard(room, playerId, cardId) {
   if (!room.combat || room.combat.mustFlee) return;
   const player = findPlayer(room, playerId);
@@ -2750,6 +2771,11 @@ function handlePlayCombatCard(room, playerId, cardId) {
       touchRoom(room);
       return;
     }
+    if (munchkinBonusWirkungslos(room, player, doorSpec)) {
+      log(room, `"${c.name}" wuerde gegen "${MONSTER_IGNORES_BONUSES_NAME}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
+      touchRoom(room);
+      return;
+    }
     removeFromHand(player, cardId);
     discardCard(room, cardId);
     const desc = applyCombatPotionAction(room, player, doorSpec, c);
@@ -2767,15 +2793,23 @@ function handlePlayCombatCard(room, playerId, cardId) {
     touchRoom(room);
     return;
   }
+  if (munchkinBonusWirkungslos(room, player, spec)) {
+    log(room, `"${c.name}" wuerde gegen "${MONSTER_IGNORES_BONUSES_NAME}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
+    touchRoom(room);
+    return;
+  }
   removeFromHand(player, cardId);
   // Über discardCard(), weil Kampf-Tränke type 'treasure' sind: auf dem
   // Tür-Ablagestapel würden sie beim Neumischen (drawDoor) zu Türkarten.
   discardCard(room, cardId);
   if (spec.type === 'modifier' && spec.side === 'either') {
-    openCardChoice(room, player, c.name, [
+    // Gegen die GEMEINEN GHOULE faellt die Munchkin-Seite weg - sie waere
+    // wirkungslos (siehe munchkinBonusWirkungslos).
+    const seiten = [
       { id: 'munchkins', label: `+${spec.amount} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount: spec.amount } },
       { id: 'monster', label: `+${spec.amount} für das Monster`, action: { type: 'modifier', side: 'monster', amount: spec.amount } },
-    ]);
+    ].filter((o) => !(o.id === 'munchkins' && combatHasMonster(room, MONSTER_IGNORES_BONUSES)));
+    openCardChoice(room, player, c.name, seiten);
     room.pendingCardAction.sourceCardId = cardId;
     log(room, `${player.name} spielt "${c.name}" im Kampf - Seite nötig.`, [cardId]);
     touchRoom(room);
