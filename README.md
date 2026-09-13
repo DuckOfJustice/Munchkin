@@ -30,11 +30,13 @@ Munchkin hat hunderte Karten mit jeweils **individuellem** Regeltext (Sondermons
 - **Alternativen statt Kampf** bei Möchtegern-Vampir, Laufende Nase, Pit Bull, plus der erzwungene Preis des Zungendämons
 - **Rassen- und Klassenkräfte**: Super Munchkin / Halb-Blut ("alle Vorteile, keine Nachteile"), Zauberer (Verzauberung, Flugzauber), Krieger (Berserken), Priester (Vertreiben, Auferstehung), Dieb (In den Rücken fallen, Diebstahl), Halbling-Wiederholungswurf, Zwergen-Handlimit
 
-Die Liste oben gilt in dieser Tiefe für das **Basis-Set** - dort ist inzwischen praktisch jede Karte anklickbar. In den vier Erweiterungen sind die Stufen-/Ausrüstungs-Konsequenzen und die Kampf-Mathematik ebenso automatisiert, einzelne Sonderkräfte aber weiterhin nicht.
+Die Liste oben gilt in dieser Tiefe für das **Basis-Set** und für **Clerical Errors** - dort ist inzwischen praktisch jede Karte anklickbar (Stand 2026-09-13; die sechs bewusst manuell gebliebenen Karten stehen in `HANDOVER.md` §9.3). In den drei übrigen Erweiterungen sind die Stufen-/Ausrüstungs-Konsequenzen und die Kampf-Mathematik ebenso automatisiert, einzelne Sonderkräfte aber weiterhin nicht.
+
+Was dabei an Spielzustand dazugekommen ist und für alle Sets gilt: ein **Geschlecht** pro Person (alle starten männlich, geändert wird es nur durch Karten), **Kartenanhänge** am Gegenstand (Vergiftet/Gesegnet/Nützliche Griffe - sie bleiben beim Gegenstand, auch wenn er den Besitzer wechselt) und drei Rassen-/Klassenkarten, die in den Rohdaten fälschlich als normale Türkarte geführt werden (Ork, Gnom, Barde) und deshalb bis dahin gar nicht spielbar waren.
 
 **Manuell (mit Werkzeug-Unterstützung):** der genaue Effekt der übrigen, sehr individuellen Sonderkräfte aus den Erweiterungen, und Boni gegen Machtgruppen auf Monsterkarten. Der **Original-Kartentext wird immer angezeigt** (Klick auf eine Karte). Bei Konsequenzen, die nicht automatisch erkannt werden, gibt es ein generisches Werkzeug (±1 Stufe, Gegenstand ablegen, „ich bin gestorben"), mit dem ihr die Auswirkung wie am echten Tisch selbst nachvollzieht. Kampf-Boni/Mali aus Karteneffekten, die nicht automatisch erkannt werden, tragt ihr im Kampf-Panel als Zahl ein.
 
-Bewusst **außerhalb des Umfangs** bleiben Karten, die einen Datenpunkt bräuchten, den `data/cards.json` nicht enthält, oder eine Tischabsprache statt einer Regel sind: Amazone (Geschlecht wird nicht erfasst), die Dieb-Tauschoption des Anwalts (toter Code - das Monster greift Diebe ohnehin nicht an), das verdeckte Ziehen bei Schatzhort! (es gibt kein "offen/verdeckt" für Schätze) und 34 Basis-Karten, die in `data/cards.json` gar keinen Text haben. Die vollständige, kommentierte Liste steht im Code bei `CONSEQUENCE_OVERRIDES` und `DOOR_OTHER_AS_CURSE` (`src/cards/consequences.js`), `TREASURE_POWER_OVERRIDES` und `COMBAT_POTION_OVERRIDES` (`src/cards/treasures.js`) sowie in `HANDOVER.md` §8.
+Bewusst **außerhalb des Umfangs** bleiben Karten, die einen Datenpunkt bräuchten, den `data/cards.json` nicht enthält, oder eine Tischabsprache statt einer Regel sind: die Dieb-Tauschoption des Anwalts (toter Code - das Monster greift Diebe ohnehin nicht an), das verdeckte Ziehen bei Schatzhort! (es gibt kein "offen/verdeckt" für Schätze) und 34 Basis-Karten, die in `data/cards.json` gar keinen Text haben. Die vollständige, kommentierte Liste steht im Code bei `CONSEQUENCE_OVERRIDES` und `DOOR_OTHER_AS_CURSE` (`src/cards/consequences.js`), `TREASURE_POWER_OVERRIDES` und `COMBAT_POTION_OVERRIDES` (`src/cards/treasures.js`) sowie in `HANDOVER.md` §8.
 
 ## Warum keine Kartenbilder?
 
@@ -73,7 +75,7 @@ Soll das Spiel wie die anderen über `games.oualid.de/munchkin/` erreichbar sein
 Munchkin/
 ├── server.js            Spiel-Server (Node.js, Express + Socket.IO)
 ├── src/cards/            Kartentabellen (Große Gegenstände, Konsequenzen, Schätze, Dauerwirkungen, Reaktionen)
-├── tools/                coverage-scan.js (welche Karte hat keinen Ausspielweg?), smoke-run.js (Partie gegen den laufenden Server)
+├── tools/                coverage-scan.js (welche Karte hat keinen Ausspielweg? `node tools/coverage-scan.js <set>`), smoke-run.js (Partie gegen den laufenden Server)
 ├── data/cards.json       504 Karten (Name, Text, Stufe, Bonus, Goldwert, Körperteil, ...)
 ├── package.json
 ├── Dockerfile
@@ -107,7 +109,7 @@ Bei jedem Push nach GitHub läuft das automatisch über eine GitHub Action (`.gi
 
 ## Bekannte Einschränkungen
 
-- Einzelne Karten bleiben absichtlich manuell (Amazone, Schatzhort!-Ziehen, Anwalt-Tauschoption) - siehe oben und `HANDOVER.md` §8.
+- Einzelne Karten bleiben absichtlich manuell (Schatzhort!-Ziehen, Anwalt-Tauschoption, sechs Karten aus Clerical Errors) - siehe oben, `HANDOVER.md` §8 und §9.3.
 - Bots sind bewusst simpel gehalten (kein Ausrüsten, kein Kämpfen aus der Hand, keine Hilfe) – gedacht zum Testen des Ablaufs, nicht als vollwertige Mitspieler.
 - Pathfinder-Set: 145 Karten ohne numerische Werte (Stufe/Bonus/Goldwert) in den Original-Spieldaten gefunden – falls das im Spiel auffällt, gerne Bescheid geben, dann schaue ich nach einer anderen Datenquelle für dieses Set.
 

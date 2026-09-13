@@ -931,3 +931,63 @@ einer `complete`-Zeile sind fertig und dürfen nicht erneut vergeben werden.
 
 Nach Task 13 gehört noch eine Gesamtdurchsicht des ganzen Zweigs dazu; die ist
 in dieser Runde noch nicht gelaufen.
+
+---
+
+## 9. Clerical Errors (Runde vom 2026-09-13) - **abgeschlossen**
+
+Das zweite Set ist auf dem Stand des Basis-Sets. Plan und Audit:
+`docs/superpowers/plans/2026-09-13-clerical-errors-kartenkraefte.md`.
+
+Ausgangslage laut Audit: von 102 Karten hatten 40 keinen Weg durch die Engine.
+Heute meldet `node tools/coverage-scan.js clericalerrors` noch sechs Zeilen -
+alle bewusst manuell, siehe 9.3.
+
+### 9.1 Was dazugekommen ist
+
+| Bereich | Inhalt |
+|---|---|
+| Rassen/Klassen | `TRAIT_DOOR_CARDS` - ORK, GNOM und BARDE stehen in den Rohdaten als `door_other` und waren deshalb **gar nicht spielbar**. Dazu Ork-Extrastufe, Gnom-G/N-Bonus, Gnom-als-Halbling, Gnom-Autoflucht vor „Nase"-Monstern, Bardenglück. |
+| Monsterboni | `MONSTER_TRAIT_BONUS` kann jetzt negative Boni, mehrere Boni je Karte (Array) und Bedingungen jenseits von Rasse/Klasse (`wennErfuellt`). 16 neue Zeilen. |
+| Geschlecht | `player.gender` (`'m'`/`'w'`/`null`). Alle starten männlich, **niemand wählt etwas aus** - so mit dem Nutzer abgesprochen. Geändert wird es nur durch GESCHLECHTSUMWANDLUNG und STRICHMÄNNCHEN. `istGeschlecht()` ist die einzige Abfragestelle; die FREUD'SCHEN SLIPPER heben dort alle Strafen auf. |
+| Kartenanhänge | `room.itemAttachments` (Gegenstands-Id → Karten-Ids). Am **Raum**, nicht an der Person: „Diese Karte bleibt beim Gegenstand, egal ob er verloren, gestohlen oder abgelegt wird". Trägt VERGIFTET, GESEGNET und NÜTZLICHE GRIFFE. Letztere machen aus einem Großen Gegenstand einen kleinen - dafür gibt es neben `isBigItem(card)` jetzt `istGrosserGegenstand(room, id)`. |
+| Verstärker im Kampf | `combat.enhancerIds`. Zwei Klauseln wirken über den Moment des Ausspielens hinaus: „… aus der Hölle." (+5 gegen Priester) und UNTOT (Monster gilt als untot). `combatHasUndead(room)` beantwortet „untot?" an einer Stelle für Priester-„Vertreiben" und die GHOULPEITSCHE. |
+| Fluch-Abwehr | `fluchZiel(room, ziel, karte)` - **beide** Fluchwege (gezogen und von jemandem gespielt) laufen hindurch. PRÄCHTIGER HUT wirft den Fluch per Würfelrunde weiter, DAS MANCHMAL VERLÄSSLICHE AMULETT blockt ihn bei 4-6. |
+| Monsterstufen | `combat.levelOverrides` - TYPOGRAFISCHER FEHLER (Stufe 1) und DER GANZ NORMALE HASE (bei einer 6 Stufe 15). |
+| Kartensperre | `room.kartenSperren` für EINSTWEILIGE VERFÜGUNG, geleert beim Zugwechsel. |
+
+### 9.2 Neue Primitive in `applyPrimitiveAction`
+
+`queuedDiscardOwn` (N eigene Karten/Gegenstände selbst aussuchen),
+`queuedDiscardEachOther`, `levelUpLowerPlayersAndLose`, `setGender`,
+`packratteGeschenk` / `nimmEinenVonZweien`, `dungeonCasino`, `schatzTauschen`,
+`kartenSperre` (Ziel-Aktion) sowie im Kampf `treatMonsterAsLevel1`,
+`tripleItemBonus`, `forceSelfAsHelper`, `schatzUmtauschAnmelden`.
+
+### 9.3 Bewusst manuell geblieben (sechs Karten)
+
+- **GUMMI-GOLEM** (Schlimme Dinge): „Du musst in jedem Kampf deine Hilfe
+  anbieten, darfst keinen Schatz annehmen, bis du einen verlierst" - eine
+  Dauerpflicht über viele Züge ohne Tracker.
+- **DU STOLPERST ÜBER DEINE EIGENE TRUHE**, **TEMPORÄRE ANMNESIE**,
+  **KLEINER FEHLER**, **HUNGRIGER RUCKSACK**, **TOURISTENFALLE** - dieselben
+  fünf, die schon im Basis-Set-Audit (§8.6) zurückgestellt wurden: freie
+  Handelsreihenfolge, wiederkehrender Rundenend-Hook, ein neuer Kampf mitten
+  in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-Status.
+
+Halb umgesetzt, jeweils mit `// ponytail:` am Code vermerkt: der Rücknahme-Teil
+der EINSTWEILIGEN VERFÜGUNG, der Schatz-gegen-Stufenkarten-Handel bei MONSTER
+SIND BESCHÄFTIGT, das Barden-„Verzaubern", die Ork-Fluchwahl und die
+Kampfbeginn-Frage der ZAUBERCOUCH (sie ist hier immer in Benutzung).
+
+### 9.4 Verifikation
+
+`npm test` → 24/24 (fünf neue Dateien `tests/card-clerical-*.test.js`).
+`node tools/coverage-scan.js base` → weiterhin 0 Lücken.
+`node tools/smoke-run.js` mit 40 Zugwechseln → ohne Hänger, keine Server-Fehler.
+
+Zwei bestehende Tests hielten den alten Stand fest und wurden bewusst
+nachgezogen: die Abdeckungs-Schranke in `auto-consequence` (15 → 10) und die
+„bewusst manuell"-Zeile für GESCHLECHTSUMWANDLUNG in `card-curses`. Dazu die
+Zusicherung in `card-abilities`, dass jede Spezialausrüstung einen Kampfbonus
+hat - FALSCHE OHREN und ZAUBERCOUCH verleihen stattdessen eine Rasse/Klasse.

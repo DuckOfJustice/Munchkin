@@ -107,7 +107,7 @@ Bereits bewusst manuell: `KLEINER FEHLER`, `HUNGRIGER RUCKSACK`,
 
 ## Tasks
 
-- [ ] **Task 1 - Neue Rasse/Klasse spielbar:** `ORK`, `GNOM`, `BARDE` über eine
+- [x] **Task 1 - Neue Rasse/Klasse spielbar:** `ORK`, `GNOM`, `BARDE` über eine
       Tabelle `TRAIT_DOOR_CARDS` in `src/cards/passives.js` als Rasse bzw.
       Klasse zulassen; Liste über `publicState` an den Client (kein zweiter
       Namensspiegel). Billige Kräfte: Ork "Sieg allein mit >10 → +1 Stufe",
@@ -115,30 +115,36 @@ Bereits bewusst manuell: `KLEINER FEHLER`, `HUNGRIGER RUCKSACK`,
       Halbling", Gnom "Monster mit *Nase* im Namen greifen nicht an",
       Barde "Bardenglück: 1 Extraschatz nach eigenem Sieg". Ork-Fluchwahl und
       Barden-Verzaubern bleiben vorerst manuell (`// ponytail:`).
-- [ ] **Task 2 - Monsterboni und Dauerwirkungen (B):** alle Tabellenzeilen aus
+- [x] **Task 2 - Monsterboni und Dauerwirkungen (B):** alle Tabellenzeilen aus
       Abschnitt B, inklusive negativer Boni (`DRECKIGE GÄNSE`, `GIFTEFEU`) und
       der beiden Sonderformen `RÜSSELKÄFER` (keine Klasse) und `GOTHYANKI`
       (Obergrenzen-Karten).
-- [ ] **Task 3 - Schlimme Dinge (C):** `RÜSSELKÄFER`, `TEQUILA-LIEDCHEN`,
+- [x] **Task 3 - Schlimme Dinge (C):** `RÜSSELKÄFER`, `TEQUILA-LIEDCHEN`,
       `DOPPELGANGSTER`, `KAMIKAZE-KOBOLDE`, `GOTHYANKI`, `BOBBELKOPF`.
-- [ ] **Task 4 - Kampfkarten und Flüche (D + E billig):** `ZWERGENBIER`,
+- [x] **Task 4 - Kampfkarten und Flüche (D + E billig):** `ZWERGENBIER`,
       `MONSTERFUTTER`, `SCHARFE PFEFFERSOSSE`, `DEUS EX MASCHINENGEWEHR`,
       `TRANK DER APATHIE`, `EINHEITSGRÖSSE`, `GHOULPEITSCHE`,
       `AM FUSS BEFESTIGTER STREITKOLBEN`, `DER ANDERE RING`,
       `TYPOGRAFISCHER FEHLER`.
-- [ ] **Task 5 - Gegenstands-Anhänge:** `VERGIFTET`, `GESEGNET`,
+- [x] **Task 5 - Gegenstands-Anhänge:** `VERGIFTET`, `GESEGNET`,
       `NÜTZLICHE GRIFFE`, `HALBFINAL-SCHLAG`, `ZWEIHÄNDIGES SCHWERT`,
       `STICH-O-MAT`, `GNOMEX-ANZUG`, `SCHRECKLICHE SOCKEN`.
-- [ ] **Task 6 - Reaktionsfenster:** `KATZENINTERVENTION`,
+- [x] **Task 6 - Reaktionsfenster:** `KATZENINTERVENTION`,
       `DAS MANCHMAL VERLÄSSLICHE AMULETT`, `PRÄCHTIGER HUT`,
       `HEIMSE DIE LORBEEREN EIN`, `NIMM MICH! NIMM MICH!`.
-- [ ] **Task 7 - Abnahme:** `node tools/coverage-scan.js clericalerrors` ohne
+- [x] **Task 7 - Abnahme:** `node tools/coverage-scan.js clericalerrors` ohne
       neue Lücken außer den bewusst manuellen; README/HANDOVER nachziehen.
 
-## Bewusst NICHT umgesetzt
+## Ergebnis (2026-09-13)
 
-Das Geschlechtsmerkmal (`STRICHMÄNNCHEN`, `CHAUVINISTENSCHWEIN`,
-`TANTE PALADIN` "+5 gegen männliche", `FREUD'SCHEN SLIPPER`) gibt es in
-`data/cards.json` nicht und es hängt an keiner anderen Mechanik. Diese vier
-Karten bleiben textlich/manuell, bis jemand ein Geschlechtsfeld pro Person
-einführt.
+Alle sieben Tasks sind umgesetzt, `npm test` steht bei 24/24 und der
+Abdeckungs-Scan meldet für Clerical Errors noch sechs bewusst manuelle Karten
+(siehe `HANDOVER.md` §9.3). Das Basis-Set blieb bei 0 Lücken.
+
+**Zur ursprünglich offenen Frage Geschlecht:** in Absprache mit dem Nutzer
+eingeführt - `player.gender`, alle starten männlich, niemand wählt etwas aus.
+Damit laufen `STRICHMÄNNCHEN`, `CHAUVINISTENSCHWEIN`, `TANTE PALADIN` und die
+`FREUD'SCHEN SLIPPER` automatisch. Ebenfalls mit dem Nutzer geklärt: die drei
+Großen Gegenstände des Sets (ZAUBERCOUCH, ZWEIHÄNDIGES SCHWERT, GROSSE FIESE
+LEIER), die Wirkung der SPASSBREMSE (ein Gnom, der sie anlegt, stirbt) und
+dass der SIEBENJÄHRIGE LICH das einzige untote Monster des Sets ist.

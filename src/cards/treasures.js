@@ -102,6 +102,27 @@ module.exports = (ctx) => {
         })),
       };
     },
+    // "Jederzeit spielbar, ausser im Kampf. Nur einmal einsetzbar. Wirf
+    // Gegenstaende im Wert von mindestens 500 Goldstuecken ab und wirf einen
+    // Wuerfel." (Die Wuerfeltabelle steht bei 'dungeonCasino' in server.js.)
+    'DAS DUNGEON-CASINO': (player, room) => {
+      if (room.combat) return null;
+      const wert = equippedItemIds(player).concat(player.hand)
+        .reduce((sum, id) => sum + ((card(id) || {}).gold || 0), 0);
+      return wert >= 500 ? { type: 'dungeonCasino' } : null;
+    },
+    // "Jederzeit spielbar. Der Gegner, auf den du diese Karte spielst, kann
+    // fuer den Rest des Zugs keine Karten gegen dich spielen und muss alle
+    // bereits gespielten Karten auf seine Hand zuruecknehmen."
+    // ponytail: umgesetzt ist die Sperre. Das Zuruecknehmen bereits gespielter
+    // Karten bleibt manuell - dafuer muesste der Server pro Kampf
+    // mitschreiben, wer welche Karte gespielt hat (heute landen sie direkt im
+    // Ablagestapel bzw. in monsterModifier).
+    'EINSTWEILIGE VERFÜGUNG': () => ({
+      type: 'targetPlayer',
+      prompt: 'Wer darf für den Rest des Zugs keine Karten mehr gegen dich spielen?',
+      action: { type: 'kartenSperre' },
+    }),
     // "Beendet jeden Fluch. Jederzeit spielbar. Nur einmal einsetzbar." - mit
     // genau einem aktiven Fluch braucht es keinen Wahldialog dafür.
     'WUNSCHRING': (player) => {
@@ -246,6 +267,18 @@ module.exports = (ctx) => {
     // seiner Beschreibung; daher wird es fuer alle Zwecke als Stufe 1
     // behandelt. Seine Kraefte und sein Schatz bleiben unveraendert."
     'TYPOGRAFISCHER FEHLER': () => ({ type: 'treatMonsterAsLevel1' }),
+    // "Waehrend beliebigem Kampf spielen. Die Monster sind mit ihrem eigenen
+    // Spiel beschaeftigt; sie werden nicht kaempfen und werden sie
+    // angegriffen, schmeissen sie die Tuer zu."
+    // ponytail: der zweite Absatz (das unterlegene Monster tauscht seine
+    // Schaetze gegen "Steige eine Stufe auf"-Karten, jede davon bringt zwei
+    // Schaetze) ist ein Handel ueber den ganzen Tisch und bleibt manuell -
+    // dafuer braeuchte es eine eigene Angebotsrunde.
+    'MONSTER SIND BESCHÄFTIGT': () => ({ type: 'endCombatNoLevel' }),
+    // "Fuer ein Monster im Kampf spielen. Wird der Schatz erbeutet, koennen
+    // die Spieler, die ihn erhalten, jede Schatzkarte ablegen, nachdem sie
+    // sich diese angesehen haben, und einmalig eine Ersatzkarte ziehen."
+    'UNFASSBAR REICH': () => ({ type: 'schatzUmtauschAnmelden' }),
   };
 
   // "Ablegen, wenn der Weglaufen-Wurf misslingt. Du entkommst automatisch."

@@ -97,6 +97,14 @@ module.exports = (ctx) => {
       label: 'Mit einem Stab ablenken (automatische Flucht)',
       action: { type: 'dropStaffEscape' },
     },
+    // "Wenn du keine Gegenstaende im Spiel hast, erhaeltst du einen von der
+    // Packratte. Ziehe zwei offene Schaetze und waehle einen aus. Du kannst
+    // stattdessen auch kaempfen, wenn du moechtest."
+    'PACKRATTE': {
+      wennErfuellt: (p) => equippedItemIds(p).length === 0,
+      label: 'Geschenk annehmen (2 offene Schaetze, einen behalten)',
+      action: { type: 'packratteGeschenk' },
+    },
   };
 
   // --- Monster, die VOR dem Kampf einen Gegenstand kosten --------------------
@@ -138,6 +146,24 @@ module.exports = (ctx) => {
       const c = card(id);
       return c && /^[GN]/i.test(c.name) && !/nur\s+einmal\s+einsetzbar/i.test(c.text || '');
     }).length,
+  };
+
+  // --- Gegenstaende, die eine Rasse/Klasse verleihen --------------------------
+  // FALSCHE OHREN: "Erlaubt dem Traeger, elfen-exklusive Gegenstaende zu
+  //   nutzen. Monster reagieren auch, als waere der Traeger ein Elf. Gibt
+  //   keine sonstigen Elfen-Faehigkeiten." -> nurMonster: zaehlt fuer
+  //   Monsterboni und Anlege-Beschraenkungen, aber nicht fuer +1 Weglaufen
+  //   oder die Helfer-Stufe des Elfen.
+  // ZAUBERCOUCH: "Wenn du dich auf dieser Couch ausruhst, wirst du IN ALLEN
+  //   BELANGEN zusaetzlich zu deiner (oder deinen) urspruenglichen Klasse(n)
+  //   als Zauberer angesehen."
+  // ponytail: die Couch ist hier immer "in Benutzung" - die Karte laesst die
+  // Wahl zu Kampfbeginn ("Du kannst entscheiden, ob du sie verwenden willst"),
+  // dafuer braeuchte es eine Ja/Nein-Frage in jedem Kampfstart. Der Preis
+  // dafuer (-1 auf Weglaufen) gilt deshalb ebenfalls dauerhaft.
+  const ITEM_GRANTS_TRAIT = {
+    'FALSCHE OHREN': { race: 'ELF', nurMonster: true },
+    'ZAUBERCOUCH': { class: 'ZAUBERER' },
   };
 
   // --- Kartenanhaenge --------------------------------------------------------
@@ -277,6 +303,7 @@ module.exports = (ctx) => {
     'TUBA DER VERZAUBERUNG': 3,                  // "... und gibt dir +3 auf Weglaufen."
     // "Verleiht dir einen kranken Tritt, aber du hast jetzt -2 auf Weglaufen."
     'AM FUSS BEFESTIGTER STREITKOLBEN': -2,
+    'ZAUBERCOUCH': -1, // "Wenn du es tust, erhaeltst du -1 auf Weglaufen."
   };
   const FLEE_MONSTER_MOD = {
     'SCHNECKEN AUF SPEED': -2, // "Du hast -2 auf Weglaufen."
@@ -390,6 +417,9 @@ module.exports = (ctx) => {
     // slotKind in den Rohdaten - ohne Platz waere sie nicht anlegbar. "Am Fuss
     // befestigt" ist kein Schuhwerk-Platz, also Spezialausruestung.
     'AM FUSS BEFESTIGTER STREITKOLBEN': { slot: 'special' },
+    // Beide haben in den Rohdaten keinen Platz, gehoeren aber angelegt:
+    'FALSCHE OHREN': { slot: 'special' },
+    'ZAUBERCOUCH': { slot: 'special' },
     // Zwei Karten, die ausdruecklich ZUSAETZLICH zu einem belegten Platz
     // getragen werden. Ein zweiter Gegenstand im selben Slot ginge nicht (die
     // Plaetze sind je ein festes Feld), der Sammelplatz "Spezialausruestung"
@@ -420,6 +450,6 @@ module.exports = (ctx) => {
     COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
     TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
     GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
-    BACKSTAB_ITEMS,
+    BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT,
   };
 };

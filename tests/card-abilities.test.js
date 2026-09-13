@@ -18,7 +18,7 @@ const {
   MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
   combatTotals, handLimit, handlePlayCombatCard,
   handleEquipItem, handleUnequipItem, equippedItemIds, newEquipped,
-  SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
+  SPECIAL_SLOT_ITEMS, ITEM_GRANTS_TRAIT, SPECIAL_SLOTS,
   handleEnchantMonster, enchantInfo, handleFleeEscape, handleFleeReroll,
   DOOR_COMBAT_CARDS, POST_FLEE_ESCAPE_CARDS,
 } = require('../server.js');
@@ -503,11 +503,14 @@ function run() {
   if (sandwichJa.cleanupTimer) clearTimeout(sandwichJa.cleanupTimer);
   assert.deepStrictEqual(sandwichJa.players[0].equipped.special, [sandwich.id], 'Halblinge dürfen das Sandwich anlegen');
 
-  // Jede Karte in der Tabelle muss es auch wirklich geben und einen Bonus
-  // haben - sonst wäre der Platz sinnlos.
+  // Jede Karte in der Tabelle muss es auch wirklich geben und etwas bringen -
+  // entweder einen Kampfbonus oder (seit Clerical Errors) eine verliehene
+  // Rasse/Klasse wie bei FALSCHE OHREN und ZAUBERCOUCH. Ohne beides waere der
+  // Platz sinnlos.
   Object.keys(SPECIAL_SLOT_ITEMS).forEach((name) => {
     const c = findCard(name);
-    assert.ok(typeof c.bonus === 'number' && c.bonus !== 0, `${name}: Spezialausrüstung ohne Kampfbonus`);
+    const bringtWas = (typeof c.bonus === 'number' && c.bonus !== 0) || !!ITEM_GRANTS_TRAIT[name];
+    assert.ok(bringtWas, `${name}: Spezialausrüstung ohne Kampfbonus und ohne verliehene Rasse/Klasse`);
     assert.ok(SPECIAL_SLOTS[SPECIAL_SLOT_ITEMS[name].slot], `${name}: verweist auf einen unbekannten Platz`);
   });
 

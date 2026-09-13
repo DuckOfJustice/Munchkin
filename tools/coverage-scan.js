@@ -17,6 +17,9 @@ const HANDGEBAUT = new Set([
   'SCHUMMELN!',                  // handlePlayCheat (M5)
   'KNIESCHÜTZER DER VERLOCKUNG', // handleRequestHelp/checkWin (M5/M6)
   'SUPER MUNCHKIN', 'HALB-BLUT', // traitImmun in monsterTraitBonusSum
+  // Clerical Errors: wirken ohne Ausspielweg, sobald sie getragen werden -
+  // fluchZiel() in server.js fragt sie beim Eintreffen jedes Fluchs ab.
+  'DAS MANCHMAL VERLÄSSLICHE AMULETT', 'PRÄCHTIGER HUT',
 ]);
 
 const abgedeckt = (c) => HANDGEBAUT.has(c.name)
@@ -33,7 +36,13 @@ const abgedeckt = (c) => HANDGEBAUT.has(c.name)
   || S.POST_FLEE_ESCAPE_CARDS.has(c.name)
   || S.isMonsterEnhancerCard(c)
   || S.isInstantLevelUpCard(c)
-  || S.isCombatPotionCard(c);
+  || S.isCombatPotionCard(c)
+  // Clerical Errors: Rassen/Klassen in "door_other" (ORK/GNOM/BARDE),
+  // Kartenanhaenge (VERGIFTET/GESEGNET/NÜTZLICHE GRIFFE) und Gegenstaende,
+  // die eine Rasse/Klasse verleihen (FALSCHE OHREN/ZAUBERCOUCH).
+  || S.TRAIT_DOOR_CARDS[c.name] !== undefined
+  || S.ATTACHMENT_CARDS[c.name] !== undefined
+  || S.ITEM_GRANTS_TRAIT[c.name] !== undefined;
 
 const zeile = (c) => ` - ${c.name}  ::  ${String(c.text || c.badstuff || '').replace(/<br>/g, ' | ').slice(0, 160)}`;
 
