@@ -6,7 +6,8 @@
 // Kartentabelle einfuehrt, traegt sie unten in abgedeckt() nach - sonst
 // meldet der Scan sie faelschlich als Luecke.
 const S = require('../server.js');
-const base = S.ALL_CARDS.filter((c) => c.set === 'base');
+const SET = process.argv[2] || 'base';
+const base = S.ALL_CARDS.filter((c) => c.set === SET);
 const p = { id: 'p1', name: 'T', level: 5, hand: [], races: [], classes: [], powerGroups: [],
   equipped: S.newEquipped(), attachments: { cheatedItemId: null }, activeCurses: [] };
 const room = { doorDiscard: [], treasureDiscard: [], players: [p], logs: [] };
