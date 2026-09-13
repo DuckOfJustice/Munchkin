@@ -360,8 +360,20 @@ function hellknightArmorBonus(player) {
   return (player.equipped.armor || player.equipped.head) ? 0 : 5;
 }
 
+// Rassenbonus, der sich aus der getragenen Ausruestung ergibt (siehe
+// RACE_ITEM_BONUS in src/cards/passives.js - heute nur der Gnom). Zaehlt wie
+// ein Gegenstandsbonus: MIESER SPIEGEL und GEMEINE GHOULE unterdruecken ihn
+// entsprechend, siehe combatTotals.
+function raceItemBonusSum(player) {
+  return player.races.reduce((sum, id) => {
+    const c = card(id);
+    const fn = c && RACE_ITEM_BONUS[c.name.toUpperCase()];
+    return sum + (fn ? fn(player) : 0);
+  }, 0);
+}
+
 function baseStrength(player) {
-  return player.level + equippedBonusSum(player) + hellknightArmorBonus(player);
+  return player.level + equippedBonusSum(player) + raceItemBonusSum(player) + hellknightArmorBonus(player);
 }
 
 // ITEM_CONDITIONAL_BONUS: siehe src/cards/passives.js (dort zusammen mit den
@@ -452,6 +464,10 @@ function publicState(room) {
     // normale Tuerkarte) - damit der Client den "Fluch spielen"-Knopf zeigen
     // kann, ohne eine eigene Namensliste zu pflegen.
     curseCards: [...DOOR_OTHER_AS_CURSE],
+    // ORK/GNOM/BARDE: Rassen- und Klassenkarten, die in den Rohdaten als
+    // "door_other" gefuehrt werden - damit der Client den "Spielen"-Knopf
+    // zeigt, ohne eine eigene Namensliste zu pflegen.
+    traitDoorCards: TRAIT_DOOR_CARDS,
     turnIndex: room.turnIndex,
     turnPlayerId: room.players[room.turnIndex] ? room.players[room.turnIndex].id : null,
     turnPhase: room.turnPhase,
@@ -1152,7 +1168,10 @@ function applyPrimitiveAction(room, player, action) {
       player[arrField] = [];
       if (player[capField]) { discardCard(room, player[capField]); player[capField] = null; }
       const matches = (action.category === 'class' || action.category === 'race')
+        // TRAIT_DOOR_CARDS: ORK/GNOM/BARDE stehen als "door_other" in den
+        // Rohdaten, zaehlen hier aber als Rassen- bzw. Klassenkarte.
         ? (cc) => cc.category === action.category
+          || TRAIT_DOOR_CARDS[(cc.name || '').toUpperCase()] === action.category
         : (cc) => cc.category === 'door_other' && POWER_GROUP_NAMES.has((cc.name || '').toUpperCase());
       for (let i = room.doorDiscard.length - 1; i >= 0; i--) {
         const cc = card(room.doorDiscard[i]);
@@ -1921,10 +1940,16 @@ const {
   CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
   ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
+  TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
 } = passivesFactory({ card, hasRace, hasClass, equippedItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
-const MONSTER_IGNORES_BONUSES_NAME = [...MONSTER_IGNORES_BONUSES][0];
+// Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
+// zaehlen (GEMEINE GHOULE, GUMMI-GOLEM).
+function monsterIgnoringBonusesName(room) {
+  const id = room.combat && room.combat.monsterIds.find((i) => { const c = card(i); return c && MONSTER_IGNORES_BONUSES.has(c.name); });
+  return id ? card(id).name : [...MONSTER_IGNORES_BONUSES][0];
+}
 
 // --- Fluchschutz -----------------------------------------------------------
 // SCHUTZSANDALEN: siehe CURSE_PROOF_ITEMS in src/cards/passives.js.
@@ -2015,6 +2040,8 @@ function monsterPassOption(cardId, player) {
   const rule = c && MONSTER_PASS_OPTION[c.name];
   if (!rule) return null;
   if ((rule.forcedFightRaces || []).some((r) => hasRace(player, r))) return null;
+  // nurRassen: BOBBELKOPF duerfen nur Elfen einfach abwerfen.
+  if (rule.nurRassen && !rule.nurRassen.some((r) => hasRace(player, r))) return null;
   return rule;
 }
 
@@ -2053,15 +2080,31 @@ function traitImmun(player, welches) {
   return false;
 }
 
+// Welche Rasse ein Monster in dieser Person SIEHT - siehe MONSTER_SEES_AS_RACE
+// (GNOM: "Monster behandeln dich wie einen Halbling"). Nur fuer Monsterboni,
+// nicht fuer die Faehigkeiten der Rasse selbst.
+function monsterSeesRace(player, race) {
+  if (hasRace(player, race)) return true;
+  return player.races.some((id) => {
+    const c = card(id);
+    return !!c && MONSTER_SEES_AS_RACE[c.name.toUpperCase()] === race.toUpperCase();
+  });
+}
+
 function monsterTraitBonusSum(room) {
   const parts = combatParticipants(room);
   return room.combat.monsterIds.reduce((sum, id) => {
     const c = card(id);
-    const rule = c && MONSTER_TRAIT_BONUS[c.name];
-    if (!rule) return sum;
-    const hit = parts.some((p) => (!traitImmun(p, 'races') && (rule.races || []).some((r) => hasRace(p, r)))
-      || (!traitImmun(p, 'classes') && (rule.classes || []).some((k) => hasClass(p, k))));
-    return sum + (hit ? rule.bonus : 0);
+    const regeln = c && MONSTER_TRAIT_BONUS[c.name];
+    if (!regeln) return sum;
+    // Eine Karte darf mehrere Boni nennen ("+5 gegen Orks, +5 gegen Krieger") -
+    // die addieren sich, siehe MONSTER_TRAIT_BONUS in src/cards/passives.js.
+    return sum + [].concat(regeln).reduce((teil, rule) => {
+      const hit = parts.some((p) => (!traitImmun(p, 'races') && (rule.races || []).some((r) => monsterSeesRace(p, r)))
+        || (!traitImmun(p, 'classes') && (rule.classes || []).some((k) => hasClass(p, k)))
+        || (rule.wennErfuellt ? rule.wennErfuellt(p) : false));
+      return teil + (hit ? rule.bonus : 0);
+    }, 0);
   }, 0);
 }
 
@@ -2076,6 +2119,22 @@ function monsterTraitBonusSum(room) {
 // FLEE_PENALTY, FLEE_TREASURE_ITEMS in src/cards/passives.js. Der Zauberer-
 // Flugzauber ("+1 pro abgelegter Karte") steht bewusst NICHT dort - er
 // kostet Karten und bleibt darum eine manuelle Eingabe im Weglaufen-Feld.
+
+// Automatische Flucht: entweder sagt das Monster selbst sie zu
+// (FLEE_AUTOMATIC) oder die Rasse der fliehenden Person (FLEE_AUTOMATIC_BY_RACE,
+// heute nur der Gnom vor Monstern mit "Nase" im Namen).
+function fleeIsAutomatic(room, player) {
+  if (combatHasMonster(room, FLEE_AUTOMATIC)) return true;
+  if (!room.combat || !player) return false;
+  const regeln = player.races.map((id) => {
+    const c = card(id);
+    return c && FLEE_AUTOMATIC_BY_RACE[c.name.toUpperCase()];
+  }).filter(Boolean);
+  if (!regeln.length) return false;
+  // Alle Monster des Kampfes muessen betroffen sein - eines, das trotzdem
+  // angreift, macht die Flucht wieder zur Wuerfelsache.
+  return room.combat.monsterIds.every((id) => { const m = card(id); return !!m && regeln.some((fn) => fn(m)); });
+}
 
 // Summiert alle festen Weglaufen-Modifikatoren und liefert die Einzelposten
 // mit, damit Log und Würfelanimation sie benennen können.
@@ -2207,6 +2266,20 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
     // "Elfen ziehen 1 zusätzlichen Schatz, nachdem sie besiegt wurde."
     if (m.name === 'TOPFPFLANZE' && hasRace(actor, 'ELF')) treasures += 1;
   });
+  // ORK: "Wenn ein Ork, der alleine kaempft, ein Monster um mehr als 10
+  // Punkte besiegt, steigt er eine zusaetzliche Stufe auf."
+  if (!helper && hasRace(actor, 'ORK')) {
+    const t = combatTotals(room);
+    if (t.playerStrength - t.monsterStrength > 10) levels += 1;
+  }
+  // BARDE, "Bardenglueck": "Wenn du in deinem Zug einen Kampf gewinnst, ziehe
+  // einen zusaetzlichen Schatz. Sieh sie dir alle an und wirf sofort einen ab
+  // (beliebig)."
+  // ponytail: das Abwerfen bleibt manuell (Ablegen-Knopf) - der Server haette
+  // dafuer eine Wahl mitten im Siegesablauf zu oeffnen, direkt neben der
+  // Belohnungsanimation. Aufruestweg: pendingConsequence-Wahl ueber die
+  // frisch gezogenen Karten in resolveCombatWin.
+  if (hasClass(actor, 'BARDE')) treasures += 1;
   return { levels, treasures };
 }
 
@@ -2285,7 +2358,7 @@ function handleUseClassCombatDiscard(room, playerId, cardId) {
   const power = classDiscardPower(room, player);
   if (!power || power.remaining <= 0) return;
   if (power.kind === 'combat' && combatHasMonster(room, MONSTER_IGNORES_BONUSES)) {
-    log(room, `"${power.label}" wuerde gegen "${MONSTER_IGNORES_BONUSES_NAME}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
+    log(room, `"${power.label}" wuerde gegen "${monsterIgnoringBonusesName(room)}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
     touchRoom(room);
     return;
   }
@@ -2554,7 +2627,7 @@ function combatTotals(room) {
       // (kein regulaerer Gegenstands-Slot, siehe Kommentar dort).
       const items = curseSuppressesItemBonuses(p)
         ? ((card(p.equipped.armor) || {}).bonus || 0)
-        : equippedBonusSum(p) + conditionalItemBonusSum(p, monsters);
+        : equippedBonusSum(p) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters);
       return sum + p.level + items + hellknightArmorBonus(p)
         + curseCombatModifier(p) - (ignoreLevel ? p.level : 0);
     }, 0) + c.actorModifier + backstabMalus(room);
@@ -2853,7 +2926,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
       return;
     }
     if (munchkinBonusWirkungslos(room, player, doorSpec)) {
-      log(room, `"${c.name}" wuerde gegen "${MONSTER_IGNORES_BONUSES_NAME}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
+      log(room, `"${c.name}" wuerde gegen "${monsterIgnoringBonusesName(room)}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
       touchRoom(room);
       return;
     }
@@ -2876,7 +2949,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     return;
   }
   if (munchkinBonusWirkungslos(room, player, spec)) {
-    log(room, `"${c.name}" wuerde gegen "${MONSTER_IGNORES_BONUSES_NAME}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
+    log(room, `"${c.name}" wuerde gegen "${monsterIgnoringBonusesName(room)}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
     touchRoom(room);
     return;
   }
@@ -3110,6 +3183,7 @@ function resolveCombatWin(room) {
   log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${treasureCount} Schatzkarte(n) gezogen.`, c.monsterIds);
   if (extras.levels) log(room, `Kartenbonus: +${extras.levels} zusätzliche Stufe(n).`);
   if (extras.treasures) log(room, `Kartenbonus: +${extras.treasures} zusätzliche(r) Schatz.`);
+  if (hasClass(actor, 'BARDE')) log(room, `Bardenglück: ${actor.name} zieht 1 Extraschatz und wirft dafür sofort 1 beliebige Karte ab.`);
   if (helper) log(room, `(${helper.name} hat geholfen.)`);
   // ELF: "Für jedes Monster, das du jemandem anderen hilfst zu töten,
   // steigst du 1 Stufe auf."
@@ -3159,7 +3233,7 @@ function handleAttemptFlee(room, playerId, modifier) {
   rollWithWindow(room, actor, 'flee', function mitWurf(roll) {
     const total = roll + mod;
     const impossible = combatHasMonster(room, FLEE_IMPOSSIBLE);
-    const automatic = combatHasMonster(room, FLEE_AUTOMATIC);
+    const automatic = fleeIsAutomatic(room, actor);
     const success = impossible ? false : (automatic ? true : total >= 5);
     let note = parts.length ? parts.map((x) => `${x.label} ${x.amount >= 0 ? '+' : ''}${x.amount}`).join(', ') : '';
     if (impossible) note = 'Vor diesem Monster gibt es kein Entkommen.';
@@ -3590,11 +3664,15 @@ function handlePlayRaceOrClass(room, playerId, cardId) {
   const c = card(cardId);
   if (!c) return;
   const upper = c.name.toUpperCase();
-  if (c.category === 'race') {
+  // ORK, GNOM, BARDE stehen in den Rohdaten als "door_other", sind aber
+  // Rassen- bzw. Klassenkarten - siehe TRAIT_DOOR_CARDS in
+  // src/cards/passives.js. Ab hier laufen sie durch dieselben Zweige.
+  const kategorie = c.category === 'door_other' ? (TRAIT_DOOR_CARDS[upper] || c.category) : c.category;
+  if (kategorie === 'race') {
     if (player.races.length >= traitCap(player, 'race')) return;
     removeFromHand(player, cardId);
     player.races.push(cardId);
-  } else if (c.category === 'class') {
+  } else if (kategorie === 'class') {
     if (player.classes.length >= traitCap(player, 'class')) return;
     removeFromHand(player, cardId);
     player.classes.push(cardId);
@@ -4167,6 +4245,10 @@ module.exports = {
   DOOR_OTHER_AS_CURSE, isInstantLevelUpCard, TREASURE_POWER_OVERRIDES,
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
   POWER_GROUP_NAMES, GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
+  TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
+  handlePlayRaceOrClass, raceItemBonusSum, monsterSeesRace, fleeIsAutomatic,
+  monsterVictoryExtras, baseStrength,
+  monsterRefusesTarget, monsterPassOption, fleeModifierParts, monsterTraitBonusSum,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, endTurn,

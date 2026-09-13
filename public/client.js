@@ -1326,7 +1326,11 @@
     // Machtgruppe (Pathfinder-Set) und die drei "Obergrenze +1"-Karten
     // (Halb-Blut/Super Munchkin/Doppelleben) werden mechanisch wie
     // Rasse/Klasse gespielt, sind aber als "door_other" kategorisiert.
-    if (myTurn && c.category === 'door_other' && (POWER_GROUP_NAMES.has((c.name || '').toUpperCase()) || TRAIT_CAP_CARD_NAMES.has(c.name))) {
+    // Dazu ORK/GNOM/BARDE - echte Rassen/Klassen, die ebenfalls als
+    // "door_other" in den Rohdaten stehen (state.traitDoorCards kommt vom
+    // Server, siehe TRAIT_DOOR_CARDS).
+    if (myTurn && c.category === 'door_other' && (POWER_GROUP_NAMES.has((c.name || '').toUpperCase())
+      || TRAIT_CAP_CARD_NAMES.has(c.name) || (state.traitDoorCards || {})[(c.name || '').toUpperCase()])) {
       const btn = mkBtn('Spielen', () => socket.emit('playRaceOrClass', { cardId: id }));
       wrap.appendChild(btn);
     }

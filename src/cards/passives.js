@@ -26,6 +26,8 @@ module.exports = (ctx) => {
     // "Greift keinen Dieb an (berufliche Höflichkeit)." Die zusätzliche
     // Dieb-Option (2 Schätze tauschen) bleibt manuell.
     'ANWALT': (p) => hasClass(p, 'DIEB'),
+    // "Greift niemanden mit Stufe 2 oder niedriger an."
+    'SIEBENJÄHRIGER LICH': (p) => p.level <= 2,
   };
 
   // --- Monster, die eine Rasse automatisch totstampft ----------------------
@@ -41,8 +43,13 @@ module.exports = (ctx) => {
   // Schatz lassen. (Ausnahme: Halblinge schauen lecker aus und muessen
   // kaempfen.)" Gilt nur fuer aufgedeckte Monster - ein aus der Hand
   // gespieltes Monster hat sich die kaempfende Person selbst eingeladen.
+  // nurRassen ist die Umkehrung von forcedFightRaces: nicht "alle ausser
+  // diesen", sondern "nur diese".
   const MONSTER_PASS_OPTION = {
     'BEKIFFTER GOLEM': { forcedFightRaces: ['HALBLING'] },
+    // "Elfen finden ihn niedlich und bekaempfen ihn vielleicht nicht (Karte
+    // einfach abwerfen) oder helfen nicht."
+    'BOBBELKOPF': { nurRassen: ['ELF'] },
   };
 
   // --- Monster, die statt des Kampfes eine Alternative anbieten -------------
@@ -104,10 +111,45 @@ module.exports = (ctx) => {
     'ZUNGENDÄMON': true,
   };
 
+  // --- Rassen/Klassen, die in den Rohdaten als "door_other" stehen ----------
+  // ORK, GNOM (Clerical Errors / Unnatural Axe) und BARDE sind Rassen- bzw.
+  // Klassenkarten, haben in data/cards.json aber category "door_other" - ohne
+  // diese Tabelle laesst handlePlayRaceOrClass sie gar nicht erst ausspielen,
+  // sie liegen tot auf der Hand. Gleiche Bauform wie POWER_GROUP_NAMES.
+  const TRAIT_DOOR_CARDS = {
+    'ORK': 'race',
+    'GNOM': 'race',
+    'BARDE': 'class',
+  };
+
+  // GNOM: "Monster behandeln dich wie einen Halbling."
+  // ponytail: gilt bewusst nur fuer die Monsterboni (MONSTER_TRAIT_BONUS) -
+  // nicht fuer Faehigkeiten, die ein Halbling selbst hat (Einstampfen,
+  // doppelter Verkaufspreis, zweiter Weglaufwurf). Wer mehr will, zieht die
+  // Abfrage in hasRace selbst hoch.
+  const MONSTER_SEES_AS_RACE = {
+    'GNOM': 'HALBLING',
+  };
+
+  // GNOM: "Du erhaeltst +1 fuer jeden nicht-einmal einsetzbaren Gegenstand,
+  // der mit den Buchstaben G oder N beginnt."
+  const RACE_ITEM_BONUS = {
+    'GNOM': (player) => equippedItemIds(player).filter((id) => {
+      const c = card(id);
+      return c && /^[GN]/i.test(c.name) && !/nur\s+einmal\s+einsetzbar/i.test(c.text || '');
+    }).length,
+  };
+
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
   // die Rasse/Klasse hat (Angreifer:in oder Helfer:in) - nicht einmal pro
   // Person.
+  //
+  // Drei Schreibweisen sind erlaubt (siehe monsterTraitBonusSum in server.js):
+  //   { races/classes: [...], bonus: n }  - der Normalfall
+  //   [regel, regel]                      - mehrere Boni, die sich addieren
+  //   { wennErfuellt: (p) => bool, bonus } - alles, was keine Rasse/Klasse ist
+  // Ein negativer bonus schwaecht das Monster ("-3 gegen Barden").
   const MONSTER_TRAIT_BONUS = {
     'UNGLAUBLICHER UNAUSSPRECHLICHER SCHRECKEN': { classes: ['KRIEGER'], bonus: 4 }, // "+4 gegen Krieger."
     'KREISCHENDER DEPP': { classes: ['KRIEGER'], bonus: 6 },                         // "+6 gegen Krieger."
@@ -130,6 +172,32 @@ module.exports = (ctx) => {
     'AFFENBANDE': { races: ['HALBLING'], bonus: 2 },                                  // "+2 gegen Halblinge."
     'ÜBERBÄR': { races: ['HALBLING', 'ZWERG'], bonus: 5 },                             // "+5 gegen Halblinge und Zwerge."
     'FÜRST YAHOO': { races: ['ELF', 'HALBLING'], classes: ['BARDE'], bonus: 5 },       // "+5 gegen Elfen, Barden und Halblinge."
+    // --- Clerical Errors ---------------------------------------------------
+    'TEQUILA-LIEDCHEN': { classes: ['BARDE'], bonus: 5 },                             // "+5 gegen Barden."
+    'DOPPELGANGSTER': { classes: ['BARDE'], bonus: 3 },                                // "+3 gegen Barden."
+    'DRECKIGE GÄNSE': { classes: ['BARDE'], bonus: -3 },                               // "-3 gegen Barden. Die dreckigen Gaense haben kein Rhythmusgefuehl."
+    'GIFTEFEU KUDZU-FLIEGENFALLE': { races: ['ELF'], bonus: -4 },                      // "-4 gegen Elfen."
+    'Harter Typ': { races: ['ORK'], bonus: 5 },                                        // "+5 gegen Orks."
+    'REDNECK-BAUM': [{ races: ['ORK'], bonus: 5 }, { classes: ['KRIEGER'], bonus: 5 }], // "+5 gegen Orks, +5 gegen Krieger."
+    'DIE TROLLE VOM TOTEN MEER': { races: ['ELF'], bonus: 5 },                         // "+5 gegen Elfen wegen ihres ueblen Gestanks."
+    'MEDUSA': { races: ['ELF'], bonus: 4 },                                            // "Eklige Schlangenhaare! +4 gegen Elfen."
+    'FEDERFEIND': [{ classes: ['PRIESTER'], bonus: 5 }, { classes: ['ZAUBERER'], bonus: 3 }], // "+5 gegen Priester und +3 gegen Zauberer."
+    'SIEBENJÄHRIGER LICH': { classes: ['KRIEGER'], bonus: 5 },                         // "+5 gegen Krieger."
+    'TANTE PALADIN': { classes: ['PRIESTER'], bonus: 5 },                              // "+5 gegen Priester" (das "+5 gegen maennliche Charaktere" braucht ein Geschlechtsfeld, das es nicht gibt)
+    // "+5 gegen Priester. Sie greift mehrmals an und erhaelt zusaetzlich +5,
+    // es sei denn, du verteidigst dich mit (mindestens) 2 eigenen Waffen."
+    'KALI': [
+      { classes: ['PRIESTER'], bonus: 5 },
+      { wennErfuellt: (p) => p.equipped.hands.filter(Boolean).length < 2, bonus: 5 },
+    ],
+    // "+3 gegen die, die keine Klasse haben."
+    'RÜSSELKÄFER': { wennErfuellt: (p) => !p.classes.length, bonus: 3 },
+    // "+5 gegen Super-Munchkins oder Mischlinge. +10 gegen beide." - als zwei
+    // Regeln, die sich bei jemandem mit beiden Karten auf +10 addieren.
+    'GOTHYANKI': [
+      { wennErfuellt: (p) => !!p.classCapCard, bonus: 5 },
+      { wennErfuellt: (p) => !!p.raceCapCard, bonus: 5 },
+    ],
   };
 
   // --- Monster, die die Kampfrechnung selbst verändern ---------------------
@@ -137,7 +205,9 @@ module.exports = (ctx) => {
   const MONSTER_IGNORES_LEVEL = new Set(['VERSICHERUNGSVERTRETER']);
   // "Gegen sie dürfen keine Gegenstände oder andere Boni eingesetzt werden
   // - kämpfe nur mit deiner Charakterstufe."
-  const MONSTER_IGNORES_BONUSES = new Set(['GEMEINE GHOULE']);
+  // GUMMI-GOLEM: "Er klebt an deinen Waffen ... du kannst nur auf deiner
+  // Stufe kaempfen, ohne weitere Boni."
+  const MONSTER_IGNORES_BONUSES = new Set(['GEMEINE GHOULE', 'GUMMI-GOLEM']);
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
   const MONSTER_FORBIDS_HELP = new Set(['PAVILLON']);
   // Die ersten beiden Regeln gelten für die ganze Munchkin-Seite: sobald
@@ -157,12 +227,21 @@ module.exports = (ctx) => {
     'FLIEGENDE FROSCHE': -1,   // "Du hast -1 auf Weglaufen."
     'GALLERT-OKTAEDER': 1,     // "Du hast +1 auf Weglaufen."
     'LAHMER GOBLIN': 1,        // "Du hast +1 auf Weglaufen."
+    'DIE TROLLE VOM TOTEN MEER': 1, // "Jeder erhaelt +1 auf Weglaufen."
   };
   // FILZLAUSE: "Denen kannst du nicht entkommen!"
   // LAUFENDE NASE: "Verlierst du den Kampf, kannst du nicht fliehen."
   const FLEE_IMPOSSIBLE = new Set(['FILZLAUSE', 'LAUFENDE NASE']);
   // TOPFPFLANZE, Schlimme Dinge: "Keine. Automatische Flucht."
-  const FLEE_AUTOMATIC = new Set(['TOPFPFLANZE']);
+  // GOLDFISCH: "Greift nicht an und du fliehst automatisch, aber ..."
+  const FLEE_AUTOMATIC = new Set(['TOPFPFLANZE', 'GOLDFISCH']);
+  // Dasselbe, aber nur fuer eine bestimmte Rasse und abhaengig vom Monster.
+  // GNOM: "Monster, die ein 'Nase' im Namen haben, werden dich nicht
+  // angreifen. Wenn du sie nicht besiegen kannst, wirst du automatisch
+  // weglaufen."
+  const FLEE_AUTOMATIC_BY_RACE = {
+    'GNOM': (monster) => /nase/i.test(monster.name || ''),
+  };
   // Stufenverlust trotz gelungener Flucht.
   const FLEE_PENALTY = {
     'MR. BONES': () => 1,                          // "Auch bei einer erfolgreichen Flucht verlierst du 1 Stufe."
@@ -204,7 +283,8 @@ module.exports = (ctx) => {
   // keiner einzigen Monsterkarte im Text. Deshalb diese kuratierte Liste; sie
   // ist die EINZIGE Stelle, an der "untot" in diesem Server definiert ist.
   // Stimmt sie nicht mit euren Karten überein, hier korrigieren.
-  const UNDEAD_MONSTERS = new Set(['MR. BONES', 'UNTOTES PFERD', 'KÖNIG TUT', 'GRUFTIGE GEBRÜDER']);
+  const UNDEAD_MONSTERS = new Set(['MR. BONES', 'UNTOTES PFERD', 'KÖNIG TUT', 'GRUFTIGE GEBRÜDER',
+    'SIEBENJÄHRIGER LICH']);
 
   // ZAUBERER "Flugzauber": "Du darfst bis zu 3 Karten ablegen, nachdem du
   // deinen Weglaufwurf gemacht hast. Jede verleiht dir +1 Bonus auf Weglaufen."
@@ -262,5 +342,6 @@ module.exports = (ctx) => {
     CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
     ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
     COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
+    TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   };
 };
