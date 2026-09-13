@@ -629,6 +629,7 @@ function startGame(room) {
   room.turnIndex = 0;
   room.turnPhase = 'tuer';
   room.combatHappenedThisTurn = false;
+  room.lastCombatWinnerId = null;
   room.revealedDoorCard = null;
   room.combat = null;
   room.pendingConsequence = null;
@@ -648,6 +649,7 @@ function endTurn(room) {
   room.players.forEach((p) => { p.halblingSaleUsed = false; });
   room.turnPhase = 'tuer';
   room.combatHappenedThisTurn = false;
+  room.lastCombatWinnerId = null;
   room.revealedDoorCard = null;
   log(room, `${currentPlayer(room).name} ist am Zug (Phase 1: Tür eintreten).`);
 }
@@ -750,9 +752,17 @@ function handleDrawDoor(room, playerId) {
       room.turnPhase = 'aerger';
       log(room, `Fluch "${c.name}" - aber ${player.name} trägt "${card(shield).name}": keine Wirkung. Phase 2: Auf Ärger aus sein.`, [id, shield]);
     } else {
-      room.pendingConsequence = { playerId: player.id, kind: 'curse', cardId: id, text: c.text || c.name, autoApplied: null, choice: null };
-      log(room, `Fluch! ${player.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
-      autoApplyLossConsequence(room, player, [{ name: c.name, text: c.text, cardId: id }]);
+      const opfer = fluchZiel(room, player, c);
+      if (!opfer) {
+        room.turnPhase = 'aerger';
+        log(room, `Fluch "${c.name}" verpufft. Phase 2: Auf Ärger aus sein.`, [id]);
+      } else {
+        room.pendingConsequence = { playerId: opfer.id, kind: 'curse', cardId: id, text: c.text || c.name, autoApplied: null, choice: null,
+          keepPhase: opfer.id !== player.id };
+        if (opfer.id !== player.id) room.turnPhase = 'aerger';
+        log(room, `Fluch! ${opfer.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
+        autoApplyLossConsequence(room, opfer, [{ name: c.name, text: c.text, cardId: id }]);
+      }
     }
   } else {
     // Karte bleibt offen auf dem Tisch liegen (wie ein Monster), bis sie per
@@ -760,6 +770,52 @@ function handleDrawDoor(room, playerId) {
     // bleibt solange 'tuer' und blockiert damit alle Folgephasen.
     log(room, `"${c.name}" liegt offen aus - ${player.name} kann sie auf die Hand nehmen.`, [id]);
   }
+}
+
+// Wen trifft ein Fluch am Ende wirklich? Zwei Gegenstaende reden hier mit,
+// beide "wenn dich ein Fluch trifft" - also gezogen UND von anderen gespielt:
+//
+//   PRÄCHTIGER HUT: "Er ist nicht nur praechtig, er glaenzt auch so sehr, dass
+//     er Flueche reflektiert. Jeder Fluch, den du ziehst oder den jemand
+//     anderes auf dich spielt, wird zufaellig zurueckgeworfen. Alle anderen
+//     Spieler wuerfeln; der Spieler mit dem niedrigsten Wurf ist verflucht."
+//   DAS MANCHMAL VERLÄSSLICHE AMULETT: "Wenn dich ein Fluch trifft, wirf einen
+//     Wuerfel. Bei einer 1-3 trifft dich der Fluch und das Amulett wird
+//     abgeworfen. Bei einer 4-6 wird der Fluch geblockt; wirf den Fluch ab.
+//     Bei einer 6 steigst du zudem eine Stufe auf."
+//
+// Rueckgabe: die Person, die der Fluch trifft, oder null, wenn er verpufft.
+// ponytail: der Hut wirft hoechstens einmal zurueck - traegt das neue Ziel
+// auch einen, bleibt der Fluch dort. Sonst koennte er im Kreis laufen.
+function fluchZiel(room, ziel, c) {
+  const traegt = (p, name) => equippedItemIds(p).find((id) => (card(id) || {}).name === name);
+
+  const hut = traegt(ziel, 'PRÄCHTIGER HUT');
+  if (hut) {
+    const andere = room.players.filter((p) => p.id !== ziel.id);
+    if (andere.length) {
+      const wuerfe = andere.map((p) => ({ p, wurf: rollDie() }));
+      const tiefster = wuerfe.reduce((a, b) => (b.wurf < a.wurf ? b : a));
+      log(room, `"${c.name}" prallt am Prächtigen Hut von ${ziel.name} ab (${wuerfe.map((w) => `${w.p.name} ${w.wurf}`).join(', ')}) - es trifft ${tiefster.p.name}.`, [hut]);
+      ziel = tiefster.p;
+    }
+  }
+
+  const amulett = traegt(ziel, 'DAS MANCHMAL VERLÄSSLICHE AMULETT');
+  if (amulett) {
+    const wurf = rollDie();
+    if (wurf <= 3) {
+      unequipSlotCard(ziel, amulett);
+      discardCard(room, amulett);
+      log(room, `${ziel.name} würfelt ${wurf}: das Amulett hält nicht und wird abgeworfen.`, [amulett]);
+    } else {
+      let extra = '';
+      if (wurf === 6) { setLevel(ziel, ziel.level + 1); extra = ' und steigt dafür 1 Stufe auf'; }
+      log(room, `${ziel.name} würfelt ${wurf}: das Amulett blockt "${c.name}"${extra}.`, [amulett]);
+      return null;
+    }
+  }
+  return ziel;
 }
 
 // Die offen liegende (Nicht-Monster-, Nicht-Fluch-)Tuerkarte auf die Hand
@@ -799,12 +855,20 @@ function handlePlayCurseFromHand(room, playerId, cardId, targetId) {
   if (room.winner) return;
   removeFromHand(player, cardId);
   discardCard(room, cardId);
+  // PRÄCHTIGER HUT / AMULETT koennen den Fluch umlenken oder ganz abwehren.
+  const opfer = fluchZiel(room, target, c);
+  if (!opfer) {
+    log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${target.name} - er verpufft.`, [cardId]);
+    refreshCombatReady(room);
+    touchRoom(room);
+    return;
+  }
   room.pendingConsequence = {
-    playerId: target.id, kind: 'curse', cardId, text: c.text || c.name,
+    playerId: opfer.id, kind: 'curse', cardId, text: c.text || c.name,
     autoApplied: null, choice: null, keepPhase: true,
   };
-  log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${target.name}!`, [cardId]);
-  autoApplyLossConsequence(room, target, [{ name: c.name, text: c.text, cardId }]);
+  log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${opfer.name}!`, [cardId]);
+  autoApplyLossConsequence(room, opfer, [{ name: c.name, text: c.text, cardId }]);
   refreshCombatReady(room); // ein Fluch kann Stufe/Ausruestung aendern
   touchRoom(room);
 }
@@ -1657,8 +1721,8 @@ const {
 // siehe src/cards/reactions.js.
 const reactionsFactory = require('./src/cards/reactions.js');
 const {
-  ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES,
-  COMBAT_REACTION_CARDS,
+  ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
+  LINGERING_CURSES, COMBAT_REACTION_CARDS,
 } = reactionsFactory();
 
 // Eine Aktion, die mehrere Personen NACHEINANDER betrifft. specFor(playerId)
@@ -1889,7 +1953,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -2353,7 +2417,10 @@ function handlePlayReactionCard(room, playerId, cardId, value) {
     const p = findPlayer(room, playerId);
     const c = card(cardId);
     if (!p || !c || !p.hand.includes(cardId) || !ROLL_REACTION_CARDS.has(c.name)) return;
-    const neu = Math.max(1, Math.min(6, Math.round(Number(value) || pr.roll)));
+    // KATZENINTERVENTION wuerfelt neu, der GEZINKTE WÜRFEL setzt den Wert.
+    const neu = ROLL_REROLL_CARDS.has(c.name)
+      ? rollDie()
+      : Math.max(1, Math.min(6, Math.round(Number(value) || pr.roll)));
     removeFromHand(p, cardId);
     discardCard(room, cardId);
     log(room, `${p.name} spielt "${c.name}": Wurf ${pr.roll} wird zu ${neu}.`, [cardId]);
@@ -2991,6 +3058,15 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.actorModifier += bonus;
       return `"${ziel.name}" zaehlt dreifach (+${bonus * 3}); Wuerfelwurf ${wurf} - Gegenstand wird abgeworfen`;
     }
+    // NIMM MICH! NIMM MICH!: "Wenn ein Spieler befugt ist, im Kampf um Hilfe
+    // zu bitten, spiele diese Karte, um ihn dazu zu zwingen, DEINE Hilfe zu
+    // akzeptieren. Du kannst keine Belohnung einfordern."
+    case 'forceSelfAsHelper': {
+      c.helperId = player.id;
+      c.helperPending = null;
+      refreshCombatReady(room);
+      return `${player.name} draengt sich als Helfer in den Kampf (ohne Belohnung)`;
+    }
     case 'removeHelper': {
       const helper = findPlayer(room, c.helperId);
       c.helperId = null;
@@ -3388,6 +3464,10 @@ function resolveCombatWin(room) {
     levelsGained,
     monsterNames: monsters.map((m) => m.name),
   };
+  // HEIMSE DIE LORBEEREN EIN: "Spielen, wenn ein RIVALE einen Kampf gewinnt
+  // und eine Stufe aufsteigt." - deshalb muss der Server wissen, wer zuletzt
+  // gewonnen hat. Wird wie combatHappenedThisTurn beim Zugwechsel geleert.
+  room.lastCombatWinnerId = actor.id;
   discardMonsterIds(room.doorDiscard, c.monsterIds);
   log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${treasureCount} Schatzkarte(n) gezogen.`, c.monsterIds);
   if (extras.levels) log(room, `Kartenbonus: +${extras.levels} zusätzliche Stufe(n).`);
@@ -4532,7 +4612,8 @@ module.exports = {
   istGeschlecht, GENDER_IMMUNE_ITEMS, pruefeSlipperVerlust, handleEquipItem,
   applyCombatPotionAction, combatHasUndead, addActiveCurse, curseCombatModifier,
   handleAttachCard, attachmentIds, attachmentBonusSum, istGrosserGegenstand, backstabMalus,
-  canCarryAnotherBigItem, applyPrimitiveAction,
+  canCarryAnotherBigItem, applyPrimitiveAction, fluchZiel, ROLL_REROLL_CARDS,
+  rollWithWindow, handlePlayReactionCard,
   ATTACHMENT_CARDS, equippedBonusSum,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,

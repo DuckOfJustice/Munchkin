@@ -3,7 +3,17 @@
 module.exports = () => {
   // "Spiel ihn, nachdem du aus einem beliebigen Grund wuerfeln musstest.
   // Aendere das Wuerfelergebnis so wie du willst. Nur einmal einsetzbar."
-  const ROLL_REACTION_CARDS = new Set(['GEZINKTER WÜRFEL']);
+  // KATZENINTERVENTION: "Spielbar, nachdem irgendjemand gewuerfelt hat, aus
+  // welchem Grund auch immer. Die Katze ist auf den Wuerfel gesprungen ... der
+  // Wurf und alle Karten, die gespielt wurden, um ihn zu beeinflussen, sind
+  // verloren. Wuerfel nochmal."
+  // ponytail: "alle Karten, die gespielt wurden, um ihn zu beeinflussen" ist
+  // hier gegenstandslos - das Wurf-Fenster schliesst sich, sobald der
+  // GEZINKTE WÜRFEL gespielt wurde, danach ist die Katze gar nicht mehr
+  // moeglich. Beide Karten reagieren also auf denselben, unberuehrten Wurf.
+  const ROLL_REACTION_CARDS = new Set(['GEZINKTER WÜRFEL', 'KATZENINTERVENTION']);
+  // Wer davon wuerfelt neu, statt den Wert zu setzen.
+  const ROLL_REROLL_CARDS = new Set(['KATZENINTERVENTION']);
 
   // "Einsetzbar, wenn jemand erfolgreich (egal warum) einem Kampf entkommt.
   // Er muss seine Flucht noch einmal wuerfeln, sogar wenn sie das erste Mal
@@ -78,7 +88,7 @@ module.exports = () => {
   };
 
   return {
-    ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES,
-    COMBAT_REACTION_CARDS,
+    ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
+    LINGERING_CURSES, COMBAT_REACTION_CARDS,
   };
 };

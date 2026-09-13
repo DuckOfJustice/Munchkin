@@ -56,6 +56,14 @@ module.exports = (ctx) => {
     // zaehlt nicht mit. Aufruestweg: ein Zaehler, der erst beim Ausspielen
     // der Karte zurueckgesetzt wird, statt beim Zugwechsel.
     'VERSTÜMMLE DIE LEICHEN': (player, room) => (room.combatHappenedThisTurn ? { type: 'levelUp', amount: 1 } : null),
+    // "Spielen, wenn ein Rivale einen Kampf gewinnt und eine Stufe aufsteigt.
+    // Du tust das auch." - gleiche Bauform wie VERSTÜMMLE DIE LEICHEN, nur
+    // strenger: es muss ein FREMDER Sieg gewesen sein.
+    // ponytail: room.lastCombatWinnerId wird beim Zugwechsel geleert, das
+    // Fenster ist also der laufende Zug - dieselbe Vereinfachung wie oben.
+    'HEIMSE DIE LORBEEREN EIN': (player, room) => (
+      room.lastCombatWinnerId && room.lastCombatWinnerId !== player.id
+        ? { type: 'levelUp', amount: 1 } : null),
 
     // --- Bewusst manuell: hängt von Karten/Zustand ab, den dieser Server
     // nicht separat verfolgt (Mietling "im Spiel" ist keine eigene Zone;
@@ -131,6 +139,18 @@ module.exports = (ctx) => {
     // hat, im Kampf zu helfen. Dieser Munchkin wandert davon und kann nicht
     // teilnehmen." Gleiche Wirkung wie der CYTILLESH-TRANK.
     'TRANK DER APATHIE': (player, room) => (room.combat.helperId ? { type: 'removeHelper' } : null),
+    // "Wenn ein Spieler befugt ist, im Kampf um Hilfe zu bitten, spiele diese
+    // Karte, um ihn dazu zu zwingen, deine Hilfe zu akzeptieren. Du kannst
+    // keine Belohnung einfordern."
+    // ponytail: "befugt, um Hilfe zu bitten" heisst hier schlicht "es laeuft
+    // ein Kampf, in dem noch niemand hilft" - eine eigene Befugnis-Pruefung
+    // gibt es in diesem Server nicht. Der zweite Satz der Karte (eine frueher
+    // freiwillige Person bekommt ihre einmaligen Karten zurueck) bleibt
+    // manuell, dafuer muesste der Server pro Kampf mitschreiben, wer was
+    // gespielt hat.
+    'NIMM MICH! NIMM MICH!': (player, room) => (
+      !room.combat.helperId && room.combat.actorId !== player.id
+        ? { type: 'forceSelfAsHelper' } : null),
     // "Waehle einen Gegenstand, den du verwendest, der nicht 'nur einmal
     // einsetzbar' ist. Erhalte fuer einen einzigen Kampf 3-Mal den normalen
     // Bonus dieses Gegenstands."
