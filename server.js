@@ -490,6 +490,10 @@ function sendInfoTo(room, player) {
     // Weglaufwurf haengen an der eigenen Hand - deshalb privat und nicht im
     // oeffentlichen Kampfzustand.
     classEnchant: room.combat ? enchantInfo(room, player) : null,
+    // DIEB (Rueckenfall/Diebstahl) und PRIESTER (Auferstehung): haengen an
+    // eigener Klasse und eigener Hand, also privat.
+    thiefPower: thiefPowerInfo(room, player),
+    resurrectPiles: priestResurrectPiles(room, player),
     fleeEscapeCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.actorId === player.id)
       ? postFleeEscapeCardIds(player) : [],
     // MAGISCHE LAMPE: nur waehrend des Fluchtentscheidungsfensters relevant.
@@ -1258,6 +1262,25 @@ function applyPrimitiveAction(room, player, action) {
         return `${target.name}: ${summe} GS abgelegt`;
       });
       return `"${card(chosen).name}" (${gold} GS) abgelegt - ${teile.join('; ')}`;
+    }
+    // DIEB "Diebstahl": der Wurf ist zu diesem Zeitpunkt schon geglueckt -
+    // hier wechselt nur noch der gewaehlte kleine Gegenstand den Besitzer.
+    case 'stealItemFrom': {
+      const opfer = findPlayer(room, action.targetId);
+      if (!opfer || !equippedItemIds(opfer).includes(action.cardId)) return 'Gegenstand nicht (mehr) getragen';
+      unequipSlotCard(opfer, action.cardId);
+      clearCheatIfLost(opfer, action.cardId);
+      player.hand.push(action.cardId);
+      refreshCombatReady(room);
+      return `"${card(action.cardId).name}" von ${opfer.name} gestohlen`;
+    }
+    // PRIESTER "Auferstehung": der Preis fuer jede vom Ablagestapel geholte
+    // Karte - eine selbst gewaehlte Handkarte.
+    case 'discardSpecificHandCard': {
+      if (!player.hand.includes(action.cardId)) return 'Karte nicht mehr auf der Hand';
+      removeFromHand(player, action.cardId);
+      discardCard(room, action.cardId);
+      return `"${card(action.cardId).name}" abgelegt`;
     }
     case 'combo':
       return action.actions.map((a) => applyPrimitiveAction(room, player, a)).join('; ');
@@ -2123,9 +2146,9 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
 // bisher überhaupt keinen Weg im Spiel - nur das manuelle Bonus-Zahlenfeld,
 // das aber keine Karte abwirft.
 
-// DIEB "In den Rücken fallen" (-2 für eine ANDERE Person) fehlt hier
-// bewusst: die Kraft richtet sich gegen Mitspieler:innen, und genau das ist
-// laut Kommentar am Dateianfang durchgehend manuell gehalten.
+// DIEB "In den Rücken fallen" (-2 für eine ANDERE Person) hat eine andere
+// Form als diese drei und steht deshalb weiter unten bei den Kräften, die
+// sich gegen Mitspieler:innen richten (handleThiefBackstab).
 
 function classDiscardPower(room, player) {
   const c = room.combat;
@@ -2201,6 +2224,139 @@ function handleUseClassCombatDiscard(room, playerId, cardId) {
     c.actorModifier += power.bonus;
     log(room, `${player.name} (${power.className}) legt "${card(cardId).name}" ab - ${power.label}: +${power.bonus} im Kampf.`, [cardId]);
   }
+  touchRoom(room);
+}
+
+// --- Klassenkraefte, die sich gegen Mitspieler:innen richten --------------
+// DIEB "In den Ruecken fallen": "Lege eine Karte ab, um einem Spieler in den
+// Ruecken zu fallen (-2 im Kampf). Das darfst du nur einmal pro Opfer pro
+// Kampf tun, aber falls zwei Spieler zusammen gegen ein Monster kaempfen,
+// darfst du beiden in den Ruecken fallen."
+function handleThiefBackstab(room, playerId, discardCardId, targetId) {
+  const c = room.combat;
+  if (!c) return;
+  const dieb = findPlayer(room, playerId);
+  const opfer = findPlayer(room, targetId);
+  if (!dieb || !opfer || !hasClass(dieb, 'DIEB')) return;
+  if (dieb.id === opfer.id) return;                                     // nicht sich selbst
+  if (!combatParticipants(room).some((p) => p.id === opfer.id)) return; // nur Kaempfende
+  if (!dieb.hand.includes(discardCardId)) return;
+  c.backstabs = c.backstabs || {};
+  const schluessel = `${dieb.id}:${opfer.id}`;
+  if (c.backstabs[schluessel]) {
+    log(room, `${dieb.name} ist ${opfer.name} in diesem Kampf schon in den Ruecken gefallen.`);
+    touchRoom(room);
+    return;
+  }
+  c.backstabs[schluessel] = true;
+  removeFromHand(dieb, discardCardId);
+  discardCard(room, discardCardId);
+  log(room, `${dieb.name} faellt ${opfer.name} in den Ruecken: -2 im Kampf.`, [discardCardId]);
+  refreshCombatReady(room); // der Bereit-Status muss verfallen
+  touchRoom(room);
+}
+
+// Summe der Rueckenfall-Mali. Gezaehlt werden nur Opfer, die JETZT noch im
+// Kampf stehen: zieht die Helferin zurueck (oder uebernimmt jemand anderes
+// den Kampf), nimmt sie ihren Malus mit - er haengt an der Person, nicht am
+// Kampf.
+function backstabMalus(room) {
+  const c = room.combat;
+  if (!c || !c.backstabs) return 0;
+  const drin = new Set(combatParticipants(room).map((p) => p.id));
+  return Object.keys(c.backstabs).filter((k) => drin.has(k.split(':')[1])).length * -2;
+}
+
+// DIEB "Diebstahl": "Lege eine Karte ab, um einem anderen Spieler einen
+// kleinen Gegenstand zu stehlen. Wuerfle. Bei einer 4 oder mehr gelingt es.
+// Ansonsten wirst du verhauen und verlierst eine Stufe."
+const DIEBSTAHL_MIN_WURF = 4;
+
+// "kleiner Gegenstand" = alles Getragene, was kein Grosser Gegenstand ist.
+function stealableItemIds(player) {
+  return equippedItemIds(player).filter((id) => !isBigItem(card(id)));
+}
+
+function handleThiefSteal(room, playerId, discardCardId, targetId) {
+  const dieb = findPlayer(room, playerId);
+  const opfer = findPlayer(room, targetId);
+  if (!dieb || !opfer || dieb.id === opfer.id) return;
+  if (!hasClass(dieb, 'DIEB') || !dieb.hand.includes(discardCardId)) return;
+  if (room.pendingCardAction || room.pendingRoll) return; // keine fremde Auswahl ueberschreiben
+  removeFromHand(dieb, discardCardId);
+  discardCard(room, discardCardId);
+  log(room, `${dieb.name} (Dieb) legt "${card(discardCardId).name}" ab und versucht, ${opfer.name} zu bestehlen.`, [discardCardId]);
+  rollWithWindow(room, dieb, 'diebstahl', (roll) => {
+    if (roll >= DIEBSTAHL_MIN_WURF) {
+      const klein = stealableItemIds(opfer);
+      if (!klein.length) {
+        log(room, `${dieb.name} wuerfelt ${roll} - aber ${opfer.name} traegt keinen kleinen Gegenstand.`);
+      } else {
+        openCardChoice(room, dieb, 'DIEBSTAHL', klein.map((id) => ({
+          id: `steal-${id}`,
+          label: card(id).name,
+          action: { type: 'stealItemFrom', targetId: opfer.id, cardId: id },
+        })));
+        log(room, `${dieb.name} wuerfelt ${roll}: der Diebstahl gelingt.`);
+      }
+    } else {
+      setLevel(dieb, dieb.level - 1);
+      log(room, `${dieb.name} wuerfelt ${roll}: erwischt! -1 Stufe (jetzt Stufe ${dieb.level}).`);
+    }
+    touchRoom(room);
+  });
+  touchRoom(room);
+}
+
+// Was der Client anbieten darf - privat im yourInfo, damit dort keine zweite
+// Kopie der Regeln liegt.
+function thiefPowerInfo(room, player) {
+  if (!hasClass(player, 'DIEB')) return null;
+  if (!player.hand.length) return { backstabTargets: [], stealTargets: [] }; // die Karte ist der Preis
+  const c = room.combat;
+  const schon = (c && c.backstabs) || {};
+  const backstabTargets = (c ? combatParticipants(room) : [])
+    .filter((p) => p.id !== player.id && !schon[`${player.id}:${p.id}`])
+    .map((p) => ({ id: p.id, name: p.name }));
+  const stealTargets = room.players
+    .filter((p) => p.id !== player.id && stealableItemIds(p).length)
+    .map((p) => ({ id: p.id, name: p.name }));
+  return { backstabTargets, stealTargets };
+}
+
+// PRIESTER "Auferstehung": "Wenn du eine oder mehrere Karten offen ziehen
+// sollst, darfst du stattdessen eine, mehrere oder alle Karten vom
+// entsprechenden Ablegestapel ziehen. Du musst danach fuer jede so gezogene
+// Karte eine Karte von deiner Hand ablegen."
+// ponytail: eine Karte pro Knopfdruck statt einer Mehrfachauswahl - fuer
+// mehrere Karten drueckt man mehrmals, der Preis wird jedesmal sofort
+// eingefordert.
+function priestResurrectPiles(room, player) {
+  if (!hasClass(player, 'PRIESTER') || !player.hand.length) return [];
+  const piles = [];
+  if (room.doorDiscard.length) piles.push('door');
+  if (room.treasureDiscard.length) piles.push('treasure');
+  return piles;
+}
+
+function handlePriestResurrect(room, playerId, stapel) {
+  const p = findPlayer(room, playerId);
+  if (!p || !hasClass(p, 'PRIESTER')) return;
+  if (room.pendingCardAction || room.pendingRoll) return; // keine fremde Auswahl ueberschreiben
+  if (!priestResurrectPiles(room, p).includes(stapel)) {
+    log(room, `${p.name}: Auferstehung nicht moeglich (leerer Ablagestapel oder keine Karte als Preis).`);
+    touchRoom(room);
+    return;
+  }
+  const discard = stapel === 'door' ? room.doorDiscard : room.treasureDiscard;
+  const geholt = discard.pop();
+  p.hand.push(geholt);
+  log(room, `${p.name} nutzt "Auferstehung" und nimmt "${card(geholt).name}" vom Ablagestapel.`, [geholt]);
+  // Preis: genau eine Karte ablegen, selbst gewaehlt - die geholte zaehlt nicht.
+  openCardChoice(room, p, 'AUFERSTEHUNG', p.hand
+    .filter((id) => id !== geholt)
+    .map((id) => ({ id: `ab-${id}`, label: `"${card(id).name}" ablegen`,
+      action: { type: 'discardSpecificHandCard', cardId: id } })));
   touchRoom(room);
 }
 
@@ -2312,7 +2468,7 @@ function combatTotals(room) {
   if (ignoreBonuses) {
     // GEMEINE GHOULE: nur die Charakterstufe(n) - keine Ausrüstung, keine
     // ausgespielten Karten. Monster-Verstärker bleiben davon unberührt.
-    playerStrength = sides.reduce((sum, p) => sum + p.level, 0);
+    playerStrength = sides.reduce((sum, p) => sum + p.level, 0) + backstabMalus(room);
   } else {
     playerStrength = sides.reduce((sum, p) => {
       // MIESER SPIEGEL: "keine Boni durch Gegenstände, die einzige Ausnahme
@@ -2324,7 +2480,7 @@ function combatTotals(room) {
         : equippedBonusSum(p) + conditionalItemBonusSum(p, monsters);
       return sum + p.level + items + hellknightArmorBonus(p)
         + curseCombatModifier(p) - (ignoreLevel ? p.level : 0);
-    }, 0) + c.actorModifier;
+    }, 0) + c.actorModifier + backstabMalus(room);
   }
   // DOPPELGAENGER: "Verdopple deine Kampfstaerke" - auf die fertige Summe der
   // Munchkin-Seite, gespielte Karten eingeschlossen.
@@ -3780,6 +3936,9 @@ io.on('connection', (socket) => {
   onSafe(socket, 'playReactionCard', ({ cardId, value }) => act(socket, (room, pid) => handlePlayReactionCard(room, pid, cardId, value)));
   onSafe(socket, 'passReaction', () => act(socket, (room, pid) => handlePassReaction(room, pid)));
   onSafe(socket, 'enchantMonster', () => act(socket, (room, pid) => handleEnchantMonster(room, pid)));
+  onSafe(socket, 'thiefBackstab', ({ cardId, targetId }) => act(socket, (room, pid) => handleThiefBackstab(room, pid, cardId, targetId)));
+  onSafe(socket, 'thiefSteal', ({ cardId, targetId }) => act(socket, (room, pid) => handleThiefSteal(room, pid, cardId, targetId)));
+  onSafe(socket, 'priestResurrect', ({ pile }) => act(socket, (room, pid) => handlePriestResurrect(room, pid, pile)));
   onSafe(socket, 'equipItem', ({ cardId }) => act(socket, (room, pid) => handleEquipItem(room, pid, cardId)));
   onSafe(socket, 'unequipItem', ({ cardId }) => act(socket, (room, pid) => handleUnequipItem(room, pid, cardId)));
   onSafe(socket, 'playCheat', ({ cheatCardId, targetItemId }) => act(socket, (room, pid) => handlePlayCheat(room, pid, cheatCardId, targetItemId)));
@@ -3836,7 +3995,9 @@ module.exports = {
   MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
   combatTotals, handLimit, hasRace, hasClass,
   CLASS_COMBAT_DISCARD, CLASS_FLEE_DISCARD, UNDEAD_MONSTERS,
-  handleUseClassCombatDiscard, classCombatPowerInfo,
+  handleUseClassCombatDiscard, classCombatPowerInfo, combatSignature,
+  handleThiefBackstab, handleThiefSteal, thiefPowerInfo,
+  handlePriestResurrect, priestResurrectPiles,
   handleSetCombatReady, combatReadyRequired, combatAllReady, refreshCombatReady,
   handleSetCombatModifier, handlePlayCombatCard,
   handleProposeTrade, handleCancelTrade, handleRespondTrade, tradableCardIds,

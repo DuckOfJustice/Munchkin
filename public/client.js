@@ -1157,6 +1157,14 @@
   function renderHand(p) {
     const box = $('myHand');
     box.innerHTML = '';
+    // PRIESTER "Auferstehung": nicht an eine einzelne Karte gebunden, also
+    // einmal ueber der Hand. Welche Stapel gehen, sagt der Server.
+    (myInfo.resurrectPiles || []).forEach((pile) => {
+      if (state.pendingCardAction || state.pendingRoll) return;
+      const btn = mkBtn(`✝️ Auferstehung: oberste Karte vom ${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel nehmen (kostet 1 Handkarte)`,
+        () => socket.emit('priestResurrect', { pile }));
+      box.appendChild(btn);
+    });
     if (handSortInput) handSortInput.checked = handSort;
     sortedHand().forEach((id) => {
       const tile = cardTile(id, { hand: true });
@@ -1272,6 +1280,23 @@
       const btn = mkBtn(`⚔️ ${power.label}: ablegen für +${power.bonus} ${suffix} (noch ${power.remaining})`,
         () => socket.emit('useClassCombatDiscard', { cardId: id }));
       wrap.appendChild(btn);
+    }
+    // DIEB: beide Kraefte kosten genau eine Handkarte - deshalb haengen sie
+    // an jeder Karte. Wer Ziel sein darf, sagt der Server (myInfo.thiefPower).
+    const thief = myInfo.thiefPower;
+    if (thief && thief.backstabTargets.length && !state.pendingCardAction) {
+      const sel = document.createElement('select');
+      sel.innerHTML = '<option value="">🗡️ In den Rücken fallen (-2)...</option>' +
+        thief.backstabTargets.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+      sel.onchange = () => { if (sel.value) socket.emit('thiefBackstab', { cardId: id, targetId: sel.value }); };
+      wrap.appendChild(sel);
+    }
+    if (thief && thief.stealTargets.length && !state.pendingCardAction && !state.pendingRoll) {
+      const sel = document.createElement('select');
+      sel.innerHTML = '<option value="">🗝️ Diebstahl (Wurf ab 4)...</option>' +
+        thief.stealTargets.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+      sel.onchange = () => { if (sel.value) socket.emit('thiefSteal', { cardId: id, targetId: sel.value }); };
+      wrap.appendChild(sel);
     }
     // HALBLING-Wiederholungswurf: jede Handkarte kann die Karte sein, die
     // dafür abgelegt wird.
