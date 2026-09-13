@@ -167,6 +167,47 @@ function run() {
     done(room);
   }
 
+  // WANDERNDES MONSTER/ILLUSION brauchen ein Monster auf der Hand ("Spiele
+  // diese Karte MIT EINEM MONSTER VON DEINER HAND"). Ohne eines bleibt die
+  // Karte liegen - und es darf auch keine Karten-Animation dafuer geben.
+  {
+    const wandernd = byName('WANDERNDES MONSTER');
+    const a = makePlayer('a', { hand: [wandernd.id] }); // kein Monster dabei
+    const room = combatRoom([a, makePlayer('b')], [byName('LAHMER GOBLIN').id]);
+    handlePlayCombatCard(room, 'a', wandernd.id);
+    assert.ok(a.hand.includes(wandernd.id), 'ohne Handmonster bleibt die Karte liegen');
+    assert.strictEqual(room.combat.monsterIds.length, 1, 'es kommt kein Monster dazu');
+    assert.ok(!room.cardPlay, 'und es wird keine Karten-Animation ausgeloest');
+    assert.deepStrictEqual(COMBAT_REACTION_CARDS['WANDERNDES MONSTER'].brauchtHandmonster, true,
+      'der Client erfaehrt die Bedingung ueber diese Kennzeichnung');
+    done(room);
+  }
+
+  // "Spiele diese Karte, waehrend du dich im Kampf befindest." - anders als
+  // KUMPEL/WANDERNDES MONSTER/ILLUSION/UEBERFALLTRANK (die ausdruecklich
+  // "wenn jemand (du eingeschlossen!) im Kampf ist" sagen) darf HILF MIR nur
+  // spielen, wer selbst kaempft.
+  {
+    const ruestung = byName('LEDERRÜSTUNG');
+    const hilfMir = byName('HILF MIR');
+    const a = makePlayer('a');
+    const b = makePlayer('b', { hand: [ruestung.id] });
+    const c = makePlayer('c', { hand: [hilfMir.id] });   // steht NICHT im Kampf
+    const room = combatRoom([a, b, c], [byName('LAHMER GOBLIN').id]);
+    handleEquipItem(room, 'b', ruestung.id);
+    handlePlayCombatCard(room, 'c', hilfMir.id);
+    assert.ok(c.hand.includes(hilfMir.id), 'die Karte bleibt auf der Hand');
+    assert.strictEqual(room.pendingCardAction, null, 'und es wird keine Zielauswahl geoeffnet');
+    assert.ok(equippedItemIds(b).includes(ruestung.id), 'B behaelt die Ruestung');
+
+    // Als Helferin im selben Kampf geht es dann doch.
+    room.combat.helperId = 'c';
+    handlePlayCombatCard(room, 'c', hilfMir.id);
+    assert.strictEqual(room.pendingCardAction && room.pendingCardAction.kind, 'targetPlayer',
+      'wer im Kampf steht, darf sie spielen');
+    done(room);
+  }
+
   // -------------------------------------------------------------------
   // ÜBERFALLTRANK: eine andere Person kaempft, aber der urspruengliche
   // Spieler darf danach trotzdem pluendern - der Zug wechselt nie

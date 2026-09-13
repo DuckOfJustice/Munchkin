@@ -1289,8 +1289,18 @@
     // Kampfreaktionskarten (Kumpel, Wanderndes Monster, Illusion, Hilf mir,
     // Ueberfalltrank) - welche das sind, sagt der Server (state.combatReactionCards).
     if (state.combat && !state.combat.mustFlee && !state.pendingCardAction && (state.combatReactionCards || []).includes(c.name)) {
-      const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
-      wrap.appendChild(btn);
+      // Zwei Bedingungen, die der Server kennt und der Client nur abfragt:
+      // HILF MIR darf nur spielen, wer selbst im Kampf steht
+      // (combatReactionOnlyInFight), und WANDERNDES MONSTER/ILLUSION brauchen
+      // ein Monster auf der eigenen Hand (combatReactionNeedsMonster).
+      const imKampf = state.combat.actorId === myInfo.playerId || state.combat.helperId === myInfo.playerId;
+      const fehltKampf = (state.combatReactionOnlyInFight || []).includes(c.name) && !imKampf;
+      const fehltMonster = (state.combatReactionNeedsMonster || []).includes(c.name)
+        && !myInfo.hand.some((hid) => (card(hid) || {}).category === 'monster');
+      if (!fehltKampf && !fehltMonster) {
+        const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
+        wrap.appendChild(btn);
+      }
     }
     // Klassenkräfte, die Handkarten kosten (Krieger "Berserken", Priester
     // "Vertreiben", Zauberer "Flugzauber"). Welche gerade nutzbar ist und wie

@@ -442,6 +442,11 @@ function publicState(room) {
     bigItems: [...BIG_ITEMS],
     doorCombatCards: Object.keys(DOOR_COMBAT_CARDS),
     combatReactionCards: Object.keys(COMBAT_REACTION_CARDS),
+    // Davon duerfen manche nur von Kaempfenden gespielt werden (HILF MIR) -
+    // damit der Client den Knopf gar nicht erst anbietet.
+    combatReactionOnlyInFight: Object.keys(COMBAT_REACTION_CARDS).filter((n) => COMBAT_REACTION_CARDS[n].nurImKampf),
+    // Und manche brauchen ein Monster auf der Hand (Wanderndes Monster, Illusion).
+    combatReactionNeedsMonster: Object.keys(COMBAT_REACTION_CARDS).filter((n) => COMBAT_REACTION_CARDS[n].brauchtHandmonster),
     // Welche Tuerkarten als Fluch gelten (die Rohdaten fuehren die meisten als
     // normale Tuerkarte) - damit der Client den "Fluch spielen"-Knopf zeigen
     // kann, ohne eine eigene Namensliste zu pflegen.
@@ -2789,6 +2794,12 @@ function handlePlayCombatCard(room, playerId, cardId) {
   const reaktion = COMBAT_REACTION_CARDS[c.name];
   if (reaktion) {
     if (room.pendingCardAction || room.pendingConsequence) return;
+    // HILF MIR: "waehrend du dich im Kampf befindest" (siehe nurImKampf).
+    if (reaktion.nurImKampf && !combatParticipants(room).some((p) => p.id === player.id)) {
+      log(room, `"${c.name}" darf nur spielen, wer selbst im Kampf steht - die Karte bleibt bei ${player.name} auf der Hand.`);
+      touchRoom(room);
+      return;
+    }
     applyCombatReaction(room, player, cardId, reaktion);
     return;
   }

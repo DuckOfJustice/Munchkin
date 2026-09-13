@@ -51,12 +51,16 @@ module.exports = () => {
     'KUMPEL': { kind: 'duplicateMonster' },
     // "Spiele diese Karte mit einem Monster von deiner Hand, wenn jemand im
     // Kampf ist. Dein Monster schliesst sich dem schon kaempfenden an."
-    'WANDERNDES MONSTER': { kind: 'addMonsterFromHand' },
+    'WANDERNDES MONSTER': { kind: 'addMonsterFromHand', brauchtHandmonster: true },
     // "Lege ein beliebiges Monster in diesem Kampf ab ... und ersetze es durch
     // eine Monsterkarte von deiner Hand."
-    'ILLUSION': { kind: 'replaceMonsterFromHand' },
-    // "Nimm einen Gegenstand von einem beliebigen Spieler."
-    'HILF MIR': { kind: 'takeItemFromPlayer' },
+    'ILLUSION': { kind: 'replaceMonsterFromHand', brauchtHandmonster: true },
+    // "Spiele diese Karte, WAEHREND DU DICH IM KAMPF BEFINDEST. Nimm einen
+    // Gegenstand von einem beliebigen Spieler." Die einzige der fuenf
+    // Reaktionskarten mit dieser Bedingung - die anderen sagen ausdruecklich
+    // das Gegenteil ("wenn jemand (du eingeschlossen!) im Kampf ist",
+    // "Waehrend beliebigem Kampf spielen").
+    'HILF MIR': { kind: 'takeItemFromPlayer', nurImKampf: true },
     // "Ein anderer Spieler (deiner Wahl) kaempft gegen das/die Monster."
     'ÜBERFALLTRANK': { kind: 'handOverCombat' },
   };
