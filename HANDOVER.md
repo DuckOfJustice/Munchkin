@@ -991,3 +991,62 @@ nachgezogen: die Abdeckungs-Schranke in `auto-consequence` (15 → 10) und die
 „bewusst manuell"-Zeile für GESCHLECHTSUMWANDLUNG in `card-curses`. Dazu die
 Zusicherung in `card-abilities`, dass jede Spezialausrüstung einen Kampfbonus
 hat - FALSCHE OHREN und ZAUBERCOUCH verleihen stattdessen eine Rasse/Klasse.
+
+---
+
+## 10. Weglaufen betrifft alle Beteiligten (2026-09-13)
+
+**Der Fehler:** Nur `actor` lief weg und nur `actor` bekam die Schlimmen
+Dinge. Wer im Kampf geholfen hatte, kam ohne Wurf und ohne Folgen davon —
+`finishFleeSuccess` sagte das sogar ausdrücklich im Kommentar. Nachgewiesen
+gegen den alten Stand: nach dem Wurf der kämpfenden Person war
+`room.combat` sofort `null`, die Helfer:in hatte nie gewürfelt.
+
+**Der Umbau:** Statt an fünf Stellen `c.actorId !== playerId` zu prüfen, gibt
+es jetzt eine Fluchtreihe am Kampf:
+
+| Feld | Bedeutung |
+|---|---|
+| `combat.fleeQueue` | wer noch weglaufen muss (kämpfende Person zuerst, dann Helfer:in) |
+| `combat.fleeingId` | wer gerade dran ist |
+| `combat.fleeFailed` | wen es erwischt hat |
+
+`fluechtenderId(room)` ist die einzige Antwort auf „wer läuft gerade?" — und
+legt die Reihe an, falls sie fehlt. Damit gilt „`mustFlee` heißt: alle
+Beteiligten laufen einzeln weg" auch dort, wo `mustFlee` anders gesetzt wird
+(Testaufbauten, künftige Kartenwege). Die fünf Handler (`handleAttemptFlee`,
+`handleFleeEscape`, `handleUseLamp`, `handleFleeReroll`,
+`handleUseGuaranteedFlee`) fragen alle nur noch diese eine Funktion.
+
+`naechsterFluechtling` rückt weiter und setzt die personenbezogenen
+Zwischenstände zurück (Halbling-Wiederholung, Kleberfläschchen-Fenster),
+sonst erbt die nächste Person sie. Getrennte werden übersprungen.
+
+`beendeFluchtphase` räumt erst auf, wenn **alle** gewürfelt haben — hätten wir
+je Person sofort aufgelöst, wäre der Kampf weg, bevor die zweite überhaupt
+würfelt. Das Miese Zeug kommt danach:
+
+- Helfer:innen zuerst (`keepPhase: true`, ihre Bestätigung bewegt die Zugphase
+  nicht), die kämpfende Person zuletzt — **ihre** Bestätigung gibt den Zug frei.
+- Ist die kämpfende Person entkommen, wechselt die Phase sofort.
+- `room._pendingConsequenceBacklog` reiht die zweite Konsequenz ein;
+  `room.pendingConsequence` ist ein einzelner Platz. Gleiche Bauform wie
+  `_queuedCardActionBacklog`.
+
+**Bots**: `scheduleBotActionsIfNeeded` plant beim Weglaufen für
+`fluechtenderId`, nicht mehr für die Person am Zug — sonst stünde die Partie,
+sobald eine Bot-Helfer:in dran ist. `botSituation` enthält `fleeingId`, damit
+ein Wechsel der fliehenden Person neu einplant.
+
+**Nicht geprüft in der Praxis**: Bots helfen aktuell grundsätzlich nicht
+(`handleRespondHelp(room, helper.id, false)`), der Bot-Helfer-Pfad kommt im
+Durchlauf also nie vor. Abgedeckt ist er nur durch `tests/flee-helper.test.js`.
+
+**Bewusst nicht mitgemacht**: die Regel „bei mehreren Monstern würfelst du
+für jedes einzeln" (so steht es auch auf WANDERNDES MONSTER). Es bleibt bei
+einem Wurf je Person gegen alle Monster; wer scheitert, bekommt die Schlimmen
+Dinge aller. Mit dem Nutzer abgestimmt, eigene Runde.
+
+`GUARANTEED_FLEE_CARDS` beenden weiterhin nur die eigene Flucht ohne
+Stufenstrafe und ohne Kleberfläschchen-Fenster (`// ponytail:` am Code) — neu
+ist nur, dass danach die Helfer:in trotzdem selbst laufen muss.

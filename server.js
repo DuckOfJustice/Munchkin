@@ -576,10 +576,10 @@ function sendInfoTo(room, player) {
     // eigener Klasse und eigener Hand, also privat.
     thiefPower: thiefPowerInfo(room, player),
     resurrectPiles: priestResurrectPiles(room, player),
-    fleeEscapeCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.actorId === player.id)
+    fleeEscapeCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.fleeingId === player.id)
       ? postFleeEscapeCardIds(player) : [],
     // MAGISCHE LAMPE: nur waehrend des Fluchtentscheidungsfensters relevant.
-    lampCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.actorId === player.id)
+    lampCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.fleeingId === player.id)
       ? lampCardIds(player) : [],
     // Beute-Animation nach einem Kampfsieg. Bewusst hier im privaten
     // yourInfo statt im oeffentlichen publicState: welche Schatzkarten
@@ -889,7 +889,20 @@ function handleAckConsequence(room, playerId) {
   const wasCurse = pc.kind === 'curse';
   room.pendingConsequence = null;
   const player = findPlayer(room, playerId);
-  if (wasCurse && pc.keepPhase) {
+  // Zweite Person eines verlorenen Kampfes: erst jetzt ist der Platz frei.
+  if (room._pendingConsequenceBacklog && room._pendingConsequenceBacklog.length) {
+    const naechste = room._pendingConsequenceBacklog.shift();
+    const opfer = findPlayer(room, naechste.playerId);
+    if (opfer) {
+      room.pendingConsequence = naechste.eintrag;
+      autoApplyLossConsequence(room, opfer, naechste.monsters.map((m) => ({ name: m.name, text: m.badstuff })));
+    }
+  }
+  if (pc.keepPhase && !wasCurse) {
+    // Miese-Zeug-Bestaetigung einer Helfer:in: sie ist nicht am Zug, die
+    // Zugphase geht sie nichts an (siehe beendeFluchtphase).
+    log(room, `${player.name} hakt das Miese Zeug ab.`);
+  } else if (wasCurse && pc.keepPhase) {
     // Aus der Hand gespielter Fluch (handlePlayCurseFromHand): er gehoert zu
     // keiner Zugphase, der laufende Zug bleibt unangetastet.
     log(room, `${player.name} hakt den Fluch ab.`);
@@ -899,8 +912,9 @@ function handleAckConsequence(room, playerId) {
   } else {
     // Folge einer verlorenen Kampfrunde: direkt weiter zu Phase 4 (wurde beim
     // Kampfstart bereits als combatHappenedThisTurn markiert) - ausser
-    // ÜBERFALLTRANK war im Spiel (pc.originalActorId, siehe applyFleeFailure
-    // und combatEndPhase), dann bekommt die urspruengliche Person trotz
+    // ÜBERFALLTRANK war im Spiel (pc.originalActorId, siehe
+    // oeffneVerlustKonsequenz und combatEndPhase), dann bekommt die
+    // urspruengliche Person trotz
     // verlorenem Kampf ihre Pluenderphase.
     room.turnPhase = combatEndPhase({ originalActorId: pc.originalActorId }, false);
     log(room, room.turnPhase === 'pluendern'
@@ -2863,6 +2877,14 @@ function startCombat(room, actorId, monsterIds, opts) {
     actorModifier: 0,
     monsterModifier: 0,
     mustFlee: false,
+    // Weglaufen betrifft JEDE beteiligte Person einzeln (Angreifer:in und
+    // Helfer:in): fleeQueue sind die, die noch dran sind, fleeingId ist die
+    // aktuelle, fleeFailed sammelt die, die es nicht geschafft haben. Das
+    // Miese Zeug wird erst verteilt, wenn alle gewuerfelt haben - siehe
+    // beendeFluchtphase.
+    fleeQueue: null,
+    fleeingId: null,
+    fleeFailed: [],
     fromHand: !!opts.fromHand,
     classDiscards: {}, // "<playerId>:combat"/"<playerId>:flee" -> Anzahl bereits abgeworfener Karten
     fleeBonus: 0,      // Summe der Flugzauber-Karten
@@ -3584,7 +3606,13 @@ function handleEvaluateCombat(room, playerId) {
     resolveCombatWin(room);
   } else {
     c.mustFlee = true;
-    log(room, `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!`);
+    // Reihenfolge: erst die kaempfende Person, dann die Helfer:in.
+    c.fleeQueue = combatParticipants(room).map((p) => p.id);
+    c.fleeingId = c.fleeQueue[0];
+    c.fleeFailed = [];
+    const wer = combatParticipants(room).length > 1
+      ? ` Jede:r läuft einzeln weg (${combatParticipants(room).map((p) => p.name).join(', ')}).` : '';
+    log(room, `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`);
     touchRoom(room);
   }
 }
@@ -3677,8 +3705,11 @@ function handleAttemptFlee(room, playerId, modifier) {
   if (room.combat.fleeRerollOffer) return; // erst das Halbling-Angebot beantworten
   if (room.combat.escapeReactionOffer) return; // erst das Kleberflaeschchen-Fenster beantworten
   const c = room.combat;
-  if (c.actorId !== playerId) return;
-  const actor = findPlayer(room, c.actorId);
+  // Nicht mehr "nur die kaempfende Person": jede beteiligte Person laeuft
+  // einzeln weg, fluechtenderId sagt, wer gerade dran ist.
+  if (fluechtenderId(room) !== playerId) return;
+  const actor = findPlayer(room, playerId);
+  if (!actor) return;
   // `modifier` kommt aus dem Client und ist damit ungeprüfte Fremdeingabe
   // (manuell eingetragene Karteneffekte). Alles, was fest auf Karten steht -
   // Elfenbonus, Weglaufstiefel, Tuba, Monster wie die Schnecken auf Speed -
@@ -3758,9 +3789,8 @@ function applyFleeSuccess(room, actor, c) {
 
 function finishFleeSuccess(room, actor, c) {
   // MIESER SPIEGEL/GESCHLECHTSUMWANDLUNG gelten nur "im nächsten Kampf" -
-  // der ist hiermit vorbei (geflohen). Helfer:in ist an einer Flucht nicht
-  // beteiligt (siehe handleAttemptFlee: nur actor würfelt), daher hier nur
-  // die/der Fliehende.
+  // der ist hiermit vorbei (geflohen). Gilt je Person, denn jede läuft
+  // einzeln weg (siehe fleeQueue).
   clearNextCombatCurses([actor]);
   let penalty = 0;
   c.monsterIds.forEach((id) => {
@@ -3787,10 +3817,87 @@ function finishFleeSuccess(room, actor, c) {
       log(room, `${actor.name} nimmt auf dem Weg nach draussen noch 1 verdeckte Schatzkarte mit.`);
     }
   }
+  naechsterFluechtling(room, c);
+}
+
+// Die naechste Person, die noch weglaufen muss - oder, wenn alle durch sind,
+// das Ende der Fluchtphase. Die personenbezogenen Zwischenstaende
+// (Halbling-Wiederholung, Kleberflaeschchen-Fenster) werden dabei
+// zurueckgesetzt, sonst erbt die naechste Person sie.
+// Wer ist gerade mit Weglaufen dran? Legt die Reihe an, falls sie fehlt -
+// so gilt die Regel "mustFlee heisst: alle Beteiligten laufen einzeln weg"
+// auch dann, wenn mustFlee irgendwo anders gesetzt wurde als in
+// handleEvaluateCombat (Testaufbauten, kuenftige Kartenwege).
+function fluechtenderId(room) {
+  const c = room.combat;
+  if (!c || !c.mustFlee) return null;
+  if (!c.fleeQueue) {
+    c.fleeQueue = combatParticipants(room).map((p) => p.id);
+    c.fleeingId = c.fleeQueue[0] || null;
+    c.fleeFailed = c.fleeFailed || [];
+  }
+  return c.fleeingId;
+}
+
+function naechsterFluechtling(room, c) {
+  c.fleeQueue = (c.fleeQueue || []).filter((id) => id !== c.fleeingId);
+  const naechsterId = c.fleeQueue.find((id) => {
+    const p = findPlayer(room, id);
+    return p && p.connected; // Getrennte werden uebersprungen, wie ueberall sonst
+  });
+  if (!naechsterId) { beendeFluchtphase(room, c); return; }
+  c.fleeingId = naechsterId;
+  c.fleeRerollOffer = false;
+  c.canReroll = false;
+  c.halblingRerollUsed = false;
+  c.escapeReactionDone = false;
+  c.fleeManualModifier = 0;
+  log(room, `${findPlayer(room, naechsterId).name} muss jetzt selbst weglaufen.`);
+  touchRoom(room);
+}
+
+// Alle haben gewuerfelt: Monster ablegen, Kampf beenden und das Miese Zeug
+// verteilen. Erst jetzt - haetten wir es je Person sofort aufgeloest, waere
+// der Kampf schon weg, bevor die zweite Person ueberhaupt gewuerfelt hat.
+function beendeFluchtphase(room, c) {
+  const monsters = c.monsterIds.map(card);
+  const gescheitert = (c.fleeFailed || []).map((id) => findPlayer(room, id)).filter(Boolean);
   discardMonsterIds(room.doorDiscard, c.monsterIds);
   room.combat = null;
-  // ÜBERFALLTRANK: siehe combatEndPhase.
-  room.turnPhase = combatEndPhase(c, false);
+  // Die Zugphase haengt an der kaempfenden Person: hat SIE das Miese Zeug
+  // kassiert, wechselt die Phase erst mit ihrer Bestaetigung (wie bisher,
+  // siehe handleAckConsequence). Sonst jetzt.
+  const actorGescheitert = gescheitert.some((p) => p.id === c.actorId);
+  if (!actorGescheitert) room.turnPhase = combatEndPhase(c, false);
+  if (!gescheitert.length) return;
+  // Helfer:innen zuerst, die kaempfende Person zuletzt - deren Bestaetigung
+  // gibt den Zug wieder frei, also soll sie am Ende stehen.
+  const reihenfolge = gescheitert.filter((p) => p.id !== c.actorId)
+    .concat(gescheitert.filter((p) => p.id === c.actorId));
+  reihenfolge.forEach((p) => oeffneVerlustKonsequenz(room, p, monsters, c, p.id !== c.actorId));
+}
+
+// Das Miese Zeug fuer EINE Person. Ist schon eine Konsequenz offen (die
+// zweite Person eines verlorenen Kampfes), wandert sie in den Nachlauf und
+// wird erst geoeffnet, wenn die erste bestaetigt ist - room.pendingConsequence
+// ist ein einzelner Platz.
+function oeffneVerlustKonsequenz(room, player, monsters, c, keepPhase) {
+  const eintrag = {
+    playerId: player.id, kind: 'loss', cardId: null,
+    text: monsters.map((m) => `${m.name}: ${m.badstuff || '(kein Text hinterlegt)'}`).join(' | '),
+    autoApplied: null, choice: null,
+    // ÜBERFALLTRANK: originalActorId muss den Kampf ueberleben (room.combat
+    // ist gerade geleert) - handleAckConsequence liest ihn von hier.
+    originalActorId: c.originalActorId || null,
+    keepPhase: !!keepPhase,
+  };
+  if (room.pendingConsequence) {
+    room._pendingConsequenceBacklog = (room._pendingConsequenceBacklog || [])
+      .concat({ eintrag, playerId: player.id, monsters });
+    return;
+  }
+  room.pendingConsequence = eintrag;
+  autoApplyLossConsequence(room, player, monsters.map((m) => ({ name: m.name, text: m.badstuff })));
 }
 
 // POST_FLEE_ESCAPE_CARDS: siehe src/cards/treasures.js. "Ablegen, wenn der
@@ -3803,7 +3910,7 @@ function postFleeEscapeCardIds(actor) {
 // Rettungskarte nach dem verpatzten Wurf einsetzen.
 function handleFleeEscape(room, playerId, cardId) {
   const c = room.combat;
-  if (!c || !c.fleeRerollOffer || c.actorId !== playerId) return;
+  if (!c || !c.fleeRerollOffer || fluechtenderId(room) !== playerId) return;
   const actor = findPlayer(room, playerId);
   if (!actor || !postFleeEscapeCardIds(actor).includes(cardId)) return;
   c.fleeRerollOffer = false;
@@ -3829,7 +3936,7 @@ function lampCardIds(actor) {
 
 function handleUseLamp(room, playerId, cardId, monsterId) {
   const c = room.combat;
-  if (!c || !c.fleeRerollOffer || c.actorId !== playerId) return;
+  if (!c || !c.fleeRerollOffer || fluechtenderId(room) !== playerId) return;
   const actor = findPlayer(room, playerId);
   if (!actor || !actor.hand.includes(cardId)) return;
   const lampe = card(cardId);
@@ -3862,19 +3969,9 @@ function applyFleeFailure(room, actor, c) {
   // Auch eine misslungene Flucht beendet "den nächsten Kampf" - sonst würde
   // der Fluch fälschlich in einen weiteren, künftigen Kampf hineinwirken.
   clearNextCombatCurses([actor]);
-  const monsters = c.monsterIds.map(card);
-  const badstuffText = monsters.map((m) => `${m.name}: ${m.badstuff || '(kein Text hinterlegt)'}`).join(' | ');
-  discardMonsterIds(room.doorDiscard, c.monsterIds);
-  room.combat = null;
-  // ÜBERFALLTRANK: originalActorId muss den Kampf ueberleben (room.combat
-  // wird gerade geleert) - handleAckConsequence liest ihn von hier, sobald
-  // die Konsequenz bestaetigt wird, und oeffnet dann die Pluenderphase statt
-  // "gabe" fuer den urspruenglichen Spieler.
-  room.pendingConsequence = {
-    playerId: actor.id, kind: 'loss', cardId: null, text: badstuffText, autoApplied: null, choice: null,
-    originalActorId: c.originalActorId || null,
-  };
-  autoApplyLossConsequence(room, actor, monsters.map((m) => ({ name: m.name, text: m.badstuff })));
+  c.fleeFailed = (c.fleeFailed || []).concat(actor.id);
+  log(room, `${actor.name} entkommt nicht und wird das Miese Zeug abbekommen.`);
+  naechsterFluechtling(room, c);
 }
 
 // Nur beim ersten verpatzten Wurf, nur mit Karte auf der Hand - und nicht
@@ -3900,7 +3997,7 @@ function botFleeRerollCard(room, actor) {
 // (cardId null) das Miese Zeug hinnehmen.
 function handleFleeReroll(room, playerId, cardId) {
   const c = room.combat;
-  if (!c || !c.fleeRerollOffer || c.actorId !== playerId) return;
+  if (!c || !c.fleeRerollOffer || fluechtenderId(room) !== playerId) return;
   const actor = findPlayer(room, playerId);
   if (!actor) return;
   if (cardId !== null && cardId !== undefined) {
@@ -3929,7 +4026,7 @@ function handleFleeReroll(room, playerId, cardId) {
 function handleUseGuaranteedFlee(room, playerId, cardId) {
   if (!room.combat || !room.combat.mustFlee) return;
   const c = room.combat;
-  if (c.actorId !== playerId) return;
+  if (fluechtenderId(room) !== playerId) return;
   const player = findPlayer(room, playerId);
   if (!player) return;
   const inHand = player.hand.includes(cardId);
@@ -3947,15 +4044,17 @@ function handleUseGuaranteedFlee(room, playerId, cardId) {
   }
   if (inHand) removeFromHand(player, cardId); else unequipSlotCard(player, cardId);
   discardCard(room, cardId);
-  discardMonsterIds(room.doorDiscard, c.monsterIds);
-  room.combat = null;
-  // ÜBERFALLTRANK: siehe combatEndPhase.
-  room.turnPhase = combatEndPhase(c, false);
   let extra = '';
   // "Du kannst automatisch aus einem beliebigen Kampf weglaufen ... aber du
   // verlierst eine Stufe."
   if (cardData.name === 'DER ANDERE RING') { setLevel(player, player.level - 1); extra = ', verliert dafür 1 Stufe'; }
   log(room, `${player.name} entkommt garantiert mit "${cardData.name}"${extra}.`, [cardId]);
+  // ponytail: bewusst NICHT ueber applyFleeSuccess - die Karte sagt
+  // "automatisch weglaufen", ohne Stufenstrafe (MR. BONES) und ohne
+  // Kleberflaeschchen-Fenster. Nur diese Person ist raus, eine wartende
+  // Helfer:in laeuft danach selbst.
+  clearNextCombatCurses([player]);
+  naechsterFluechtling(room, c);
   touchRoom(room);
 }
 
@@ -4430,7 +4529,7 @@ function botSituation(room) {
     room.pendingCardAction ? room.pendingCardAction.playerId : null,
     room.pendingConsequence ? room.pendingConsequence.playerId : null,
     c ? [c.actorId, c.helperId, c.helperPending ? c.helperPending.targetId : null, c.monsterIds,
-      c.mustFlee, !!c.fleeRerollOffer, !!c.escapeReactionOffer, combatAllReady(room)] : null,
+      c.mustFlee, c.fleeingId, !!c.fleeRerollOffer, !!c.escapeReactionOffer, combatAllReady(room)] : null,
   ]);
 }
 
@@ -4500,7 +4599,11 @@ function scheduleBotActionsIfNeeded(room) {
       return;
     }
     if (c.escapeReactionOffer) return; // erst das Kleberflaeschchen-Fenster
-    if (actor.isBot) {
+    // Beim Weglaufen ist nicht zwingend die kaempfende Person dran: jede
+    // beteiligte Person laeuft einzeln weg (fleeingId). Ein Bot als Helfer:in
+    // muss deshalb hier eingeplant werden, sonst steht die Partie.
+    const dran = (c.mustFlee && findPlayer(room, fluechtenderId(room))) || actor;
+    if (dran.isBot) {
       // Solange noch jemand bestätigen muss, gar nicht erst einplanen -
       // handleEvaluateCombat würde nur wirkungslos abprallen und der Bot
       // liefe im Sekundentakt dagegen. Das nächste "Bereit" löst ohnehin
@@ -4512,9 +4615,9 @@ function scheduleBotActionsIfNeeded(room) {
         if (!rooms.has(room.code) || room.combat !== snapshotCombat) return;
         // Ein Bot-Halbling muss das Wiederholungsangebot selbst beantworten,
         // sonst wartet die Partie ewig auf eine Entscheidung.
-        if (room.combat.fleeRerollOffer) handleFleeReroll(room, actor.id, botFleeRerollCard(room, actor));
-        else if (room.combat.mustFlee) handleAttemptFlee(room, actor.id, 0);
-        else handleEvaluateCombat(room, actor.id);
+        if (room.combat.fleeRerollOffer) handleFleeReroll(room, dran.id, botFleeRerollCard(room, dran));
+        else if (room.combat.mustFlee) handleAttemptFlee(room, dran.id, 0);
+        else handleEvaluateCombat(room, dran.id);
         broadcastState(room);
       }, randomDelay());
     }
@@ -4816,6 +4919,7 @@ module.exports = {
   BIG_ITEMS, isBigItem, bigItemCount, canCarryAnotherBigItem,
   ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, reactionHolders, rollWithWindow,
   handlePlayReactionCard, handlePassReaction, LAMP_CARDS, lampCardIds, handleUseLamp,
+  fluechtenderId, naechsterFluechtling, beendeFluchtphase,
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurse, curseCombatModifier, curseSuppressesItemBonuses,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,

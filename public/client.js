@@ -827,6 +827,9 @@
     div.appendChild(monsterRow);
 
     const iAmActor = c.actorId === myInfo.playerId;
+    // Beim Weglaufen laeuft jede beteiligte Person einzeln - c.fleeingId sagt,
+    // wer gerade dran ist (auch eine Helfer:in).
+    const ichFliehe = c.fleeingId === myInfo.playerId;
     const iAmHelper = c.helperId === myInfo.playerId;
 
     const strengthRow = document.createElement('div');
@@ -987,7 +990,7 @@
       div.appendChild(btn);
     }
 
-    if (iAmActor && c.fleeRerollOffer) {
+    if (ichFliehe && c.fleeRerollOffer) {
       const escapeIds = myInfo.fleeEscapeCardIds || [];
       const wege = [];
       if (c.canReroll) wege.push('als Halbling 1 Handkarte ablegen (Knopf unter der Karte) und noch einmal würfeln');
@@ -1012,7 +1015,7 @@
       });
       const acceptBtn = mkBtn('Miesem Zeug stellen', () => socket.emit('fleeReroll', { cardId: null }));
       div.appendChild(acceptBtn);
-    } else if (iAmActor && c.mustFlee) {
+    } else if (ichFliehe && c.mustFlee) {
       div.appendChild(textNode('Ihr verliert diesen Kampf - jetzt fliehen (Würfelwurf ≥ 5 nötig)!'));
       const fleeRow = document.createElement('div');
       fleeRow.className = 'row gap';
@@ -1022,6 +1025,11 @@
       fleeBtn.onclick = () => socket.emit('attemptFlee', { modifier: fleeRow.querySelector('#fleeModInput').value });
       fleeRow.appendChild(fleeBtn);
       div.appendChild(fleeRow);
+    } else if (c.mustFlee && c.fleeingId) {
+      // Wer nicht gerade dran ist, sieht wenigstens, auf wen gewartet wird -
+      // beim Weglaufen laeuft jede beteiligte Person einzeln.
+      const wer = (state.players.find((p) => p.id === c.fleeingId) || {}).name || '?';
+      div.appendChild(textNode(`Ihr verliert diesen Kampf. ${wer} läuft gerade weg - danach ist die nächste beteiligte Person dran.`));
     }
 
     div.appendChild(actions);
@@ -1528,7 +1536,7 @@
 
   function guaranteedFleeUsable(c) {
     if (!state.combat || !state.combat.mustFlee) return false;
-    if (state.combat.actorId !== myInfo.playerId) return false;
+    if (state.combat.fleeingId !== myInfo.playerId) return false;
     if (!GUARANTEED_FLEE_NAMES.has(c.name)) return false;
     const max = GUARANTEED_FLEE_MAX_LEVEL[c.name];
     if (typeof max !== 'number') return true;
