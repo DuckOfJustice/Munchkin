@@ -990,6 +990,24 @@
       div.appendChild(btn);
     }
 
+    const lampIds = myInfo.lampCardIds || [];
+    if (isMyTurn() && lampIds.length && !c.fleeRerollOffer) {
+      const lampBox = document.createElement('div');
+      lampBox.className = 'row gap wrap';
+      lampBox.style.marginTop = '6px';
+      lampIds.forEach((lampId) => {
+        (c.monsterIds || []).forEach((monsterId) => {
+          const txt = (c.monsterIds.length === 1)
+            ? `🧞 "${card(lampId).name}": "${card(monsterId).name}" verschwinden lassen (Schatz ja, keine Stufe)`
+            : `🧞 "${card(lampId).name}": "${card(monsterId).name}" verschwinden lassen`;
+          const btn = mkBtn(txt, () => socket.emit('useLamp', { cardId: lampId, monsterId }));
+          btn.className = 'primary';
+          lampBox.appendChild(btn);
+        });
+      });
+      div.appendChild(lampBox);
+    }
+
     if (ichFliehe && c.fleeRerollOffer) {
       const escapeIds = myInfo.fleeEscapeCardIds || [];
       const wege = [];
@@ -1437,6 +1455,24 @@
       if (!fehltKampf && !fehltMonster) {
         const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
         wrap.appendChild(btn);
+      }
+    }
+    // MAGISCHE LAMPE: in der eigenen Runde während des Kampfes spielbar (auch beim Fliehen)
+    if (state.combat && isMyTurn() && (myInfo.lampCardIds || []).includes(id) && !state.pendingCardAction) {
+      if ((state.combat.monsterIds || []).length === 1) {
+        const monId = state.combat.monsterIds[0];
+        const btn = mkBtn(`🧞 Im Kampf einsetzen ("${card(monId).name}" verschwinden lassen)`,
+          () => socket.emit('useLamp', { cardId: id, monsterId: monId }));
+        btn.className = 'primary';
+        wrap.appendChild(btn);
+      } else if ((state.combat.monsterIds || []).length > 1) {
+        const select = document.createElement('select');
+        select.innerHTML = '<option value="">🧞 Monster verschwinden lassen...</option>' +
+          state.combat.monsterIds.map((mId) => `<option value="${mId}">${escapeHtml(card(mId).name)}</option>`).join('');
+        select.onchange = () => {
+          if (select.value) socket.emit('useLamp', { cardId: id, monsterId: select.value });
+        };
+        wrap.appendChild(select);
       }
     }
     // Klassenkräfte, die Handkarten kosten (Krieger "Berserken", Priester

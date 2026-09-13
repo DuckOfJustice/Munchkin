@@ -578,8 +578,9 @@ function sendInfoTo(room, player) {
     resurrectPiles: priestResurrectPiles(room, player),
     fleeEscapeCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.fleeingId === player.id)
       ? postFleeEscapeCardIds(player) : [],
-    // MAGISCHE LAMPE: nur waehrend des Fluchtentscheidungsfensters relevant.
-    lampCardIds: (room.combat && room.combat.fleeRerollOffer && room.combat.fleeingId === player.id)
+    // MAGISCHE LAMPE: in der eigenen Runde während des Kampfes spielbar (im Kampf,
+    // bei der Flucht oder nach verpatztem Wurf).
+    lampCardIds: (room.combat && currentPlayer(room) && currentPlayer(room).id === player.id && room.combat.actorId === player.id)
       ? lampCardIds(player) : [],
     // Beute-Animation nach einem Kampfsieg. Bewusst hier im privaten
     // yourInfo statt im oeffentlichen publicState: welche Schatzkarten
@@ -1129,6 +1130,10 @@ function applyPrimitiveAction(room, player, action) {
         cardIds: [action.nehmen], levelsGained: 0, monsterNames: ['PACKRATTE'],
       };
       return `nimmt "${card(action.nehmen).name}"`;
+    }
+    case 'useLampOnMonster': {
+      handleUseLamp(room, player.id, action.lampCardId, action.monsterId);
+      return '';
     }
     // DAS DUNGEON-CASINO: "Jederzeit spielbar, ausser im Kampf. Wirf
     // Gegenstaende im Wert von mindestens 500 Goldstuecken ab und wirf einen
@@ -3337,6 +3342,27 @@ function handlePlayCombatCard(room, playerId, cardId) {
     applyCombatReaction(room, player, cardId, reaktion);
     return;
   }
+  if (LAMP_CARDS.has(c.name)) {
+    const actor = currentPlayer(room);
+    if (!actor || actor.id !== playerId || room.combat.actorId !== playerId) {
+      log(room, `"${c.name}" ist nur in der eigenen Runde spielbar - die Karte bleibt auf der Hand.`);
+      touchRoom(room);
+      return;
+    }
+    if (room.combat.monsterIds.length === 1) {
+      handleUseLamp(room, playerId, cardId, room.combat.monsterIds[0]);
+      return;
+    }
+    openCardChoice(room, actor, c.name, room.combat.monsterIds.map((mId) => ({
+      id: `lamp-mon-${mId}`,
+      label: `"${card(mId).name}" verschwinden lassen`,
+      action: { type: 'useLampOnMonster', monsterId: mId, lampCardId: cardId },
+    })));
+    room.pendingCardAction.sourceCardId = cardId;
+    log(room, `${player.name} spielt "${c.name}" im Kampf - Monster-Wahl nötig.`, [cardId]);
+    touchRoom(room);
+    return;
+  }
   if (isMonsterEnhancerCard(c)) {
     removeFromHand(player, cardId);
     // RAPIER-TROTTEL: "Jeder Monsterverstaerker, der auf den Trottel gespielt
@@ -3936,13 +3962,18 @@ function lampCardIds(actor) {
 
 function handleUseLamp(room, playerId, cardId, monsterId) {
   const c = room.combat;
-  if (!c || !c.fleeRerollOffer || fluechtenderId(room) !== playerId) return;
-  const actor = findPlayer(room, playerId);
-  if (!actor || !actor.hand.includes(cardId)) return;
+  if (!c) return;
+  const actor = currentPlayer(room);
+  if (!actor || actor.id !== playerId) return;
+  if (c.actorId !== playerId) return;
+  if (c.mustFlee && fluechtenderId(room) !== playerId) return;
+  if (!actor.hand.includes(cardId)) return;
   const lampe = card(cardId);
   if (!lampe || !LAMP_CARDS.has(lampe.name)) return;
-  const idx = c.monsterIds.indexOf(monsterId);
+  const targetMonsterId = monsterId || (c.monsterIds.length === 1 ? c.monsterIds[0] : null);
+  const idx = c.monsterIds.indexOf(targetMonsterId);
   if (idx < 0) return;
+  announceCardPlay(room, actor, cardId, `"${card(targetMonsterId).name}" verschwindet`);
   removeFromHand(actor, cardId);
   discardCard(room, cardId);
   if (c.monsterIds.length === 1) {
@@ -3951,7 +3982,8 @@ function handleUseLamp(room, playerId, cardId, monsterId) {
     // stehenden Monstern, das Monster darf also NICHT vorher aus
     // c.monsterIds gesplict werden (siehe VERZAUBERARMBAND-Kommentar in
     // src/cards/treasures.js, derselbe Grund).
-    log(room, `${actor.name} spielt "${lampe.name}": "${card(monsterId).name}" verschwindet - es war das einzige Monster.`, [cardId, monsterId]);
+    log(room, `${actor.name} spielt "${lampe.name}": "${card(targetMonsterId).name}" verschwindet - es war das einzige Monster.`, [cardId, targetMonsterId]);
+    clearNextCombatCurses([actor]);
     applyCombatPotionAction(room, actor, { type: 'endCombatNoLevel', leavesTreasure: true }, lampe);
   } else {
     const weg = c.monsterIds.splice(idx, 1)[0];

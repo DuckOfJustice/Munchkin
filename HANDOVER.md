@@ -837,13 +837,11 @@ kennt, verliert Zeit oder baut Fehler ein.
 Keine davon blockiert etwas. Sie stehen hier, damit sie nicht als neue
 Entdeckungen noch einmal Zeit kosten.
 
-- **MAGISCHE LAMPE** ist an `c.fleeRerollOffer` gebunden, wirkt also nur nach
-  einem verpatzten Weglaufwurf. Die Karte sagt "Nur in deiner Runde spielbar" -
-  der Rahmen ist der ganze Zug, und "selbst wenn dein Weglaufenwurf verpatzt
-  wurde" ist eine Zusicherung für den schlimmsten Fall, keine Einschränkung
-  darauf. Ein weiteres Fenster wäre ein eigener Ausspielweg plus UI. **Die
-  auffälligste der zurückgestellten Sachen - hier zuerst nachbessern, falls
-  jemand es im Spiel vermisst.**
+- **MAGISCHE LAMPE** war ursprünglich rein an `c.fleeRerollOffer` gebunden.
+  Inzwischen vollständig umgesetzt: im eigenen Zug zu jedem Zeitpunkt im Kampf
+  (vor dem Fliehen, beim Fliehen oder nach verpatztem Wurf) über das Kampf-Panel
+  sowie direkt an der Handkarte einsetzbar; bei mehreren Monstern mit freier
+  Monster-Auswahl.
 - **Die Warteschlangen-Reihenfolge ist kartenspezifisch.** Jede Karte sagt
   etwas anderes ("beginnend mit dem Spieler **vor** dir" gegen "**nach** dir",
   nur die Nachbarn, nur die Höchststufigen, alle anderen), und eine verdrehte
