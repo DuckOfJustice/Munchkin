@@ -547,7 +547,7 @@
         img.onerror = () => img.remove();
         el.innerHTML = `<b>${label}</b>`;
         el.appendChild(img);
-        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`));
+        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}${anhangText(cardId)}`));
         el.style.cursor = 'pointer';
         el.onclick = () => openCardModal(cardId);
       } else {
@@ -827,6 +827,9 @@
     div.appendChild(monsterRow);
 
     const iAmActor = c.actorId === myInfo.playerId;
+    // Beim Weglaufen laeuft jede beteiligte Person einzeln - c.fleeingId sagt,
+    // wer gerade dran ist (auch eine Helfer:in).
+    const ichFliehe = c.fleeingId === myInfo.playerId;
     const iAmHelper = c.helperId === myInfo.playerId;
 
     const strengthRow = document.createElement('div');
@@ -987,7 +990,25 @@
       div.appendChild(btn);
     }
 
-    if (iAmActor && c.fleeRerollOffer) {
+    const lampIds = myInfo.lampCardIds || [];
+    if (isMyTurn() && lampIds.length && !c.fleeRerollOffer) {
+      const lampBox = document.createElement('div');
+      lampBox.className = 'row gap wrap';
+      lampBox.style.marginTop = '6px';
+      lampIds.forEach((lampId) => {
+        (c.monsterIds || []).forEach((monsterId) => {
+          const txt = (c.monsterIds.length === 1)
+            ? `🧞 "${card(lampId).name}": "${card(monsterId).name}" verschwinden lassen (Schatz ja, keine Stufe)`
+            : `🧞 "${card(lampId).name}": "${card(monsterId).name}" verschwinden lassen`;
+          const btn = mkBtn(txt, () => socket.emit('useLamp', { cardId: lampId, monsterId }));
+          btn.className = 'primary';
+          lampBox.appendChild(btn);
+        });
+      });
+      div.appendChild(lampBox);
+    }
+
+    if (ichFliehe && c.fleeRerollOffer) {
       const escapeIds = myInfo.fleeEscapeCardIds || [];
       const wege = [];
       if (c.canReroll) wege.push('als Halbling 1 Handkarte ablegen (Knopf unter der Karte) und noch einmal würfeln');
@@ -1012,7 +1033,7 @@
       });
       const acceptBtn = mkBtn('Miesem Zeug stellen', () => socket.emit('fleeReroll', { cardId: null }));
       div.appendChild(acceptBtn);
-    } else if (iAmActor && c.mustFlee) {
+    } else if (ichFliehe && c.mustFlee) {
       div.appendChild(textNode('Ihr verliert diesen Kampf - jetzt fliehen (Würfelwurf ≥ 5 nötig)!'));
       const fleeRow = document.createElement('div');
       fleeRow.className = 'row gap';
@@ -1022,6 +1043,11 @@
       fleeBtn.onclick = () => socket.emit('attemptFlee', { modifier: fleeRow.querySelector('#fleeModInput').value });
       fleeRow.appendChild(fleeBtn);
       div.appendChild(fleeRow);
+    } else if (c.mustFlee && c.fleeingId) {
+      // Wer nicht gerade dran ist, sieht wenigstens, auf wen gewartet wird -
+      // beim Weglaufen laeuft jede beteiligte Person einzeln.
+      const wer = (state.players.find((p) => p.id === c.fleeingId) || {}).name || '?';
+      div.appendChild(textNode(`Ihr verliert diesen Kampf. ${wer} läuft gerade weg - danach ist die nächste beteiligte Person dran.`));
     }
 
     div.appendChild(actions);
@@ -1228,7 +1254,7 @@
         img.onerror = () => img.remove();
         el.innerHTML = `<b>${label}</b>`;
         el.appendChild(img);
-        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`));
+        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}${anhangText(cardId)}`));
         // Getragene Karte gross ansehen - wie in der Ausruestung anderer
         // Spieler:innen (openPlayerModal) und an den Handkarten.
         el.classList.add('clickable');
@@ -1265,14 +1291,20 @@
   function renderHand(p) {
     const box = $('myHand');
     box.innerHTML = '';
-    // PRIESTER "Auferstehung": nicht an eine einzelne Karte gebunden, also
-    // einmal ueber der Hand. Welche Stapel gehen, sagt der Server.
+    // PRIESTER "Auferstehung": nicht an eine einzelne Karte gebunden, also in
+    // einer eigenen Leiste ÜBER der Hand statt als Kachel dazwischen - sie ist
+    // keine Karte und soll auch nicht wie eine aussehen. Welche Stapel gehen,
+    // sagt der Server.
+    const powersBox = $('handPowers');
+    powersBox.innerHTML = '';
     (myInfo.resurrectPiles || []).forEach((pile) => {
       if (state.pendingCardAction || state.pendingRoll) return;
       const btn = mkBtn(`✝️ Auferstehung: oberste Karte vom ${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel nehmen (kostet 1 Handkarte)`,
         () => socket.emit('priestResurrect', { pile }));
-      box.appendChild(btn);
+      btn.classList.remove('small');
+      powersBox.appendChild(btn);
     });
+    powersBox.classList.toggle('hidden', !powersBox.children.length);
     if (handSortInput) handSortInput.checked = handSort;
     sortedHand().forEach((id) => {
       const tile = cardTile(id, { hand: true });
@@ -1315,6 +1347,26 @@
       };
       wrap.appendChild(select);
     }
+    // Kartenanhaenge (VERGIFTET/GESEGNET/NÜTZLICHE GRIFFE): dieselbe Bauform
+    // wie SCHUMMELN! oben. Welche Karten das sind und welche Bedingung gilt,
+    // sagt der Server ueber state.attachmentCards - keine zweite Namensliste.
+    if ((state.attachmentCards || {})[c.name] && myTurn) {
+      const regel = state.attachmentCards[c.name];
+      const items = myTradableIds().filter((iid) => {
+        const ic = card(iid);
+        if (!ic || iid === id) return false;
+        if (regel.bedingung === 'kampfbonus') return (ic.bonus || 0) > 0;
+        if (regel.bedingung === 'gross') return (state.bigItems || []).includes(ic.name);
+        return ic.category === 'item';
+      });
+      const select = document.createElement('select');
+      select.innerHTML = `<option value="">📎 An Gegenstand heften...</option>` +
+        items.map((iid) => `<option value="${iid}">${escapeHtml(card(iid).name)}</option>`).join('');
+      select.onchange = () => {
+        if (select.value) socket.emit('attachCard', { attachCardId: id, targetItemId: select.value });
+      };
+      wrap.appendChild(select);
+    }
     if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger') {
       const btn = mkBtn('Als Monster spielen', () => socket.emit('playMonsterFromHand', { cardId: id }));
       wrap.appendChild(btn);
@@ -1326,7 +1378,11 @@
     // Machtgruppe (Pathfinder-Set) und die drei "Obergrenze +1"-Karten
     // (Halb-Blut/Super Munchkin/Doppelleben) werden mechanisch wie
     // Rasse/Klasse gespielt, sind aber als "door_other" kategorisiert.
-    if (myTurn && c.category === 'door_other' && (POWER_GROUP_NAMES.has((c.name || '').toUpperCase()) || TRAIT_CAP_CARD_NAMES.has(c.name))) {
+    // Dazu ORK/GNOM/BARDE - echte Rassen/Klassen, die ebenfalls als
+    // "door_other" in den Rohdaten stehen (state.traitDoorCards kommt vom
+    // Server, siehe TRAIT_DOOR_CARDS).
+    if (myTurn && c.category === 'door_other' && (POWER_GROUP_NAMES.has((c.name || '').toUpperCase())
+      || TRAIT_CAP_CARD_NAMES.has(c.name) || (state.traitDoorCards || {})[(c.name || '').toUpperCase()])) {
       const btn = mkBtn('Spielen', () => socket.emit('playRaceOrClass', { cardId: id }));
       wrap.appendChild(btn);
     }
@@ -1407,6 +1463,24 @@
         wrap.appendChild(btn);
       }
     }
+    // MAGISCHE LAMPE: in der eigenen Runde während des Kampfes spielbar (auch beim Fliehen)
+    if (state.combat && isMyTurn() && (myInfo.lampCardIds || []).includes(id) && !state.pendingCardAction) {
+      if ((state.combat.monsterIds || []).length === 1) {
+        const monId = state.combat.monsterIds[0];
+        const btn = mkBtn(`🧞 Im Kampf einsetzen ("${card(monId).name}" verschwinden lassen)`,
+          () => socket.emit('useLamp', { cardId: id, monsterId: monId }));
+        btn.className = 'primary';
+        wrap.appendChild(btn);
+      } else if ((state.combat.monsterIds || []).length > 1) {
+        const select = document.createElement('select');
+        select.innerHTML = '<option value="">🧞 Monster verschwinden lassen...</option>' +
+          state.combat.monsterIds.map((mId) => `<option value="${mId}">${escapeHtml(card(mId).name)}</option>`).join('');
+        select.onchange = () => {
+          if (select.value) socket.emit('useLamp', { cardId: id, monsterId: select.value });
+        };
+        wrap.appendChild(select);
+      }
+    }
     // Klassenkräfte, die Handkarten kosten (Krieger "Berserken", Priester
     // "Vertreiben", Zauberer "Flugzauber"). Welche gerade nutzbar ist und wie
     // viele Karten noch gehen, rechnet der Server - hier steht bewusst keine
@@ -1469,6 +1543,18 @@
     return wrap;
   }
 
+  // Kartenanhaenge am Gegenstand anzeigen (VERGIFTET/GESEGNET/NÜTZLICHE
+  // GRIFFE) - state.itemAttachments kommt vom Server.
+  function anhangText(cardId) {
+    const ids = (state.itemAttachments || {})[cardId] || [];
+    if (!ids.length) return '';
+    return ' [' + ids.map((id) => {
+      const c = card(id);
+      if (!c) return '?';
+      return c.name + (c.bonus ? ` +${c.bonus}` : '');
+    }).join(', ') + ']';
+  }
+
   function isMonsterEnhancer(c) {
     return c.category === 'door_other' && typeof c.bonus === 'number' && c.bonus !== 0 &&
       /für\s+(das\s+)?Monster/i.test(c.text || '');
@@ -1492,7 +1578,7 @@
 
   function guaranteedFleeUsable(c) {
     if (!state.combat || !state.combat.mustFlee) return false;
-    if (state.combat.actorId !== myInfo.playerId) return false;
+    if (state.combat.fleeingId !== myInfo.playerId) return false;
     if (!GUARANTEED_FLEE_NAMES.has(c.name)) return false;
     const max = GUARANTEED_FLEE_MAX_LEVEL[c.name];
     if (typeof max !== 'number') return true;
