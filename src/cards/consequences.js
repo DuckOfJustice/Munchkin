@@ -7,7 +7,7 @@
 module.exports = (ctx) => {
   const {
     card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
-    equippedItemIds, isBigItem, istGeschlecht,
+    equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
   } = ctx;
 
   const CONSEQUENCE_OVERRIDES = {
@@ -202,7 +202,7 @@ module.exports = (ctx) => {
       : { type: 'levelDelta', amount: 1 }),
     // "VERLIERE 1 GROSSEN GEGENSTAND. Wenn du keinen Großen Gegenstand hast,
     // verliere 1 Stufe."
-    'GRÜNSCHLEIM': (player) => (bigItemCount(player) ? { type: 'discardBigItem' } : { type: 'levelDelta', amount: 1 }),
+    'GRÜNSCHLEIM': (player, room) => (bigItemCount(player, room) ? { type: 'discardBigItem' } : { type: 'levelDelta', amount: 1 }),
     // Betrifft, WELCHE Karte(n) andere Spieler:innen von der eigenen Hand
     // nehmen (freie/zufällige Auswahl, in den Rohdaten nicht festgelegt) -
     // bleibt bewusst manuell:
@@ -269,8 +269,8 @@ module.exports = (ctx) => {
     // getragenem Großen Gegenstand ist discardBigItem (alle ablegen)
     // gleichwertig zu "einen auswählen" - erst ein Zwerg mit mehreren
     // braucht die echte Wahl, siehe 'discardSpecificItem' in server.js.
-    'VERLIERE 1 GROSSEN GEGENSTAND': (player) => {
-      const ids = equippedItemIds(player).filter((id) => isBigItem(card(id)));
+    'VERLIERE 1 GROSSEN GEGENSTAND': (player, room) => {
+      const ids = equippedItemIds(player).filter((id) => istGrosserGegenstand(room, id));
       if (ids.length <= 1) return { type: 'discardBigItem' };
       return {
         type: 'choice',
@@ -286,8 +286,8 @@ module.exports = (ctx) => {
     // Gegenstaende) ist "klein" definierbar - vorher musste diese Karte
     // manuell bleiben. Die Karte nennt keinen Ersatz-Malus, wer nichts
     // Kleines traegt, kommt also davon.
-    'VERLIERE 1 KLEINEN GEGENSTAND': (player) => {
-      const ids = equippedItemIds(player).filter((id) => !isBigItem(card(id)));
+    'VERLIERE 1 KLEINEN GEGENSTAND': (player, room) => {
+      const ids = equippedItemIds(player).filter((id) => !istGrosserGegenstand(room, id));
       if (!ids.length) return { type: 'noEffect' };
       if (ids.length === 1) return { type: 'discardSpecificItem', itemId: ids[0] };
       return {

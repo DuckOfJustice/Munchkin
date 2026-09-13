@@ -192,6 +192,11 @@ function createRoom() {
     pendingCardAction: null,
     pendingRoll: null, // {playerId, purpose, roll, holders, onResolve} - siehe rollWithWindow
     winner: null,
+    // Kartenanhaenge: Gegenstands-Id -> [Karten-Ids]. VERGIFTET/GESEGNET
+    // ("Diese Karte bleibt beim Gegenstand, egal ob er verloren, gestohlen
+    // oder abgelegt wird") und NÜTZLICHE GRIFFE haengen am GEGENSTAND, nicht
+    // an der Person - deshalb liegt die Tabelle am Raum.
+    itemAttachments: {},
     logs: [],
     lastActivity: Date.now(),
     cleanupTimer: null,
@@ -321,14 +326,36 @@ function equippedItemIds(player) {
     ...SPECIAL_SLOT_KEYS.flatMap((k) => specialSlotCards(player, k))].filter(Boolean))];
 }
 
-// ZWERG: "Du kannst eine beliebige Anzahl Grosser Gegenstaende tragen und
-// ausruesten." Alle anderen duerfen genau einen tragen.
-function bigItemCount(player) {
-  return equippedItemIds(player).filter((id) => isBigItem(card(id))).length;
+// Kartenanhaenge (siehe room.itemAttachments). Ohne Raum - z.B. in den
+// aelteren Test-Helfern - gibt es schlicht keine Anhaenge.
+function attachmentIds(room, itemId) {
+  return (room && room.itemAttachments && room.itemAttachments[itemId]) || [];
 }
 
-function canCarryAnotherBigItem(player) {
-  return hasRace(player, 'ZWERG') || bigItemCount(player) < 1;
+function attachmentBonusSum(room, itemId) {
+  return attachmentIds(room, itemId).reduce((sum, id) => {
+    const c = card(id);
+    return sum + (c && c.bonus ? c.bonus : 0);
+  }, 0);
+}
+
+// NÜTZLICHE GRIFFE: "Permanent an einen beliebigen grossen Gegenstand
+// anzubringen. Der Gegenstand zaehlt nicht laenger als gross." Deshalb gibt
+// es neben dem statischen isBigItem(card) diese raumbezogene Frage - ueberall
+// dort benutzt, wo der Raum bekannt ist.
+function istGrosserGegenstand(room, cardId) {
+  if (!isBigItem(card(cardId))) return false;
+  return !attachmentIds(room, cardId).some((id) => (card(id) || {}).name === 'NÜTZLICHE GRIFFE');
+}
+
+// ZWERG: "Du kannst eine beliebige Anzahl Grosser Gegenstaende tragen und
+// ausruesten." Alle anderen duerfen genau einen tragen.
+function bigItemCount(player, room) {
+  return equippedItemIds(player).filter((id) => istGrosserGegenstand(room, id)).length;
+}
+
+function canCarryAnotherBigItem(player, room) {
+  return hasRace(player, 'ZWERG') || bigItemCount(player, room) < 1;
 }
 
 // Ermittelt gierig (teuerste zuerst) genug Gegenstaende/Handkarten, um
@@ -349,10 +376,12 @@ function pickItemsWorthGold(player, gold) {
   return { summe, weg };
 }
 
-function equippedBonusSum(player) {
+// room ist optional: ohne ihn zaehlen nur die gedruckten Boni, mit ihm auch
+// die Kartenanhaenge (VERGIFTET/GESEGNET, je +2).
+function equippedBonusSum(player, room) {
   return equippedItemIds(player).reduce((sum, id) => {
     const c = card(id);
-    return sum + (c && c.bonus ? c.bonus : 0);
+    return sum + (c && c.bonus ? c.bonus : 0) + attachmentBonusSum(room, id);
   }, 0);
 }
 
@@ -380,8 +409,8 @@ function raceItemBonusSum(player) {
   }, 0);
 }
 
-function baseStrength(player) {
-  return player.level + equippedBonusSum(player) + raceItemBonusSum(player) + hellknightArmorBonus(player);
+function baseStrength(player, room) {
+  return player.level + equippedBonusSum(player, room) + raceItemBonusSum(player) + hellknightArmorBonus(player);
 }
 
 // ITEM_CONDITIONAL_BONUS: siehe src/cards/passives.js (dort zusammen mit den
@@ -438,7 +467,7 @@ function publicPlayer(room, p) {
     attachments: p.attachments, // SCHUMMELN!: markiert den geschummelten Gegenstand fuer den Client
     activeCurses: p.activeCurses, // anhaltende Flueche, siehe LINGERING_CURSES
     gender: p.gender,
-    strength: baseStrength(p),
+    strength: baseStrength(p, room),
     handLimit: handLimit(p), // ZWERG darf 6 Karten halten, alle anderen 5
   };
 }
@@ -477,6 +506,10 @@ function publicState(room) {
     // "door_other" gefuehrt werden - damit der Client den "Spielen"-Knopf
     // zeigt, ohne eine eigene Namensliste zu pflegen.
     traitDoorCards: TRAIT_DOOR_CARDS,
+    // Kartenanhaenge: welche Karten angeheftet werden koennen (fuer den Knopf
+    // im Client) und was aktuell woran haengt (fuer die Anzeige am Gegenstand).
+    attachmentCards: ATTACHMENT_CARDS,
+    itemAttachments: room.itemAttachments,
     turnIndex: room.turnIndex,
     turnPlayerId: room.players[room.turnIndex] ? room.players[room.turnIndex].id : null,
     turnPhase: room.turnPhase,
@@ -664,7 +697,7 @@ function handleDrawDoor(room, playerId) {
       if (player.isBot) {
         // Ein Wahldialog wuerde auf einen Bot ewig warten: er kaempft, wenn
         // seine Staerke reicht, und geht sonst vorbei.
-        const desc = applyPrimitiveAction(room, player, baseStrength(player) > (c.level || 0) ? fightAction : passAction);
+        const desc = applyPrimitiveAction(room, player, baseStrength(player, room) > (c.level || 0) ? fightAction : passAction);
         log(room, `${player.name} (Bot) trifft die Wahl bei "${c.name}": ${desc}.`, [id]);
       } else {
         openCardChoice(room, player, c.name, [
@@ -1067,15 +1100,23 @@ function applyPrimitiveAction(room, player, action) {
     }
     case 'discardSlot': {
       const id = player.equipped[action.slot];
-      if (!id) return `${slotLabelDe(action.slot)}: nichts getragen`;
+      // Gekoppelte Spezialausruestung faellt mit (GNOMEX-ANZUG mit der
+      // Ruestung, SCHRECKLICHE SOCKEN mit dem Schuhwerk) - auch dann, wenn der
+      // eigentliche Platz gerade leer ist.
+      const gekoppelt = SPECIAL_SLOT_KEYS
+        .flatMap((k) => specialSlotCards(player, k))
+        .filter((sid) => (SPECIAL_SLOT_ITEMS[(card(sid) || {}).name] || {}).mitSlot === action.slot);
+      gekoppelt.forEach((sid) => { unequipSlotCard(player, sid); discardCard(room, sid); });
+      const mit = gekoppelt.length ? ` (mit ${gekoppelt.map((sid) => `"${card(sid).name}"`).join(', ')})` : '';
+      if (!id) return gekoppelt.length ? `${slotLabelDe(action.slot)} war leer${mit} abgelegt` : `${slotLabelDe(action.slot)}: nichts getragen`;
       player.equipped[action.slot] = null;
       discardCard(room, id);
-      return `${slotLabelDe(action.slot)} "${card(id).name}" abgelegt`;
+      return `${slotLabelDe(action.slot)} "${card(id).name}"${mit} abgelegt`;
     }
     case 'discardBigItem': {
       // GALLERT-OKTAEDER: "Lass ALLE deine Grossen Gegenstaende fallen." -
       // deshalb alle betroffenen, nicht nur einer.
-      const ids = equippedItemIds(player).filter((id) => isBigItem(card(id)));
+      const ids = equippedItemIds(player).filter((id) => istGrosserGegenstand(room, id));
       if (!ids.length) return 'kein Grosser Gegenstand getragen';
       ids.forEach((id) => { unequipSlotCard(player, id); discardCard(room, id); });
       return `Grosse Gegenstaende abgelegt: ${ids.map((id) => card(id).name).join(', ')}`;
@@ -1343,7 +1384,7 @@ function applyPrimitiveAction(room, player, action) {
       const quelle = () => {
         if (action.quelle === 'hand') return player.hand.slice();
         const ids = equippedItemIds(player);
-        return action.quelle === 'kleineGegenstaende' ? ids.filter((id) => !isBigItem(card(id))) : ids;
+        return action.quelle === 'kleineGegenstaende' ? ids.filter((id) => !istGrosserGegenstand(room, id)) : ids;
       };
       if (!quelle().length) return 'nichts Passendes vorhanden';
       openQueuedCardAction(room, action.cardName || 'Schlimme Dinge', Array(action.count).fill(player.id), () => {
@@ -1471,6 +1512,7 @@ const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
   card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
   resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
+  istGrosserGegenstand,
 });
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
@@ -1609,7 +1651,7 @@ const treasuresFactory = require('./src/cards/treasures.js');
 const {
   TREASURE_POWER_OVERRIDES, COMBAT_POTION_OVERRIDES, DOOR_COMBAT_CARDS,
   POST_FLEE_ESCAPE_CARDS, GUARANTEED_FLEE_CARDS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
-} = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants });
+} = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds });
 
 // ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES:
 // siehe src/cards/reactions.js.
@@ -1847,7 +1889,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -2029,7 +2071,8 @@ const {
   ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
-  GENDER_IMMUNE_ITEMS,
+  GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
+  BACKSTAB_ITEMS,
 } = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
@@ -2493,7 +2536,10 @@ function handleThiefBackstab(room, playerId, discardCardId, targetId) {
   if (!c) return;
   const dieb = findPlayer(room, playerId);
   const opfer = findPlayer(room, targetId);
-  if (!dieb || !opfer || !hasClass(dieb, 'DIEB')) return;
+  // STICH-O-MAT laesst auch Nicht-Diebe in den Ruecken fallen (-2), und gibt
+  // einem Dieb +1 auf seinen eigenen Rueckenfall (-3 statt -2).
+  const stichOMat = dieb && equippedItemIds(dieb).some((id) => BACKSTAB_ITEMS.has((card(id) || {}).name));
+  if (!dieb || !opfer || (!hasClass(dieb, 'DIEB') && !stichOMat)) return;
   if (dieb.id === opfer.id) return;                                     // nicht sich selbst
   if (!combatParticipants(room).some((p) => p.id === opfer.id)) return; // nur Kaempfende
   if (!dieb.hand.includes(discardCardId)) return;
@@ -2504,10 +2550,11 @@ function handleThiefBackstab(room, playerId, discardCardId, targetId) {
     touchRoom(room);
     return;
   }
-  c.backstabs[schluessel] = true;
+  const malus = (hasClass(dieb, 'DIEB') && stichOMat) ? 3 : 2;
+  c.backstabs[schluessel] = malus;
   removeFromHand(dieb, discardCardId);
   discardCard(room, discardCardId);
-  log(room, `${dieb.name} faellt ${opfer.name} in den Ruecken: -2 im Kampf.`, [discardCardId]);
+  log(room, `${dieb.name} faellt ${opfer.name} in den Ruecken: -${malus} im Kampf.`, [discardCardId]);
   refreshCombatReady(room); // der Bereit-Status muss verfallen
   touchRoom(room);
 }
@@ -2520,7 +2567,11 @@ function backstabMalus(room) {
   const c = room.combat;
   if (!c || !c.backstabs) return 0;
   const drin = new Set(combatParticipants(room).map((p) => p.id));
-  return Object.keys(c.backstabs).filter((k) => drin.has(k.split(':')[1])).length * -2;
+  // Der Wert ist der Malus dieses Rueckenfalls (2, mit STICH-O-MAT beim Dieb
+  // 3) - aeltere Eintraege stehen noch auf `true` und zaehlen als 2.
+  return Object.keys(c.backstabs)
+    .filter((k) => drin.has(k.split(':')[1]))
+    .reduce((sum, k) => sum - (typeof c.backstabs[k] === 'number' ? c.backstabs[k] : 2), 0);
 }
 
 // DIEB "Diebstahl": "Lege eine Karte ab, um einem anderen Spieler einen
@@ -2529,8 +2580,8 @@ function backstabMalus(room) {
 const DIEBSTAHL_MIN_WURF = 4;
 
 // "kleiner Gegenstand" = alles Getragene, was kein Grosser Gegenstand ist.
-function stealableItemIds(player) {
-  return equippedItemIds(player).filter((id) => !isBigItem(card(id)));
+function stealableItemIds(player, room) {
+  return equippedItemIds(player).filter((id) => !istGrosserGegenstand(room, id));
 }
 
 function handleThiefSteal(room, playerId, discardCardId, targetId) {
@@ -2544,7 +2595,7 @@ function handleThiefSteal(room, playerId, discardCardId, targetId) {
   log(room, `${dieb.name} (Dieb) legt "${card(discardCardId).name}" ab und versucht, ${opfer.name} zu bestehlen.`, [discardCardId]);
   rollWithWindow(room, dieb, 'diebstahl', (roll) => {
     if (roll >= DIEBSTAHL_MIN_WURF) {
-      const klein = stealableItemIds(opfer);
+      const klein = stealableItemIds(opfer, room);
       if (!klein.length) {
         log(room, `${dieb.name} wuerfelt ${roll} - aber ${opfer.name} traegt keinen kleinen Gegenstand.`);
       } else {
@@ -2575,7 +2626,7 @@ function thiefPowerInfo(room, player) {
     .filter((p) => p.id !== player.id && !schon[`${player.id}:${p.id}`])
     .map((p) => ({ id: p.id, name: p.name }));
   const stealTargets = room.players
-    .filter((p) => p.id !== player.id && stealableItemIds(p).length)
+    .filter((p) => p.id !== player.id && stealableItemIds(p, room).length)
     .map((p) => ({ id: p.id, name: p.name }));
   return { backstabTargets, stealTargets };
 }
@@ -2745,7 +2796,7 @@ function combatTotals(room) {
       // (kein regulaerer Gegenstands-Slot, siehe Kommentar dort).
       const items = curseSuppressesItemBonuses(p)
         ? ((card(p.equipped.armor) || {}).bonus || 0)
-        : equippedBonusSum(p) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters, combatHasUndead(room));
+        : equippedBonusSum(p, room) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters, combatHasUndead(room));
       return sum + p.level + items + hellknightArmorBonus(p)
         + curseCombatModifier(p) - (ignoreLevel ? p.level : 0);
     }, 0) + c.actorModifier + backstabMalus(room);
@@ -2916,6 +2967,29 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const ziel = offen.reduce((a, b) => (((card(a) || {}).level || 0) >= ((card(b) || {}).level || 0) ? a : b));
       c.levelOverrides[ziel] = 1;
       return `"${(card(ziel) || {}).name}" zählt jetzt als Stufe 1`;
+    }
+    // HALBFINAL-SCHLAG: "Waehle einen Gegenstand, den du verwendest, der NICHT
+    // 'nur einmal einsetzbar' ist. Erhalte fuer einen einzigen Kampf 3-Mal den
+    // normalen Bonus dieses Gegenstands. Wirf dann einen Wuerfel. Bei einer 6
+    // kannst du den Gegenstand behalten; andernfalls wird er abgeworfen."
+    // ponytail: der Wuerfelwurf laeuft direkt ueber rollDie() statt ueber
+    // rollWithWindow - der GEZINKTE WÜRFEL kann ihn also nicht drehen. Das
+    // Reaktionsfenster hier aufzumachen hiesse, den Kartenbonus erst nach der
+    // Antwort zu verrechnen.
+    case 'tripleItemBonus': {
+      const ziel = card(action.itemId);
+      if (!ziel) return '';
+      const bonus = ziel.bonus || 0;
+      // Der Gegenstand selbst zaehlt schon einmal ueber equippedBonusSum mit.
+      c.actorModifier += bonus * 2;
+      const wurf = rollDie();
+      if (wurf === 6) return `"${ziel.name}" zaehlt dreifach (+${bonus * 3}); Wuerfelwurf 6 - Gegenstand bleibt`;
+      // Verloren, aber der dreifache Bonus gilt "fuer einen einzigen Kampf":
+      // der wegfallende Grundbonus wird ausgeglichen.
+      unequipSlotCard(player, action.itemId);
+      discardCard(room, action.itemId);
+      c.actorModifier += bonus;
+      return `"${ziel.name}" zaehlt dreifach (+${bonus * 3}); Wuerfelwurf ${wurf} - Gegenstand wird abgeworfen`;
     }
     case 'removeHelper': {
       const helper = findPlayer(room, c.helperId);
@@ -3652,8 +3726,19 @@ function handleEquipItem(room, playerId, cardId) {
   // Ausruestungsmodell erst auf Arrays je Slot umgestellt werden.
   // ponytail: Slot-Belegung/Handzahl bleiben deshalb hart, Ausbauweg s.o.
   const geschummelt = player.attachments && player.attachments.cheatedItemId === cardId;
-  if (!geschummelt && isBigItem(c) && !canCarryAnotherBigItem(player)) {
+  if (!geschummelt && istGrosserGegenstand(room, cardId) && !canCarryAnotherBigItem(player, room)) {
     log(room, `${player.name} kann "${c.name}" nicht anlegen - Grosser Gegenstand, und es wird bereits einer getragen (nur Zwerge duerfen mehrere).`);
+    touchRoom(room);
+    return;
+  }
+  // SPASSBREMSE: "In den falschen Haenden - und zwar den Haenden eines Gnoms -
+  // ist es toedlich." Wer die Karte trotzdem anlegt, stirbt.
+  const toedlichFuer = DEADLY_ITEMS_BY_RACE[c.name];
+  if (toedlichFuer && hasRace(player, toedlichFuer)) {
+    removeFromHand(player, cardId);
+    discardCard(room, cardId);
+    log(room, `${player.name} legt "${c.name}" an - in den Haenden eines ${toedlichFuer}s ist das toedlich.`, [cardId]);
+    applyDeathConsequence(room, player);
     touchRoom(room);
     return;
   }
@@ -3678,11 +3763,14 @@ function handleEquipItem(room, playerId, cardId) {
   else if (c.slotKind === 'armor') { if (player.equipped.armor) return; removeFromHand(player, cardId); player.equipped.armor = cardId; }
   else if (c.slotKind === 'feet') { if (player.equipped.feet) return; removeFromHand(player, cardId); player.equipped.feet = cardId; }
   else if (c.slotKind === 'hand') {
+    // ZWEIHÄNDIGES SCHWERT gibt eine Hand zurueck, kostet also netto keine.
+    const kosten = FREE_HAND_ITEMS.has(c.name) ? 0 : c.handsCost;
     const freeSlots = player.equipped.hands.filter((h) => h === null).length;
-    if (freeSlots < c.handsCost) return;
+    if (freeSlots < kosten) return;
     removeFromHand(player, cardId);
-    if (c.handsCost === 2) { player.equipped.hands = [cardId, cardId]; }
-    else { const idx = player.equipped.hands.indexOf(null); player.equipped.hands[idx] = cardId; }
+    if (kosten === 2) { player.equipped.hands = [cardId, cardId]; }
+    else if (kosten === 1) { const idx = player.equipped.hands.indexOf(null); player.equipped.hands[idx] = cardId; }
+    else { player.equipped.special = [...specialSlotCards(player, 'special'), cardId]; }
   } else return;
   // FREUD'SCHEN SLIPPER: das Geschlecht beim Ausspielen merken - beim Verlust
   // entscheidet es ueber die -5-Strafe (siehe pruefeSlipperVerlust).
@@ -3720,6 +3808,36 @@ function pruefeSlipperVerlust(room, player) {
 // waere. Lege diese Karte ab, wenn du den geschummelten Gegenstand verlierst
 // (verkaufst usw.)." Der Anhang gilt fuer genau einen Gegenstand gleichzeitig
 // (siehe attachments.cheatedItemId - kein Array).
+// Kartenanhaenge: VERGIFTET/GESEGNET (+2 fuer den Gegenstand) und NÜTZLICHE
+// GRIFFE (Grosser Gegenstand zaehlt als klein). Gleiche Bauform wie
+// handlePlayCheat, aber der Anhang haengt am Gegenstand statt an der Person -
+// er bleibt also dran, wenn der Gegenstand den Besitzer wechselt.
+function handleAttachCard(room, playerId, attachCardId, targetItemId) {
+  const player = findPlayer(room, playerId);
+  if (!player || !player.hand.includes(attachCardId)) return;
+  const anhang = card(attachCardId);
+  const regel = anhang && ATTACHMENT_CARDS[anhang.name];
+  if (!regel) return;
+  const ziel = card(targetItemId);
+  if (!ziel) return;
+  const besitzt = player.hand.includes(targetItemId) || equippedItemIds(player).includes(targetItemId);
+  if (!besitzt) return;
+  if (regel.bedingung === 'kampfbonus' && !((ziel.bonus || 0) > 0)) {
+    log(room, `"${anhang.name}" braucht einen Gegenstand mit Kampfbonus - "${ziel.name}" hat keinen.`);
+    touchRoom(room);
+    return;
+  }
+  if (regel.bedingung === 'gross' && !istGrosserGegenstand(room, targetItemId)) {
+    log(room, `"${anhang.name}" gehoert an einen Grossen Gegenstand - "${ziel.name}" ist keiner (mehr).`);
+    touchRoom(room);
+    return;
+  }
+  removeFromHand(player, attachCardId);
+  room.itemAttachments[targetItemId] = attachmentIds(room, targetItemId).concat(attachCardId);
+  log(room, `${player.name} heftet "${anhang.name}" dauerhaft an "${ziel.name}".`, [attachCardId, targetItemId]);
+  touchRoom(room);
+}
+
 function handlePlayCheat(room, playerId, cheatCardId, targetItemId) {
   const player = findPlayer(room, playerId);
   if (!player || !player.hand.includes(cheatCardId)) return;
@@ -4369,6 +4487,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'unequipItem', ({ cardId }) => act(socket, (room, pid) => handleUnequipItem(room, pid, cardId)));
   onSafe(socket, 'playCheat', ({ cheatCardId, targetItemId }) => act(socket, (room, pid) => handlePlayCheat(room, pid, cheatCardId, targetItemId)));
   onSafe(socket, 'sellItems', ({ cardIds }) => act(socket, (room, pid) => handleSellItems(room, pid, cardIds)));
+  onSafe(socket, 'attachCard', ({ attachCardId, targetItemId }) => act(socket, (room, pid) => handleAttachCard(room, pid, attachCardId, targetItemId)));
   onSafe(socket, 'playRaceOrClass', ({ cardId }) => act(socket, (room, pid) => handlePlayRaceOrClass(room, pid, cardId)));
   onSafe(socket, 'discardFromHand', ({ cardId }) => act(socket, (room, pid) => handleDiscardFromHand(room, pid, cardId)));
   onSafe(socket, 'endTurn', () => act(socket, (room, pid) => handleEndTurnAction(room, pid)));
@@ -4412,6 +4531,9 @@ module.exports = {
   monsterRefusesTarget, monsterPassOption, fleeModifierParts, monsterTraitBonusSum,
   istGeschlecht, GENDER_IMMUNE_ITEMS, pruefeSlipperVerlust, handleEquipItem,
   applyCombatPotionAction, combatHasUndead, addActiveCurse, curseCombatModifier,
+  handleAttachCard, attachmentIds, attachmentBonusSum, istGrosserGegenstand, backstabMalus,
+  canCarryAnotherBigItem, applyPrimitiveAction,
+  ATTACHMENT_CARDS, equippedBonusSum,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, endTurn,

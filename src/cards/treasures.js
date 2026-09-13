@@ -4,7 +4,7 @@
 // GUARANTEED_FLEE_MAX_MONSTER_LEVEL). Kuratiert statt per Regex - siehe die
 // Erklärung bei den anderen Kartentabellen.
 module.exports = (ctx) => {
-  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants } = ctx;
+  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds } = ctx;
 
   const TREASURE_POWER_OVERRIDES = {
     // --- Ziel-Auswahl (Spieler-Picker) ---
@@ -131,6 +131,24 @@ module.exports = (ctx) => {
     // hat, im Kampf zu helfen. Dieser Munchkin wandert davon und kann nicht
     // teilnehmen." Gleiche Wirkung wie der CYTILLESH-TRANK.
     'TRANK DER APATHIE': (player, room) => (room.combat.helperId ? { type: 'removeHelper' } : null),
+    // "Waehle einen Gegenstand, den du verwendest, der nicht 'nur einmal
+    // einsetzbar' ist. Erhalte fuer einen einzigen Kampf 3-Mal den normalen
+    // Bonus dieses Gegenstands."
+    'HALBFINAL-SCHLAG': (player) => {
+      const ids = equippedItemIds(player).filter((id) => {
+        const c = card(id);
+        return c && (c.bonus || 0) > 0 && !/nur\s+einmal\s+einsetzbar/i.test(c.text || '');
+      });
+      if (!ids.length) return null;
+      return {
+        type: 'choice',
+        options: ids.map((id) => ({
+          id: `item-${id}`,
+          label: `"${card(id).name}" dreifach zaehlen lassen (+${(card(id).bonus || 0) * 3})`,
+          action: { type: 'tripleItemBonus', itemId: id },
+        })),
+      };
+    },
     // "Lege alle Monster des Kampfes ab. Du erhältst keinen Schatz, aber du
     // darfst den Raum durchsuchen."
     'FREUNDSCHAFTSTRANK': () => ({ type: 'endCombatNoLevel', thenLoot: true }),

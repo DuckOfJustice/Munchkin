@@ -547,7 +547,7 @@
         img.onerror = () => img.remove();
         el.innerHTML = `<b>${label}</b>`;
         el.appendChild(img);
-        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`));
+        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}${anhangText(cardId)}`));
         el.style.cursor = 'pointer';
         el.onclick = () => openCardModal(cardId);
       } else {
@@ -1228,7 +1228,7 @@
         img.onerror = () => img.remove();
         el.innerHTML = `<b>${label}</b>`;
         el.appendChild(img);
-        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`));
+        el.appendChild(document.createTextNode(`${c.name}${c.bonus ? ` (+${c.bonus})` : ''}${anhangText(cardId)}`));
         // Getragene Karte gross ansehen - wie in der Ausruestung anderer
         // Spieler:innen (openPlayerModal) und an den Handkarten.
         el.classList.add('clickable');
@@ -1312,6 +1312,26 @@
         items.map((iid) => `<option value="${iid}">${escapeHtml(card(iid).name)}</option>`).join('');
       select.onchange = () => {
         if (select.value) socket.emit('playCheat', { cheatCardId: id, targetItemId: select.value });
+      };
+      wrap.appendChild(select);
+    }
+    // Kartenanhaenge (VERGIFTET/GESEGNET/NÜTZLICHE GRIFFE): dieselbe Bauform
+    // wie SCHUMMELN! oben. Welche Karten das sind und welche Bedingung gilt,
+    // sagt der Server ueber state.attachmentCards - keine zweite Namensliste.
+    if ((state.attachmentCards || {})[c.name] && myTurn) {
+      const regel = state.attachmentCards[c.name];
+      const items = myTradableIds().filter((iid) => {
+        const ic = card(iid);
+        if (!ic || iid === id) return false;
+        if (regel.bedingung === 'kampfbonus') return (ic.bonus || 0) > 0;
+        if (regel.bedingung === 'gross') return (state.bigItems || []).includes(ic.name);
+        return ic.category === 'item';
+      });
+      const select = document.createElement('select');
+      select.innerHTML = `<option value="">📎 An Gegenstand heften...</option>` +
+        items.map((iid) => `<option value="${iid}">${escapeHtml(card(iid).name)}</option>`).join('');
+      select.onchange = () => {
+        if (select.value) socket.emit('attachCard', { attachCardId: id, targetItemId: select.value });
       };
       wrap.appendChild(select);
     }
@@ -1471,6 +1491,18 @@
       wrap.appendChild(btn);
     }
     return wrap;
+  }
+
+  // Kartenanhaenge am Gegenstand anzeigen (VERGIFTET/GESEGNET/NÜTZLICHE
+  // GRIFFE) - state.itemAttachments kommt vom Server.
+  function anhangText(cardId) {
+    const ids = (state.itemAttachments || {})[cardId] || [];
+    if (!ids.length) return '';
+    return ' [' + ids.map((id) => {
+      const c = card(id);
+      if (!c) return '?';
+      return c.name + (c.bonus ? ` +${c.bonus}` : '');
+    }).join(', ') + ']';
   }
 
   function isMonsterEnhancer(c) {

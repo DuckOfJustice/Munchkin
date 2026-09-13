@@ -140,11 +140,47 @@ module.exports = (ctx) => {
     }).length,
   };
 
+  // --- Kartenanhaenge --------------------------------------------------------
+  // Karten, die dauerhaft an einen GEGENSTAND geheftet werden (nicht an eine
+  // Person) - siehe room.itemAttachments und handleAttachCard in server.js.
+  // `bedingung` sagt, an welche Gegenstaende die Karte darf.
+  const ATTACHMENT_CARDS = {
+    // "Diese Karte muss mit einem Gegenstand gespielt werden, der Kampfbonus
+    // verleiht. Dieser Gegenstand ist jetzt der Vergiftete Irgendwas (oder so)
+    // und zusaetzlich +2 im Kampf wert." (+2 steht im bonus-Feld der Karte.)
+    'VERGIFTET': { bedingung: 'kampfbonus', label: 'Vergiftet' },
+    'GESEGNET': { bedingung: 'kampfbonus', label: 'Gesegnet' },
+    // "Permanent an einen beliebigen grossen Gegenstand anzubringen. Der
+    // Gegenstand zaehlt nicht laenger als gross."
+    'NÜTZLICHE GRIFFE': { bedingung: 'gross', label: 'Nützliche Griffe' },
+  };
+
   // --- Geschlecht ------------------------------------------------------------
   // Gegenstaende, die alle Geschlechter-Strafen aufheben. FREUD'SCHEN SLIPPER:
   // "Waehrend du die Freud'schen Slipper traegst, zaehlst du gleichzeitig als
   // beide Geschlechter, erleidest aber keine der Strafen."
   const GENDER_IMMUNE_ITEMS = new Set(["FREUD'SCHEN SLIPPER"]);
+
+  // --- Weitere Gegenstands-Sonderfaelle --------------------------------------
+  // ZWEIHÄNDIGES SCHWERT: "Dies ist eine Einhandwaffe, aber sie hat zwei
+  // eigene Haende, du bekommst also eine Hand dazu, wenn du es traegst."
+  // ponytail: eine Hand kosten und eine Hand geben hebt sich auf - deshalb
+  // kostet die Karte hier schlicht keine Hand, statt das Zwei-Felder-Modell
+  // von player.equipped.hands auf eine variable Laenge umzubauen. Sichtbarer
+  // Unterschied gaebe es nur, wenn eine weitere Karte Haende schenkt.
+  const FREE_HAND_ITEMS = new Set(['ZWEIHÄNDIGES SCHWERT']);
+
+  // SPASSBREMSE: "In den falschen Haenden - und zwar den Haenden eines Gnoms -
+  // ist es toedlich." (Bedeutung mit dem Nutzer geklaert: ein Gnom, der sie
+  // anlegt, stirbt.)
+  const DEADLY_ITEMS_BY_RACE = {
+    'SPASSBREMSE': 'GNOM',
+  };
+
+  // STICH-O-MAT: "Verleiht seinem Besitzer die Macht, jemandem fuer +2 Schaden
+  // wie ein Dieb in den Ruecken zu fallen ... oder fuegt einem Dieb +1 auf
+  // sein 'in den Ruecken fallen' hinzu."
+  const BACKSTAB_ITEMS = new Set(['STICH-O-MAT']);
 
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
@@ -354,6 +390,18 @@ module.exports = (ctx) => {
     // slotKind in den Rohdaten - ohne Platz waere sie nicht anlegbar. "Am Fuss
     // befestigt" ist kein Schuhwerk-Platz, also Spezialausruestung.
     'AM FUSS BEFESTIGTER STREITKOLBEN': { slot: 'special' },
+    // Zwei Karten, die ausdruecklich ZUSAETZLICH zu einem belegten Platz
+    // getragen werden. Ein zweiter Gegenstand im selben Slot ginge nicht (die
+    // Plaetze sind je ein festes Feld), der Sammelplatz "Spezialausruestung"
+    // dagegen schon. mitSlot koppelt sie an den echten Platz: geht der
+    // verloren, gehen sie mit.
+    // GNOMEX-ANZUG: "Dieser Gegenstand kann ueber anderer Ruestung getragen
+    // werden, wenn etwas aber deine Ruestung entfernt, ist die GESAMTE
+    // Ruestung weg."
+    'GNOMEX-ANZUG': { slot: 'special', mitSlot: 'armor' },
+    // SCHRECKLICHE SOCKEN: "Du kannst die Socken unter anderem Schuhwerk
+    // tragen, aber wenn du dein Schuhwerk verlierst, sind sie auch weg."
+    'SCHRECKLICHE SOCKEN': { slot: 'special', mitSlot: 'feet' },
   };
   // Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
   // nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).
@@ -371,6 +419,7 @@ module.exports = (ctx) => {
     ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
     COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
     TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
-    GENDER_IMMUNE_ITEMS,
+    GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
+    BACKSTAB_ITEMS,
   };
 };
