@@ -837,13 +837,11 @@ kennt, verliert Zeit oder baut Fehler ein.
 Keine davon blockiert etwas. Sie stehen hier, damit sie nicht als neue
 Entdeckungen noch einmal Zeit kosten.
 
-- **MAGISCHE LAMPE** ist an `c.fleeRerollOffer` gebunden, wirkt also nur nach
-  einem verpatzten Weglaufwurf. Die Karte sagt "Nur in deiner Runde spielbar" -
-  der Rahmen ist der ganze Zug, und "selbst wenn dein Weglaufenwurf verpatzt
-  wurde" ist eine Zusicherung für den schlimmsten Fall, keine Einschränkung
-  darauf. Ein weiteres Fenster wäre ein eigener Ausspielweg plus UI. **Die
-  auffälligste der zurückgestellten Sachen - hier zuerst nachbessern, falls
-  jemand es im Spiel vermisst.**
+- **MAGISCHE LAMPE** war ursprünglich rein an `c.fleeRerollOffer` gebunden.
+  Inzwischen vollständig umgesetzt: im eigenen Zug zu jedem Zeitpunkt im Kampf
+  (vor dem Fliehen, beim Fliehen oder nach verpatztem Wurf) über das Kampf-Panel
+  sowie direkt an der Handkarte einsetzbar; bei mehreren Monstern mit freier
+  Monster-Auswahl.
 - **Die Warteschlangen-Reihenfolge ist kartenspezifisch.** Jede Karte sagt
   etwas anderes ("beginnend mit dem Spieler **vor** dir" gegen "**nach** dir",
   nur die Nachbarn, nur die Höchststufigen, alle anderen), und eine verdrehte
@@ -931,3 +929,122 @@ einer `complete`-Zeile sind fertig und dürfen nicht erneut vergeben werden.
 
 Nach Task 13 gehört noch eine Gesamtdurchsicht des ganzen Zweigs dazu; die ist
 in dieser Runde noch nicht gelaufen.
+
+---
+
+## 9. Clerical Errors (Runde vom 2026-09-13) - **abgeschlossen**
+
+Das zweite Set ist auf dem Stand des Basis-Sets. Plan und Audit:
+`docs/superpowers/plans/2026-09-13-clerical-errors-kartenkraefte.md`.
+
+Ausgangslage laut Audit: von 102 Karten hatten 40 keinen Weg durch die Engine.
+Heute meldet `node tools/coverage-scan.js clericalerrors` noch sechs Zeilen -
+alle bewusst manuell, siehe 9.3.
+
+### 9.1 Was dazugekommen ist
+
+| Bereich | Inhalt |
+|---|---|
+| Rassen/Klassen | `TRAIT_DOOR_CARDS` - ORK, GNOM und BARDE stehen in den Rohdaten als `door_other` und waren deshalb **gar nicht spielbar**. Dazu Ork-Extrastufe, Gnom-G/N-Bonus, Gnom-als-Halbling, Gnom-Autoflucht vor „Nase"-Monstern, Bardenglück. |
+| Monsterboni | `MONSTER_TRAIT_BONUS` kann jetzt negative Boni, mehrere Boni je Karte (Array) und Bedingungen jenseits von Rasse/Klasse (`wennErfuellt`). 16 neue Zeilen. |
+| Geschlecht | `player.gender` (`'m'`/`'w'`/`null`). Alle starten männlich, **niemand wählt etwas aus** - so mit dem Nutzer abgesprochen. Geändert wird es nur durch GESCHLECHTSUMWANDLUNG und STRICHMÄNNCHEN. `istGeschlecht()` ist die einzige Abfragestelle; die FREUD'SCHEN SLIPPER heben dort alle Strafen auf. |
+| Kartenanhänge | `room.itemAttachments` (Gegenstands-Id → Karten-Ids). Am **Raum**, nicht an der Person: „Diese Karte bleibt beim Gegenstand, egal ob er verloren, gestohlen oder abgelegt wird". Trägt VERGIFTET, GESEGNET und NÜTZLICHE GRIFFE. Letztere machen aus einem Großen Gegenstand einen kleinen - dafür gibt es neben `isBigItem(card)` jetzt `istGrosserGegenstand(room, id)`. |
+| Verstärker im Kampf | `combat.enhancerIds`. Zwei Klauseln wirken über den Moment des Ausspielens hinaus: „… aus der Hölle." (+5 gegen Priester) und UNTOT (Monster gilt als untot). `combatHasUndead(room)` beantwortet „untot?" an einer Stelle für Priester-„Vertreiben" und die GHOULPEITSCHE. |
+| Fluch-Abwehr | `fluchZiel(room, ziel, karte)` - **beide** Fluchwege (gezogen und von jemandem gespielt) laufen hindurch. PRÄCHTIGER HUT wirft den Fluch per Würfelrunde weiter, DAS MANCHMAL VERLÄSSLICHE AMULETT blockt ihn bei 4-6. |
+| Monsterstufen | `combat.levelOverrides` - TYPOGRAFISCHER FEHLER (Stufe 1) und DER GANZ NORMALE HASE (bei einer 6 Stufe 15). |
+| Kartensperre | `room.kartenSperren` für EINSTWEILIGE VERFÜGUNG, geleert beim Zugwechsel. |
+
+### 9.2 Neue Primitive in `applyPrimitiveAction`
+
+`queuedDiscardOwn` (N eigene Karten/Gegenstände selbst aussuchen),
+`queuedDiscardEachOther`, `levelUpLowerPlayersAndLose`, `setGender`,
+`packratteGeschenk` / `nimmEinenVonZweien`, `dungeonCasino`, `schatzTauschen`,
+`kartenSperre` (Ziel-Aktion) sowie im Kampf `treatMonsterAsLevel1`,
+`tripleItemBonus`, `forceSelfAsHelper`, `schatzUmtauschAnmelden`.
+
+### 9.3 Bewusst manuell geblieben (sechs Karten)
+
+- **GUMMI-GOLEM** (Schlimme Dinge): „Du musst in jedem Kampf deine Hilfe
+  anbieten, darfst keinen Schatz annehmen, bis du einen verlierst" - eine
+  Dauerpflicht über viele Züge ohne Tracker.
+- **DU STOLPERST ÜBER DEINE EIGENE TRUHE**, **TEMPORÄRE ANMNESIE**,
+  **KLEINER FEHLER**, **HUNGRIGER RUCKSACK**, **TOURISTENFALLE** - dieselben
+  fünf, die schon im Basis-Set-Audit (§8.6) zurückgestellt wurden: freie
+  Handelsreihenfolge, wiederkehrender Rundenend-Hook, ein neuer Kampf mitten
+  in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-Status.
+
+Halb umgesetzt, jeweils mit `// ponytail:` am Code vermerkt: der Rücknahme-Teil
+der EINSTWEILIGEN VERFÜGUNG, der Schatz-gegen-Stufenkarten-Handel bei MONSTER
+SIND BESCHÄFTIGT, das Barden-„Verzaubern", die Ork-Fluchwahl und die
+Kampfbeginn-Frage der ZAUBERCOUCH (sie ist hier immer in Benutzung).
+
+### 9.4 Verifikation
+
+`npm test` → 24/24 (fünf neue Dateien `tests/card-clerical-*.test.js`).
+`node tools/coverage-scan.js base` → weiterhin 0 Lücken.
+`node tools/smoke-run.js` mit 40 Zugwechseln → ohne Hänger, keine Server-Fehler.
+
+Zwei bestehende Tests hielten den alten Stand fest und wurden bewusst
+nachgezogen: die Abdeckungs-Schranke in `auto-consequence` (15 → 10) und die
+„bewusst manuell"-Zeile für GESCHLECHTSUMWANDLUNG in `card-curses`. Dazu die
+Zusicherung in `card-abilities`, dass jede Spezialausrüstung einen Kampfbonus
+hat - FALSCHE OHREN und ZAUBERCOUCH verleihen stattdessen eine Rasse/Klasse.
+
+---
+
+## 10. Weglaufen betrifft alle Beteiligten (2026-09-13)
+
+**Der Fehler:** Nur `actor` lief weg und nur `actor` bekam die Schlimmen
+Dinge. Wer im Kampf geholfen hatte, kam ohne Wurf und ohne Folgen davon —
+`finishFleeSuccess` sagte das sogar ausdrücklich im Kommentar. Nachgewiesen
+gegen den alten Stand: nach dem Wurf der kämpfenden Person war
+`room.combat` sofort `null`, die Helfer:in hatte nie gewürfelt.
+
+**Der Umbau:** Statt an fünf Stellen `c.actorId !== playerId` zu prüfen, gibt
+es jetzt eine Fluchtreihe am Kampf:
+
+| Feld | Bedeutung |
+|---|---|
+| `combat.fleeQueue` | wer noch weglaufen muss (kämpfende Person zuerst, dann Helfer:in) |
+| `combat.fleeingId` | wer gerade dran ist |
+| `combat.fleeFailed` | wen es erwischt hat |
+
+`fluechtenderId(room)` ist die einzige Antwort auf „wer läuft gerade?" — und
+legt die Reihe an, falls sie fehlt. Damit gilt „`mustFlee` heißt: alle
+Beteiligten laufen einzeln weg" auch dort, wo `mustFlee` anders gesetzt wird
+(Testaufbauten, künftige Kartenwege). Die fünf Handler (`handleAttemptFlee`,
+`handleFleeEscape`, `handleUseLamp`, `handleFleeReroll`,
+`handleUseGuaranteedFlee`) fragen alle nur noch diese eine Funktion.
+
+`naechsterFluechtling` rückt weiter und setzt die personenbezogenen
+Zwischenstände zurück (Halbling-Wiederholung, Kleberfläschchen-Fenster),
+sonst erbt die nächste Person sie. Getrennte werden übersprungen.
+
+`beendeFluchtphase` räumt erst auf, wenn **alle** gewürfelt haben — hätten wir
+je Person sofort aufgelöst, wäre der Kampf weg, bevor die zweite überhaupt
+würfelt. Das Miese Zeug kommt danach:
+
+- Helfer:innen zuerst (`keepPhase: true`, ihre Bestätigung bewegt die Zugphase
+  nicht), die kämpfende Person zuletzt — **ihre** Bestätigung gibt den Zug frei.
+- Ist die kämpfende Person entkommen, wechselt die Phase sofort.
+- `room._pendingConsequenceBacklog` reiht die zweite Konsequenz ein;
+  `room.pendingConsequence` ist ein einzelner Platz. Gleiche Bauform wie
+  `_queuedCardActionBacklog`.
+
+**Bots**: `scheduleBotActionsIfNeeded` plant beim Weglaufen für
+`fluechtenderId`, nicht mehr für die Person am Zug — sonst stünde die Partie,
+sobald eine Bot-Helfer:in dran ist. `botSituation` enthält `fleeingId`, damit
+ein Wechsel der fliehenden Person neu einplant.
+
+**Nicht geprüft in der Praxis**: Bots helfen aktuell grundsätzlich nicht
+(`handleRespondHelp(room, helper.id, false)`), der Bot-Helfer-Pfad kommt im
+Durchlauf also nie vor. Abgedeckt ist er nur durch `tests/flee-helper.test.js`.
+
+**Bewusst nicht mitgemacht**: die Regel „bei mehreren Monstern würfelst du
+für jedes einzeln" (so steht es auch auf WANDERNDES MONSTER). Es bleibt bei
+einem Wurf je Person gegen alle Monster; wer scheitert, bekommt die Schlimmen
+Dinge aller. Mit dem Nutzer abgestimmt, eigene Runde.
+
+`GUARANTEED_FLEE_CARDS` beenden weiterhin nur die eigene Flucht ohne
+Stufenstrafe und ohne Kleberfläschchen-Fenster (`// ponytail:` am Code) — neu
+ist nur, dass danach die Helfer:in trotzdem selbst laufen muss.

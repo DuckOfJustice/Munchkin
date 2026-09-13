@@ -2,7 +2,7 @@
 // im Spiel ist. Kuratiert statt per Regex - die Formulierungen auf den Karten
 // sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6 gegen Elfen").
 module.exports = (ctx) => {
-  const { hasRace, hasClass, card, equippedItemIds } = ctx;
+  const { hasRace, hasClass, card, equippedItemIds, istGeschlecht } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
   // SCHUTZSANDALEN: "Flüche, die du ziehst, nachdem du eine Tür
@@ -26,6 +26,8 @@ module.exports = (ctx) => {
     // "Greift keinen Dieb an (berufliche Höflichkeit)." Die zusätzliche
     // Dieb-Option (2 Schätze tauschen) bleibt manuell.
     'ANWALT': (p) => hasClass(p, 'DIEB'),
+    // "Greift niemanden mit Stufe 2 oder niedriger an."
+    'SIEBENJÄHRIGER LICH': (p) => p.level <= 2,
   };
 
   // --- Monster, die eine Rasse automatisch totstampft ----------------------
@@ -41,8 +43,13 @@ module.exports = (ctx) => {
   // Schatz lassen. (Ausnahme: Halblinge schauen lecker aus und muessen
   // kaempfen.)" Gilt nur fuer aufgedeckte Monster - ein aus der Hand
   // gespieltes Monster hat sich die kaempfende Person selbst eingeladen.
+  // nurRassen ist die Umkehrung von forcedFightRaces: nicht "alle ausser
+  // diesen", sondern "nur diese".
   const MONSTER_PASS_OPTION = {
     'BEKIFFTER GOLEM': { forcedFightRaces: ['HALBLING'] },
+    // "Elfen finden ihn niedlich und bekaempfen ihn vielleicht nicht (Karte
+    // einfach abwerfen) oder helfen nicht."
+    'BOBBELKOPF': { nurRassen: ['ELF'] },
   };
 
   // --- Monster, die statt des Kampfes eine Alternative anbieten -------------
@@ -90,6 +97,14 @@ module.exports = (ctx) => {
       label: 'Mit einem Stab ablenken (automatische Flucht)',
       action: { type: 'dropStaffEscape' },
     },
+    // "Wenn du keine Gegenstaende im Spiel hast, erhaeltst du einen von der
+    // Packratte. Ziehe zwei offene Schaetze und waehle einen aus. Du kannst
+    // stattdessen auch kaempfen, wenn du moechtest."
+    'PACKRATTE': {
+      wennErfuellt: (p) => equippedItemIds(p).length === 0,
+      label: 'Geschenk annehmen (2 offene Schaetze, einen behalten)',
+      action: { type: 'packratteGeschenk' },
+    },
   };
 
   // --- Monster, die VOR dem Kampf einen Gegenstand kosten --------------------
@@ -104,10 +119,105 @@ module.exports = (ctx) => {
     'ZUNGENDÄMON': true,
   };
 
+  // --- Rassen/Klassen, die in den Rohdaten als "door_other" stehen ----------
+  // ORK, GNOM (Clerical Errors / Unnatural Axe) und BARDE sind Rassen- bzw.
+  // Klassenkarten, haben in data/cards.json aber category "door_other" - ohne
+  // diese Tabelle laesst handlePlayRaceOrClass sie gar nicht erst ausspielen,
+  // sie liegen tot auf der Hand. Gleiche Bauform wie POWER_GROUP_NAMES.
+  const TRAIT_DOOR_CARDS = {
+    'ORK': 'race',
+    'GNOM': 'race',
+    'BARDE': 'class',
+  };
+
+  // GNOM: "Monster behandeln dich wie einen Halbling."
+  // ponytail: gilt bewusst nur fuer die Monsterboni (MONSTER_TRAIT_BONUS) -
+  // nicht fuer Faehigkeiten, die ein Halbling selbst hat (Einstampfen,
+  // doppelter Verkaufspreis, zweiter Weglaufwurf). Wer mehr will, zieht die
+  // Abfrage in hasRace selbst hoch.
+  const MONSTER_SEES_AS_RACE = {
+    'GNOM': 'HALBLING',
+  };
+
+  // GNOM: "Du erhaeltst +1 fuer jeden nicht-einmal einsetzbaren Gegenstand,
+  // der mit den Buchstaben G oder N beginnt."
+  const RACE_ITEM_BONUS = {
+    'GNOM': (player) => equippedItemIds(player).filter((id) => {
+      const c = card(id);
+      return c && /^[GN]/i.test(c.name) && !/nur\s+einmal\s+einsetzbar/i.test(c.text || '');
+    }).length,
+  };
+
+  // --- Gegenstaende, die eine Rasse/Klasse verleihen --------------------------
+  // FALSCHE OHREN: "Erlaubt dem Traeger, elfen-exklusive Gegenstaende zu
+  //   nutzen. Monster reagieren auch, als waere der Traeger ein Elf. Gibt
+  //   keine sonstigen Elfen-Faehigkeiten." -> nurMonster: zaehlt fuer
+  //   Monsterboni und Anlege-Beschraenkungen, aber nicht fuer +1 Weglaufen
+  //   oder die Helfer-Stufe des Elfen.
+  // ZAUBERCOUCH: "Wenn du dich auf dieser Couch ausruhst, wirst du IN ALLEN
+  //   BELANGEN zusaetzlich zu deiner (oder deinen) urspruenglichen Klasse(n)
+  //   als Zauberer angesehen."
+  // ponytail: die Couch ist hier immer "in Benutzung" - die Karte laesst die
+  // Wahl zu Kampfbeginn ("Du kannst entscheiden, ob du sie verwenden willst"),
+  // dafuer braeuchte es eine Ja/Nein-Frage in jedem Kampfstart. Der Preis
+  // dafuer (-1 auf Weglaufen) gilt deshalb ebenfalls dauerhaft.
+  const ITEM_GRANTS_TRAIT = {
+    'FALSCHE OHREN': { race: 'ELF', nurMonster: true },
+    'ZAUBERCOUCH': { class: 'ZAUBERER' },
+  };
+
+  // --- Kartenanhaenge --------------------------------------------------------
+  // Karten, die dauerhaft an einen GEGENSTAND geheftet werden (nicht an eine
+  // Person) - siehe room.itemAttachments und handleAttachCard in server.js.
+  // `bedingung` sagt, an welche Gegenstaende die Karte darf.
+  const ATTACHMENT_CARDS = {
+    // "Diese Karte muss mit einem Gegenstand gespielt werden, der Kampfbonus
+    // verleiht. Dieser Gegenstand ist jetzt der Vergiftete Irgendwas (oder so)
+    // und zusaetzlich +2 im Kampf wert." (+2 steht im bonus-Feld der Karte.)
+    'VERGIFTET': { bedingung: 'kampfbonus', label: 'Vergiftet' },
+    'GESEGNET': { bedingung: 'kampfbonus', label: 'Gesegnet' },
+    // "Permanent an einen beliebigen grossen Gegenstand anzubringen. Der
+    // Gegenstand zaehlt nicht laenger als gross."
+    'NÜTZLICHE GRIFFE': { bedingung: 'gross', label: 'Nützliche Griffe' },
+  };
+
+  // --- Geschlecht ------------------------------------------------------------
+  // Gegenstaende, die alle Geschlechter-Strafen aufheben. FREUD'SCHEN SLIPPER:
+  // "Waehrend du die Freud'schen Slipper traegst, zaehlst du gleichzeitig als
+  // beide Geschlechter, erleidest aber keine der Strafen."
+  const GENDER_IMMUNE_ITEMS = new Set(["FREUD'SCHEN SLIPPER"]);
+
+  // --- Weitere Gegenstands-Sonderfaelle --------------------------------------
+  // ZWEIHÄNDIGES SCHWERT: "Dies ist eine Einhandwaffe, aber sie hat zwei
+  // eigene Haende, du bekommst also eine Hand dazu, wenn du es traegst."
+  // ponytail: eine Hand kosten und eine Hand geben hebt sich auf - deshalb
+  // kostet die Karte hier schlicht keine Hand, statt das Zwei-Felder-Modell
+  // von player.equipped.hands auf eine variable Laenge umzubauen. Sichtbarer
+  // Unterschied gaebe es nur, wenn eine weitere Karte Haende schenkt.
+  const FREE_HAND_ITEMS = new Set(['ZWEIHÄNDIGES SCHWERT']);
+
+  // SPASSBREMSE: "In den falschen Haenden - und zwar den Haenden eines Gnoms -
+  // ist es toedlich." (Bedeutung mit dem Nutzer geklaert: ein Gnom, der sie
+  // anlegt, stirbt.)
+  const DEADLY_ITEMS_BY_RACE = {
+    'SPASSBREMSE': 'GNOM',
+  };
+
+  // STICH-O-MAT: "Verleiht seinem Besitzer die Macht, jemandem fuer +2 Schaden
+  // wie ein Dieb in den Ruecken zu fallen ... oder fuegt einem Dieb +1 auf
+  // sein 'in den Ruecken fallen' hinzu."
+  const BACKSTAB_ITEMS = new Set(['STICH-O-MAT']);
+
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
   // die Rasse/Klasse hat (Angreifer:in oder Helfer:in) - nicht einmal pro
   // Person.
+  //
+  // Drei Schreibweisen sind erlaubt (siehe monsterTraitBonusSum in server.js):
+  //   { races/classes: [...], bonus: n }  - der Normalfall
+  //   [regel, regel]                      - mehrere Boni, die sich addieren
+  //   { wennErfuellt: (p) => bool, bonus } - alles, was keine Rasse/Klasse ist
+  // Ein negativer bonus schwaecht das Monster ("-3 gegen Barden").
   const MONSTER_TRAIT_BONUS = {
     'UNGLAUBLICHER UNAUSSPRECHLICHER SCHRECKEN': { classes: ['KRIEGER'], bonus: 4 }, // "+4 gegen Krieger."
     'KREISCHENDER DEPP': { classes: ['KRIEGER'], bonus: 6 },                         // "+6 gegen Krieger."
@@ -130,6 +240,44 @@ module.exports = (ctx) => {
     'AFFENBANDE': { races: ['HALBLING'], bonus: 2 },                                  // "+2 gegen Halblinge."
     'ÜBERBÄR': { races: ['HALBLING', 'ZWERG'], bonus: 5 },                             // "+5 gegen Halblinge und Zwerge."
     'FÜRST YAHOO': { races: ['ELF', 'HALBLING'], classes: ['BARDE'], bonus: 5 },       // "+5 gegen Elfen, Barden und Halblinge."
+    // --- Clerical Errors ---------------------------------------------------
+    'TEQUILA-LIEDCHEN': { classes: ['BARDE'], bonus: 5 },                             // "+5 gegen Barden."
+    'DOPPELGANGSTER': { classes: ['BARDE'], bonus: 3 },                                // "+3 gegen Barden."
+    'DRECKIGE GÄNSE': { classes: ['BARDE'], bonus: -3 },                               // "-3 gegen Barden. Die dreckigen Gaense haben kein Rhythmusgefuehl."
+    'GIFTEFEU KUDZU-FLIEGENFALLE': { races: ['ELF'], bonus: -4 },                      // "-4 gegen Elfen."
+    'Harter Typ': { races: ['ORK'], bonus: 5 },                                        // "+5 gegen Orks."
+    'REDNECK-BAUM': [{ races: ['ORK'], bonus: 5 }, { classes: ['KRIEGER'], bonus: 5 }], // "+5 gegen Orks, +5 gegen Krieger."
+    'DIE TROLLE VOM TOTEN MEER': { races: ['ELF'], bonus: 5 },                         // "+5 gegen Elfen wegen ihres ueblen Gestanks."
+    'MEDUSA': { races: ['ELF'], bonus: 4 },                                            // "Eklige Schlangenhaare! +4 gegen Elfen."
+    'FEDERFEIND': [{ classes: ['PRIESTER'], bonus: 5 }, { classes: ['ZAUBERER'], bonus: 3 }], // "+5 gegen Priester und +3 gegen Zauberer."
+    'SIEBENJÄHRIGER LICH': { classes: ['KRIEGER'], bonus: 5 },                         // "+5 gegen Krieger."
+    // "+5 gegen Priester, +5 gegen maennliche Charaktere."
+    'TANTE PALADIN': [
+      { classes: ['PRIESTER'], bonus: 5 },
+      { wennErfuellt: (p) => istGeschlecht(p, 'm'), bonus: 5 },
+    ],
+    // "+5 gegen Priester. Sie greift mehrmals an und erhaelt zusaetzlich +5,
+    // es sei denn, du verteidigst dich mit (mindestens) 2 eigenen Waffen."
+    'KALI': [
+      { classes: ['PRIESTER'], bonus: 5 },
+      { wennErfuellt: (p) => p.equipped.hands.filter(Boolean).length < 2, bonus: 5 },
+    ],
+    // "+3 gegen die, die keine Klasse haben."
+    'RÜSSELKÄFER': { wennErfuellt: (p) => !p.classes.length, bonus: 3 },
+    // "+5 gegen Super-Munchkins oder Mischlinge. +10 gegen beide." - als zwei
+    // Regeln, die sich bei jemandem mit beiden Karten auf +10 addieren.
+    // "+5 gegen Frauen." (Der Zusatzschatz "fuer jede Frau, die hilft"
+    // bleibt manuell - dafuer gibt es keinen Schatz-pro-Person-Weg.)
+    'CHAUVINISTENSCHWEIN': { wennErfuellt: (p) => istGeschlecht(p, 'w'), bonus: 5 },
+    // Verstaerkerkarte statt Monster: "... aus der Hoelle." gibt "+5 fuer das
+    // Monster" (ueber das bonus-Feld) und "ein zusaetzliches +5 gegen
+    // Priester" - Letzteres haengt an den Kaempfenden und gehoert deshalb
+    // hierher. Siehe combat.enhancerIds in server.js.
+    '… aus der Hölle.': { classes: ['PRIESTER'], bonus: 5 },
+    'GOTHYANKI': [
+      { wennErfuellt: (p) => !!p.classCapCard, bonus: 5 },
+      { wennErfuellt: (p) => !!p.raceCapCard, bonus: 5 },
+    ],
   };
 
   // --- Monster, die die Kampfrechnung selbst verändern ---------------------
@@ -137,7 +285,9 @@ module.exports = (ctx) => {
   const MONSTER_IGNORES_LEVEL = new Set(['VERSICHERUNGSVERTRETER']);
   // "Gegen sie dürfen keine Gegenstände oder andere Boni eingesetzt werden
   // - kämpfe nur mit deiner Charakterstufe."
-  const MONSTER_IGNORES_BONUSES = new Set(['GEMEINE GHOULE']);
+  // GUMMI-GOLEM: "Er klebt an deinen Waffen ... du kannst nur auf deiner
+  // Stufe kaempfen, ohne weitere Boni."
+  const MONSTER_IGNORES_BONUSES = new Set(['GEMEINE GHOULE', 'GUMMI-GOLEM']);
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
   const MONSTER_FORBIDS_HELP = new Set(['PAVILLON']);
   // Die ersten beiden Regeln gelten für die ganze Munchkin-Seite: sobald
@@ -151,18 +301,30 @@ module.exports = (ctx) => {
   const FLEE_ITEM_BONUS = {
     'STIEFEL ZUM ECHT SCHNELLEN DAVONLAUFEN': 2, // "Sie geben dir einen +2 Bonus auf Weglaufen."
     'TUBA DER VERZAUBERUNG': 3,                  // "... und gibt dir +3 auf Weglaufen."
+    // "Verleiht dir einen kranken Tritt, aber du hast jetzt -2 auf Weglaufen."
+    'AM FUSS BEFESTIGTER STREITKOLBEN': -2,
+    'ZAUBERCOUCH': -1, // "Wenn du es tust, erhaeltst du -1 auf Weglaufen."
   };
   const FLEE_MONSTER_MOD = {
     'SCHNECKEN AUF SPEED': -2, // "Du hast -2 auf Weglaufen."
     'FLIEGENDE FROSCHE': -1,   // "Du hast -1 auf Weglaufen."
     'GALLERT-OKTAEDER': 1,     // "Du hast +1 auf Weglaufen."
     'LAHMER GOBLIN': 1,        // "Du hast +1 auf Weglaufen."
+    'DIE TROLLE VOM TOTEN MEER': 1, // "Jeder erhaelt +1 auf Weglaufen."
   };
   // FILZLAUSE: "Denen kannst du nicht entkommen!"
   // LAUFENDE NASE: "Verlierst du den Kampf, kannst du nicht fliehen."
   const FLEE_IMPOSSIBLE = new Set(['FILZLAUSE', 'LAUFENDE NASE']);
   // TOPFPFLANZE, Schlimme Dinge: "Keine. Automatische Flucht."
-  const FLEE_AUTOMATIC = new Set(['TOPFPFLANZE']);
+  // GOLDFISCH: "Greift nicht an und du fliehst automatisch, aber ..."
+  const FLEE_AUTOMATIC = new Set(['TOPFPFLANZE', 'GOLDFISCH']);
+  // Dasselbe, aber nur fuer eine bestimmte Rasse und abhaengig vom Monster.
+  // GNOM: "Monster, die ein 'Nase' im Namen haben, werden dich nicht
+  // angreifen. Wenn du sie nicht besiegen kannst, wirst du automatisch
+  // weglaufen."
+  const FLEE_AUTOMATIC_BY_RACE = {
+    'GNOM': (monster) => /nase/i.test(monster.name || ''),
+  };
   // Stufenverlust trotz gelungener Flucht.
   const FLEE_PENALTY = {
     'MR. BONES': () => 1,                          // "Auch bei einer erfolgreichen Flucht verlierst du 1 Stufe."
@@ -204,7 +366,8 @@ module.exports = (ctx) => {
   // keiner einzigen Monsterkarte im Text. Deshalb diese kuratierte Liste; sie
   // ist die EINZIGE Stelle, an der "untot" in diesem Server definiert ist.
   // Stimmt sie nicht mit euren Karten überein, hier korrigieren.
-  const UNDEAD_MONSTERS = new Set(['MR. BONES', 'UNTOTES PFERD', 'KÖNIG TUT', 'GRUFTIGE GEBRÜDER']);
+  const UNDEAD_MONSTERS = new Set(['MR. BONES', 'UNTOTES PFERD', 'KÖNIG TUT', 'GRUFTIGE GEBRÜDER',
+    'SIEBENJÄHRIGER LICH']);
 
   // ZAUBERER "Flugzauber": "Du darfst bis zu 3 Karten ablegen, nachdem du
   // deinen Weglaufwurf gemacht hast. Jede verleiht dir +1 Bonus auf Weglaufen."
@@ -231,6 +394,10 @@ module.exports = (ctx) => {
     'ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT': (player, monsters) => (monsters.some((m) => m.name === 'KRAKZILLA') ? -4 : 0),
     // "+5 gegen die Laufende Nase und den Schatten."
     'SCHRECKLICHE SOCKEN': (player, monsters) => (monsters.some((m) => m.name === 'LAUFENDE NASE' || m.name === 'SCHATTEN') ? 5 : 0),
+    // "Zusaetzlich +3 gegen Untote." Der dritte Parameter sagt, ob im Kampf
+    // etwas Untotes steht - das schliesst die Verstaerkerkarte UNTOT ein
+    // ("Das Monster zaehlt jetzt als Untoter fuer alle Zwecke").
+    'GHOULPEITSCHE': (player, monsters, untot) => (untot ? 3 : 0),
   };
 
   // Karten, die angelegt werden, aber auf keinen der klassischen Plaetze
@@ -246,6 +413,25 @@ module.exports = (ctx) => {
     // "aber nur fuer Halblinge"
     'LIMBURGER UND SARDELLEN-SANDWICH': { slot: 'special', races: ['HALBLING'] },
     'SPIESSIGE KNIE': { slot: 'special' },
+    // Clerical Errors. Die Karte hat +4 und einen Goldwert, aber keinen
+    // slotKind in den Rohdaten - ohne Platz waere sie nicht anlegbar. "Am Fuss
+    // befestigt" ist kein Schuhwerk-Platz, also Spezialausruestung.
+    'AM FUSS BEFESTIGTER STREITKOLBEN': { slot: 'special' },
+    // Beide haben in den Rohdaten keinen Platz, gehoeren aber angelegt:
+    'FALSCHE OHREN': { slot: 'special' },
+    'ZAUBERCOUCH': { slot: 'special' },
+    // Zwei Karten, die ausdruecklich ZUSAETZLICH zu einem belegten Platz
+    // getragen werden. Ein zweiter Gegenstand im selben Slot ginge nicht (die
+    // Plaetze sind je ein festes Feld), der Sammelplatz "Spezialausruestung"
+    // dagegen schon. mitSlot koppelt sie an den echten Platz: geht der
+    // verloren, gehen sie mit.
+    // GNOMEX-ANZUG: "Dieser Gegenstand kann ueber anderer Ruestung getragen
+    // werden, wenn etwas aber deine Ruestung entfernt, ist die GESAMTE
+    // Ruestung weg."
+    'GNOMEX-ANZUG': { slot: 'special', mitSlot: 'armor' },
+    // SCHRECKLICHE SOCKEN: "Du kannst die Socken unter anderem Schuhwerk
+    // tragen, aber wenn du dein Schuhwerk verlierst, sind sie auch weg."
+    'SCHRECKLICHE SOCKEN': { slot: 'special', mitSlot: 'feet' },
   };
   // Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
   // nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).
@@ -262,5 +448,8 @@ module.exports = (ctx) => {
     CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
     ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
     COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
+    TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
+    GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
+    BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT,
   };
 };
