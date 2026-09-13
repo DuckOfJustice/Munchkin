@@ -740,18 +740,23 @@ die Landkarte:
 Im selben Verzeichnis liegen je Aufgabe ein `task-N-brief.md` (die Anforderung)
 und ein `task-N-report.md` (was die umsetzende Session gemacht hat).
 
-### 8.2 Was fertig ist (Tasks 1-10)
+### 8.2 Was fertig ist (Tasks 1-12)
 
-20 Commits, `10641fc..b2db73a`. `npm test` = **15/15 grün**, Server startet
+23 Commits, `10641fc..53ed4a2`. `npm test` = **17/17 grün**, Server startet
 sauber. Jede Aufgabe wurde nach der Umsetzung von einer zweiten, unabhängigen
 Instanz geprüft; fünf Prüfungen fanden echte Fehler, die in einer Fix-Runde
 behoben und erneut geprüft wurden.
 
-**Eine offene Stelle:** die Fix-Runde von Task 10 (`b2db73a`) ist **noch nicht
-nachgeprüft**. Der umsetzende Agent meldet 15/15 grün und einen Test, der ohne
-den Fix rot wird; das ist aber sein eigener Bericht, nicht die unabhängige
-Gegenprüfung, die alle anderen Fix-Runden bekommen haben. Erste Amtshandlung
-einer neuen Session: diesen einen Diff gegenprüfen (`git diff d1602f0..b2db73a`).
+**Nachgeprüft am 2026-09-13:** die Fix-Runde von Task 10 (`b2db73a`) und der
+Task-11-Diff (`db17bf1`) sind gegengeprüft und in Ordnung. Bei Task 10 stimmen
+Freischaltung (`hatGegenstandAbGold`) und Bezahlung (`bribeMonster`) überein,
+PIT BULL bleibt korrekt equipped-only. Bei Task 11 liegt `traitImmun` an der
+richtigen Stelle (`monsterTraitBonusSum`, also innerhalb von `combatTotals`
+und damit in `combatSignature`), und `VERSTÜMMLE DIE LEICHEN` fällt sauber auf
+den `null`-Zweig von `handleUseCardPower` zurück, wenn noch kein Kampf war.
+Ein Nachtrag zur Auslassungsliste in `server.js` bei `traitImmun`: **KRAKZILLA**
+("greift Stufe 4 oder niedriger nicht an, außer Elfen") ist eine vierte Stelle,
+an der eine Rasse ein Nachteil ist - sie fehlt in der Aufzählung dort.
 
 | # | Was | Commits |
 |---|---|---|
@@ -765,6 +770,8 @@ einer neuen Session: diesen einen Diff gegenprüfen (`git diff d1602f0..b2db73a`
 | 8 | **Kampfreaktionen**: KUMPEL, WANDERNDES MONSTER, ILLUSION, HILF MIR, ÜBERFALLTRANK | `4b0306d`, `b66feb1` |
 | 9 | **Schlimme Dinge mit Fremdbeteiligung**: HIPPOGREIF, ANWALT, LEPRACHAUN, NETZ-TROLL, VERSICHERUNGSVERTRETER, SCHNECKEN AUF SPEED, FLUCH! EINKOMMENSSTEUER | `7bc2d70`, `0acca45` |
 | 10 | **Kampf-Alternativen**: MÖCHTEGERN-VAMPIR, LAUFENDE NASE, PIT BULL, ZUNGENDÄMON | `d1602f0`, `b2db73a` |
+| 11 | **Kleinkram**: SUPER MUNCHKIN / HALB-BLUT ohne Nachteile, VERSTÜMMLE DIE LEICHEN nur nach einem Kampf | `db17bf1` |
+| 12 | **Klassenkräfte**: DIEB (In den Rücken fallen, Diebstahl), PRIESTER (Auferstehung) | `53ed4a2` |
 
 Dazu ein Einschub auf Zuruf: die **Kartengroßansicht zeigt jetzt die Werte**
 (Stufe/Schätze bei Monstern, Slot/Hände/Bonus/Gold bei Gegenständen) und
@@ -772,18 +779,10 @@ kennzeichnet Große Gegenstände (`80fcdf0`). Das `big`-Flag hängt dafür am
 Kartenobjekt selbst (`server.js`, beim Einlesen von `ALL_CARDS`), nicht als
 fünfte handgepflegte Namensliste im Client - siehe die Driftquelle in 8.5.
 
-### 8.3 Was noch offen ist (Tasks 11-13)
+### 8.3 Was noch offen ist (Task 13)
 
-Der Plan enthält für jede dieser Aufgaben den vollständigen Code und die
-Tests.
+Der Plan enthält für die Aufgabe den vollständigen Ablauf.
 
-- **Task 11 - Kleinkram.** SUPER MUNCHKIN / HALB-BLUT zweite Hälfte ("alle
-  Vorteile, keine Nachteile") und VERSTÜMMLE DIE LEICHEN nur nach einem Kampf.
-  Hängt von nichts ab, kann sofort laufen.
-- **Task 12 - Klassenkräfte.** DIEB ("In den Rücken fallen", "Diebstahl") und
-  PRIESTER ("Auferstehung"). Braucht `rollWithWindow` aus Task 4 und die
-  Zielauswahl aus Task 3, und **muss nach 7 und 8 laufen** (alle drei rechnen
-  in `combatTotals`) - was inzwischen erfüllt ist.
 - **Task 13 - Abnahme.** Volle Testsuite, Abdeckung neu messen, Durchlauf im
   Browser, README-Abschnitt "Was automatisiert ist" nachziehen.
 
