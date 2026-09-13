@@ -159,6 +159,14 @@ function newPlayer(name, socketId, isBot) {
     // Anhaltende Flueche (MIESER SPIEGEL, GESCHLECHTSUMWANDLUNG, HUHN AUF
     // DEINEM KOPF, WINZIGE HÄNDE) - siehe LINGERING_CURSES/addActiveCurse.
     activeCurses: [],
+    // Geschlecht: 'm' | 'w' | null (geschlechtslos, siehe STRICHMÄNNCHEN).
+    // Alle starten maennlich und waehlen nichts aus - geaendert wird es nur
+    // durch Karten (GESCHLECHTSUMWANDLUNG, STRICHMÄNNCHEN).
+    gender: 'm',
+    // FREUD'SCHEN SLIPPER: das Geschlecht beim Anlegen der Slipper, fuer die
+    // "-5, wenn es nicht das Geschlecht ist, das du beim Ausspielen hattest"-
+    // Klausel beim Verlust. null = keine Slipper im Spiel.
+    genderBeiSlippern: null,
   };
 }
 
@@ -429,6 +437,7 @@ function publicPlayer(room, p) {
     equipped: p.equipped,
     attachments: p.attachments, // SCHUMMELN!: markiert den geschummelten Gegenstand fuer den Client
     activeCurses: p.activeCurses, // anhaltende Flueche, siehe LINGERING_CURSES
+    gender: p.gender,
     strength: baseStrength(p),
     handLimit: handLimit(p), // ZWERG darf 6 Karten halten, alle anderen 5
   };
@@ -905,6 +914,17 @@ function hasRace(player, substr) {
   return player.races.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
 }
 
+// Geschlecht: alle starten maennlich (player.gender), geaendert wird es nur
+// durch Karten. Wer die FREUD'SCHEN SLIPPER traegt, "zaehlt gleichzeitig als
+// beide Geschlechter, erleidet aber keine der Strafen" - fuer jede Regel, die
+// ein Geschlecht NENNT, gilt er damit als keins von beiden. Geschlechtslos
+// (STRICHMÄNNCHEN) wirkt genauso.
+function istGeschlecht(player, g) {
+  if (!player || !player.gender) return false;
+  if (equippedItemIds(player).some((id) => { const c = card(id); return c && GENDER_IMMUNE_ITEMS.has(c.name); })) return false;
+  return player.gender === g;
+}
+
 function hasPowerGroup(player, name) {
   return player.powerGroups.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase() === name.toUpperCase(); });
 }
@@ -1259,8 +1279,11 @@ function applyPrimitiveAction(room, player, action) {
       // waehlende Person sieht die Karten. ponytail: bewusst offen gelassen,
       // ein verdecktes Ziehen braeuchte eine eigene Anzeigeart im Client.
       const opfer = player;
-      const queue = playerQueueFrom(room, opfer, action.mode);
-      if (!queue.length) return 'niemand sonst am Tisch';
+      let queue = playerQueueFrom(room, opfer, action.mode);
+      // BOBBELKOPF: "Lass jeden ORK im Spiel eine Karte aus deiner Hand
+      // ziehen" - dieselbe Warteschlange, nur auf eine Rasse eingeschraenkt.
+      if (action.nurRasse) queue = queue.filter((pid) => { const p2 = findPlayer(room, pid); return p2 && hasRace(p2, action.nurRasse); });
+      if (!queue.length) return action.nurRasse ? `niemand am Tisch ist ${action.nurRasse}` : 'niemand sonst am Tisch';
       openQueuedCardAction(room, 'Schlimme Dinge', queue, (pid) => {
         if (!opfer.hand.length) return null; // nichts mehr zu holen: ueberspringen
         return { kind: 'chooseCard', prompt: `Eine Karte von ${opfer.name} nehmen`,
@@ -1311,6 +1334,71 @@ function applyPrimitiveAction(room, player, action) {
           candidateIds: ids, discardOwn: true };
       });
       return `Wuerfelwurf ${roll} -> ${roll} Karte(n)/Gegenstand/Gegenstaende ablegen`;
+    }
+    // Mehrere eigene Karten/Gegenstaende nacheinander SELBST aussuchen und
+    // ablegen ("Lege zwei Karten deiner Wahl ab", "Verliere 2 kleine
+    // Gegenstaende deiner Wahl"). Gleiche Bauform wie diceItemOrHandLoss, nur
+    // mit fester Anzahl und waehlbarer Quelle.
+    case 'queuedDiscardOwn': {
+      const quelle = () => {
+        if (action.quelle === 'hand') return player.hand.slice();
+        const ids = equippedItemIds(player);
+        return action.quelle === 'kleineGegenstaende' ? ids.filter((id) => !isBigItem(card(id))) : ids;
+      };
+      if (!quelle().length) return 'nichts Passendes vorhanden';
+      openQueuedCardAction(room, action.cardName || 'Schlimme Dinge', Array(action.count).fill(player.id), () => {
+        const ids = quelle();
+        if (!ids.length) return null;
+        return { kind: 'chooseCard', prompt: action.prompt || 'Eine Karte ablegen', candidateIds: ids, discardOwn: true };
+      });
+      return `${action.count} Karte(n)/Gegenstand/Gegenstaende selbst aussuchen und ablegen`;
+    }
+    // KAMIKAZE-KOBOLDE: "Alle anderen verlieren 1 Gegenstand ihrer Wahl."
+    // Anders als queuedTakeItem bekommt niemand etwas - jede Person legt
+    // selbst ab.
+    case 'queuedDiscardEachOther': {
+      const queue = playerQueueFrom(room, player, 'allOthers');
+      if (!queue.length) return 'niemand sonst am Tisch';
+      openQueuedCardAction(room, action.cardName || 'Schlimme Dinge', queue, (pid) => {
+        const p2 = findPlayer(room, pid);
+        const ids = p2 ? equippedItemIds(p2) : [];
+        if (!ids.length) return null;
+        return { kind: 'chooseCard', prompt: 'Einen Gegenstand ablegen', candidateIds: ids, discardOwn: true };
+      });
+      return `${queue.length} Mitspieler legen je 1 Gegenstand ab`;
+    }
+    // GOTHYANKI: "Jeder Spieler, dessen Stufe niedriger ist als deine, steigt
+    // eine Stufe auf. Du verlierst dann diese Anzahl an Stufen."
+    case 'levelUpLowerPlayersAndLose': {
+      const niedriger = room.players.filter((p) => p.id !== player.id && p.level < player.level);
+      if (!niedriger.length) return 'niemand steht niedriger - keine Wirkung';
+      // setLevel deckelt auf die Siegstufe; aufsteigen darf man dadurch laut
+      // Karte trotzdem nicht gewinnen - das prueft checkWin ohnehin separat.
+      niedriger.forEach((p) => setLevel(p, p.level + 1));
+      setLevel(player, player.level - niedriger.length);
+      return `${niedriger.map((p) => p.name).join(', ')} steigen je 1 Stufe auf, ${player.name} verliert ${niedriger.length}`;
+    }
+    // GESCHLECHTSUMWANDLUNG ("Die Umwandlung ist jedoch permanent") und
+    // STRICHMÄNNCHEN ("Du bist weder maennlich noch weiblich, bis ein anderer
+    // Spieler das Geschlecht wechselt ... dann nimmst du dessen Geschlecht
+    // an"). value: 'm' | 'w' | null | 'wechseln'.
+    case 'setGender': {
+      const alt = player.gender;
+      player.gender = action.value === 'wechseln'
+        ? (alt === 'w' ? 'm' : (alt === 'm' ? 'w' : alt))
+        : action.value;
+      const wort = (g) => (g === 'w' ? 'weiblich' : (g === 'm' ? 'maennlich' : 'geschlechtslos'));
+      // Zweiter Satz von STRICHMÄNNCHEN: wer geschlechtslos ist, uebernimmt
+      // das Geschlecht der naechsten Person, die ihres wechselt.
+      if (player.gender) {
+        room.players.forEach((p2) => {
+          if (p2.id !== player.id && p2.gender === null) {
+            p2.gender = player.gender;
+            log(room, `${p2.name} war geschlechtslos und ist jetzt ${wort(p2.gender)}.`);
+          }
+        });
+      }
+      return `Geschlecht: ${wort(alt)} -> ${wort(player.gender)}`;
     }
     case 'curseIncomeTax': {
       // FLUCH! EINKOMMENSSTEUER: "Lege einen Gegenstand deiner Wahl ab. Jeder
@@ -1382,7 +1470,7 @@ function applyPrimitiveAction(room, player, action) {
 const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
   card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
-  resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem,
+  resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
 });
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
@@ -1941,7 +2029,8 @@ const {
   ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
-} = passivesFactory({ card, hasRace, hasClass, equippedItemIds });
+  GENDER_IMMUNE_ITEMS,
+} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
 // Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
@@ -2521,6 +2610,7 @@ function handLimit(player) {
 // ---------------------------------------------------------------------------
 
 function startCombat(room, actorId, monsterIds, opts) {
+  room.players.forEach((p) => pruefeSlipperVerlust(room, p));
   room.combatHappenedThisTurn = true;
   room.turnPhase = 'kampf';
   room.combat = {
@@ -3549,8 +3639,34 @@ function handleEquipItem(room, playerId, cardId) {
     if (c.handsCost === 2) { player.equipped.hands = [cardId, cardId]; }
     else { const idx = player.equipped.hands.indexOf(null); player.equipped.hands[idx] = cardId; }
   } else return;
+  // FREUD'SCHEN SLIPPER: das Geschlecht beim Ausspielen merken - beim Verlust
+  // entscheidet es ueber die -5-Strafe (siehe pruefeSlipperVerlust).
+  if (GENDER_IMMUNE_ITEMS.has(c.name)) player.genderBeiSlippern = player.gender;
   log(room, `${player.name} legt "${c.name}" an.`, [cardId]);
   touchRoom(room);
+}
+
+// FREUD'SCHEN SLIPPER: "Wenn du die Slipper verlierst, ... erhaeltst du eine
+// -5 Strafe im naechsten Kampf, wenn es nicht das Geschlecht ist, das du beim
+// Ausspielen der Karte hattest."
+// ponytail: geprueft wird beim Kampfbeginn statt an jedem einzelnen Verlust-
+// pfad (die Slipper koennen ueber ein Dutzend Wege verschwinden - Schlimme
+// Dinge, Diebstahl, Handel, Verkauf). Wirkung ist dieselbe, weil die Strafe
+// ohnehin erst im naechsten Kampf zaehlt. Das Geschlecht selbst waehlt hier
+// niemand neu (Standard ist maennlich, siehe newPlayer).
+function pruefeSlipperVerlust(room, player) {
+  if (!player || player.genderBeiSlippern === undefined || player.genderBeiSlippern === null) return;
+  const traegtNoch = equippedItemIds(player).some((id) => { const c = card(id); return c && GENDER_IMMUNE_ITEMS.has(c.name); });
+  if (traegtNoch) return;
+  const vorher = player.genderBeiSlippern;
+  player.genderBeiSlippern = null;
+  if (vorher === player.gender) return; // gleiches Geschlecht: keine Strafe
+  player.activeCurses = player.activeCurses || [];
+  player.activeCurses.push({
+    cardId: null, name: "FREUD'SCHEN SLIPPER", kind: 'combatMalus', amount: -5, dauer: 'naechsterKampf',
+    hinweis: '-5 im nächsten Kampf: die Slipper sind weg und das Geschlecht ein anderes als beim Anlegen.',
+  });
+  log(room, `${player.name} hat die Freud'schen Slipper verloren - -5 im nächsten Kampf.`);
 }
 
 // "Spiele diese Karte auf einen Gegenstand, den du im Spiel hast, oder dann,
@@ -4249,6 +4365,7 @@ module.exports = {
   handlePlayRaceOrClass, raceItemBonusSum, monsterSeesRace, fleeIsAutomatic,
   monsterVictoryExtras, baseStrength,
   monsterRefusesTarget, monsterPassOption, fleeModifierParts, monsterTraitBonusSum,
+  istGeschlecht, GENDER_IMMUNE_ITEMS, pruefeSlipperVerlust, handleEquipItem,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, endTurn,

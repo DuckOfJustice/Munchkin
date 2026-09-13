@@ -7,7 +7,7 @@
 module.exports = (ctx) => {
   const {
     card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
-    equippedItemIds, isBigItem,
+    equippedItemIds, isBigItem, istGeschlecht,
   } = ctx;
 
   const CONSEQUENCE_OVERRIDES = {
@@ -114,6 +114,46 @@ module.exports = (ctx) => {
     // verlieren eine Stufe." Betrifft laut Text ALLE anderen (kein Nachbar-
     // oder Stufen-Bezug wie bei den Monstern oben).
     'FLUCH! EINKOMMENSSTEUER': () => ({ type: 'curseIncomeTax', mode: 'allOthers' }),
+
+    // --- Clerical Errors: Schlimme Dinge mit freier eigener Auswahl -------
+    // "Du hast den Wurm gegessen! Lege zwei Karten (deiner Wahl) aus deiner
+    // Hand ab."
+    'TEQUILA-LIEDCHEN': () => ({ type: 'queuedDiscardOwn', count: 2, quelle: 'hand',
+      cardName: 'TEQUILA-LIEDCHEN', prompt: 'Eine Handkarte ablegen' }),
+    // "Opfere eine Karte deiner Wahl dem Uebel des Ruesselkaefers."
+    'RÜSSELKÄFER': () => ({ type: 'queuedDiscardOwn', count: 1, quelle: 'hand',
+      cardName: 'RÜSSELKÄFER', prompt: 'Eine Handkarte opfern' }),
+    // "Verliere 2 kleine Gegenstaende deiner Wahl."
+    'DOPPELGANGSTER': () => ({ type: 'queuedDiscardOwn', count: 2, quelle: 'kleineGegenstaende',
+      cardName: 'DOPPELGANGSTER', prompt: 'Einen kleinen Gegenstand ablegen' }),
+    // "Sie explodieren ueberall um dich herum. Du verlierst 2 Gegenstaende
+    // deiner Wahl. Alle anderen verlieren 1 Gegenstand ihrer Wahl."
+    'KAMIKAZE-KOBOLDE': () => ({ type: 'combo', actions: [
+      { type: 'queuedDiscardOwn', count: 2, quelle: 'gegenstaende', cardName: 'KAMIKAZE-KOBOLDE', prompt: 'Einen Gegenstand ablegen' },
+      { type: 'queuedDiscardEachOther', cardName: 'KAMIKAZE-KOBOLDE' },
+    ] }),
+    // "Sie machen dir Schuldgefuehle. Jeder Spieler, dessen Stufe niedriger
+    // ist als deine, steigt eine Stufe auf. Du verlierst dann diese Anzahl an
+    // Stufen."
+    'GOTHYANKI': () => ({ type: 'levelUpLowerPlayersAndLose' }),
+    // "Lass jeden Ork im Spiel eine Karte aus deiner Hand ziehen."
+    'BOBBELKOPF': () => ({ type: 'queuedTakeFromHand', mode: 'after', nurRasse: 'ORK' }),
+    // "Zuckerschock! Du musst in jedem Kampf deine Hilfe anbieten, darfst
+    // keinen Schatz annehmen, bis du einen verlierst." - eine Dauerpflicht
+    // ueber viele Zuege, fuer die es keinen Tracker gibt; bleibt manuell:
+    'GUMMI-GOLEM': () => null,
+    // "Ein Strichmaennchen hat kein Geschlecht, und du jetzt auch nicht. Du
+    // bist weder maennlich noch weiblich, bis ein anderer Spieler das
+    // Geschlecht wechselt ... dann nimmst du dessen Geschlecht an."
+    'STRICHMÄNNCHEN': () => ({ type: 'setGender', value: null }),
+    // "Frauen verlieren ihre Ruestung. Maenner muessen ein Bier mit ihm
+    // teilen, verliere 1 Stufe." (Wer die Freud'schen Slipper traegt, gilt als
+    // keins von beiden - siehe istGeschlecht - und kommt davon.)
+    'CHAUVINISTENSCHWEIN': (player) => {
+      if (istGeschlecht(player, 'w')) return { type: 'discardSlot', slot: 'armor' };
+      if (istGeschlecht(player, 'm')) return { type: 'levelDelta', amount: 1 };
+      return { type: 'noEffect' };
+    },
 
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
     'ENTIKOR': () => ({
@@ -261,7 +301,10 @@ module.exports = (ctx) => {
     },
     // Persistente Mali/Flags ohne laufenden Status-Tracker in diesem Server -
     // bleiben nach dem Einordnen als Fluch bewusst manuell/nur textlich:
-    'GESCHLECHTSUMWANDLUNG': () => null,
+    // "-5 auf deinen naechsten Kampf, weil du abgelenkt bist. ... Die
+    // Umwandlung ist jedoch permanent." Der -5-Teil laeuft weiter ueber
+    // LINGERING_CURSES, der Wechsel selbst hier:
+    'GESCHLECHTSUMWANDLUNG': () => ({ type: 'setGender', value: 'wechseln' }),
     'HUHN AUF DEINEM KOPF': () => null,
     'NARRENGOLD': () => null,
     'BLUTSCHLEIER': () => null,

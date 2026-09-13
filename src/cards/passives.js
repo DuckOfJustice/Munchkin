@@ -2,7 +2,7 @@
 // im Spiel ist. Kuratiert statt per Regex - die Formulierungen auf den Karten
 // sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6 gegen Elfen").
 module.exports = (ctx) => {
-  const { hasRace, hasClass, card, equippedItemIds } = ctx;
+  const { hasRace, hasClass, card, equippedItemIds, istGeschlecht } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
   // SCHUTZSANDALEN: "Flüche, die du ziehst, nachdem du eine Tür
@@ -140,6 +140,12 @@ module.exports = (ctx) => {
     }).length,
   };
 
+  // --- Geschlecht ------------------------------------------------------------
+  // Gegenstaende, die alle Geschlechter-Strafen aufheben. FREUD'SCHEN SLIPPER:
+  // "Waehrend du die Freud'schen Slipper traegst, zaehlst du gleichzeitig als
+  // beide Geschlechter, erleidest aber keine der Strafen."
+  const GENDER_IMMUNE_ITEMS = new Set(["FREUD'SCHEN SLIPPER"]);
+
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
   // die Rasse/Klasse hat (Angreifer:in oder Helfer:in) - nicht einmal pro
@@ -183,7 +189,11 @@ module.exports = (ctx) => {
     'MEDUSA': { races: ['ELF'], bonus: 4 },                                            // "Eklige Schlangenhaare! +4 gegen Elfen."
     'FEDERFEIND': [{ classes: ['PRIESTER'], bonus: 5 }, { classes: ['ZAUBERER'], bonus: 3 }], // "+5 gegen Priester und +3 gegen Zauberer."
     'SIEBENJÄHRIGER LICH': { classes: ['KRIEGER'], bonus: 5 },                         // "+5 gegen Krieger."
-    'TANTE PALADIN': { classes: ['PRIESTER'], bonus: 5 },                              // "+5 gegen Priester" (das "+5 gegen maennliche Charaktere" braucht ein Geschlechtsfeld, das es nicht gibt)
+    // "+5 gegen Priester, +5 gegen maennliche Charaktere."
+    'TANTE PALADIN': [
+      { classes: ['PRIESTER'], bonus: 5 },
+      { wennErfuellt: (p) => istGeschlecht(p, 'm'), bonus: 5 },
+    ],
     // "+5 gegen Priester. Sie greift mehrmals an und erhaelt zusaetzlich +5,
     // es sei denn, du verteidigst dich mit (mindestens) 2 eigenen Waffen."
     'KALI': [
@@ -194,6 +204,9 @@ module.exports = (ctx) => {
     'RÜSSELKÄFER': { wennErfuellt: (p) => !p.classes.length, bonus: 3 },
     // "+5 gegen Super-Munchkins oder Mischlinge. +10 gegen beide." - als zwei
     // Regeln, die sich bei jemandem mit beiden Karten auf +10 addieren.
+    // "+5 gegen Frauen." (Der Zusatzschatz "fuer jede Frau, die hilft"
+    // bleibt manuell - dafuer gibt es keinen Schatz-pro-Person-Weg.)
+    'CHAUVINISTENSCHWEIN': { wennErfuellt: (p) => istGeschlecht(p, 'w'), bonus: 5 },
     'GOTHYANKI': [
       { wennErfuellt: (p) => !!p.classCapCard, bonus: 5 },
       { wennErfuellt: (p) => !!p.raceCapCard, bonus: 5 },
@@ -343,5 +356,6 @@ module.exports = (ctx) => {
     ITEM_CONDITIONAL_BONUS, SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS,
     COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
     TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
+    GENDER_IMMUNE_ITEMS,
   };
 };

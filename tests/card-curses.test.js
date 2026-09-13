@@ -154,10 +154,19 @@ function run() {
   // CONSEQUENCE_OVERRIDES bleibt fuer die vier Karten "bewusst manuell" -
   // der Tracker kommt zusaetzlich, nicht als Ersatz.
   // -------------------------------------------------------------------
-  ['MIESER SPIEGEL', 'GESCHLECHTSUMWANDLUNG', 'HUHN AUF DEINEM KOPF'].forEach((name) => {
+  ['MIESER SPIEGEL', 'HUHN AUF DEINEM KOPF'].forEach((name) => {
     const spec = CONSEQUENCE_OVERRIDES[name](makePlayer(), makeRoom());
     assert.strictEqual(spec, null, `${name}: weiterhin kein Sofort-Effekt`);
   });
+  // GESCHLECHTSUMWANDLUNG hat seit dem Geschlechtsmerkmal (2026-09-13,
+  // Clerical Errors) einen Sofort-Effekt - "Die Umwandlung ist jedoch
+  // permanent". Der -5-Tracker kommt weiterhin zusaetzlich dazu, nicht
+  // statt dessen.
+  assert.deepStrictEqual(
+    CONSEQUENCE_OVERRIDES['GESCHLECHTSUMWANDLUNG'](makePlayer(), makeRoom()),
+    { type: 'setGender', value: 'wechseln' },
+    'GESCHLECHTSUMWANDLUNG wechselt das Geschlecht');
+  assert.ok(LINGERING_CURSES['GESCHLECHTSUMWANDLUNG'], 'und bleibt trotzdem im Fluch-Tracker');
   assert.ok(LINGERING_CURSES['WINZIGE HÄNDE'], 'WINZIGE HÄNDE steht im Fluch-Tracker');
 
   // -------------------------------------------------------------------

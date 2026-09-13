@@ -120,7 +120,15 @@ function run() {
   // etwas Spielraum bleibt. Die Schranke schuetzt weiter davor, dass eine zu
   // grosszuegige REGEX-Regel Karten einfaengt - kuratierte Eintraege wie die
   // sieben obigen sind davon nicht betroffen.
-  assert.ok(manual >= 15, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
+  // Runde vom 2026-09-13 (Clerical Errors, Tasks 2-3): neun weitere Karten
+  // sind kuratiert dazugekommen - TEQUILA-LIEDCHEN, RÜSSELKÄFER,
+  // DOPPELGANGSTER, KAMIKAZE-KOBOLDE, GOTHYANKI, BOBBELKOPF, STRICHMÄNNCHEN,
+  // CHAUVINISTENSCHWEIN (Monster) und GESCHLECHTSUMWANDLUNG (Fluch, seit dem
+  // Geschlechtsmerkmal mit echtem Sofort-Effekt). Tatsaechlich stehen damit
+  // noch 12 Karten manuell; die Schranke geht auf 10, der Zweck bleibt
+  // derselbe: eine zu grosszuegige REGEX-Regel auffallen lassen. Kuratierte
+  // Eintraege sind davon nicht betroffen.
+  assert.ok(manual >= 10, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
 }
 
 run();
