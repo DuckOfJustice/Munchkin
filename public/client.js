@@ -1268,6 +1268,18 @@
         () => socket.emit('playCombatCard', { cardId: id }));
       wrap.appendChild(btn);
     }
+    // Fluchkarten aus der Hand: "jederzeit gegen eine beliebige Person".
+    // Welche Karten als Fluch gelten, sagt der Server (state.curseCards) -
+    // die Rohdaten fuehren die meisten Flueche als normale Tuerkarte.
+    const istFluch = c.category === 'curse' || (state.curseCards || []).includes(c.name);
+    if (istFluch && !state.pendingCardAction && !state.pendingConsequence && !state.pendingRoll && !state.winner) {
+      const ziele = state.players.filter((p) => p.id !== myInfo.playerId);
+      const select = document.createElement('select');
+      select.innerHTML = '<option value="">💀 Fluch spielen gegen...</option>' +
+        ziele.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+      select.onchange = () => { if (select.value) socket.emit('playCurseFromHand', { cardId: id, targetId: select.value }); };
+      wrap.appendChild(select);
+    }
     // Türkarten mit eigener Kampfwirkung (MAHLZEIT!) - welche das sind, sagt
     // der Server (state.doorCombatCards), damit hier keine Namensliste liegt.
     if (state.combat && !state.combat.mustFlee && (state.doorCombatCards || []).includes(c.name)) {

@@ -11,7 +11,7 @@ const {
   curseCombatModifier, curseSuppressesItemBonuses, newEquipped, handleEquipItem,
   handleDrawDoor, resolveCombatWin, applyPrimitiveAction, TREASURE_POWER_OVERRIDES,
   CONSEQUENCE_OVERRIDES, LINGERING_CURSES, refreshCombatReady, combatAllReady,
-  handleSetCombatReady,
+  handleSetCombatReady, handlePlayCurseFromHand, handleAckConsequence,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -220,6 +220,59 @@ function run() {
     assert.strictEqual(p.activeCurses.length, 1);
     assert.ok(clearActiveCurse({}, p, 0), 'gueltiger Index entfernt den Fluch');
     assert.strictEqual(p.activeCurses.length, 0);
+  }
+
+  // ------------------------------------------------------------------
+  // Fluchkarten aus der HAND gegen eine andere Person ausspielen.
+  // Bis dahin war ein Fluch auf der Hand eine tote Karte: er wirkte nur, wenn
+  // man ihn selbst aus dem Tuerstapel zog.
+  // ------------------------------------------------------------------
+  {
+    const fluch = findCard('VERLIERE 1 STUFE');
+    const room = makeRoom();
+    room.players[0].hand = [fluch.id];
+    const stufeVorher = room.players[1].level;
+    handlePlayCurseFromHand(room, 'p1', fluch.id, 'p2');
+    assert.ok(!room.players[0].hand.includes(fluch.id), 'die Fluchkarte ist gespielt');
+    assert.ok(room.doorDiscard.includes(fluch.id), 'und liegt im Tuer-Ablagestapel');
+    assert.strictEqual(room.players[1].level, stufeVorher - 1, 'die Wirkung trifft das ZIEL, nicht die spielende Person');
+    assert.ok(room.pendingConsequence && room.pendingConsequence.playerId === 'p2',
+      'das Ziel bekommt die Konsequenz zum Abhaken');
+    // Der Zug der spielenden Person laeuft unveraendert weiter - ein aus der
+    // Hand gespielter Fluch gehoert zu keiner Zugphase.
+    const phaseVorher = room.turnPhase;
+    handleAckConsequence(room, 'p2');
+    assert.strictEqual(room.turnPhase, phaseVorher, 'die Zugphase bleibt, wo sie war');
+    done(room);
+  }
+  {
+    // SCHUTZSANDALEN schuetzen ausdruecklich NICHT: "(Flueche von anderen
+    // Spielern wirken weiterhin auf dich.)"
+    const fluch = findCard('VERLIERE 1 STUFE');
+    const sandalen = findCard('SCHUTZSANDALEN');
+    const room = makeRoom();
+    room.players[0].hand = [fluch.id];
+    room.players[1].equipped.feet = sandalen.id;
+    const stufeVorher = room.players[1].level;
+    handlePlayCurseFromHand(room, 'p1', fluch.id, 'p2');
+    assert.strictEqual(room.players[1].level, stufeVorher - 1, 'Sandalen helfen nur gegen selbst gezogene Flueche');
+    done(room);
+  }
+  {
+    // Keine Fluchkarte, sich selbst als Ziel, und eine laufende Entscheidung:
+    // jeweils passiert nichts, die Karte bleibt auf der Hand.
+    const fluch = findCard('VERLIERE 1 STUFE');
+    const keinFluch = ALL_CARDS.find((c) => c.category === 'item');
+    const room = makeRoom();
+    room.players[0].hand = [fluch.id, keinFluch.id];
+    handlePlayCurseFromHand(room, 'p1', keinFluch.id, 'p2');
+    assert.ok(room.players[0].hand.includes(keinFluch.id), 'nur Fluchkarten gehen diesen Weg');
+    handlePlayCurseFromHand(room, 'p1', fluch.id, 'p1');
+    assert.ok(room.players[0].hand.includes(fluch.id), 'nicht gegen sich selbst');
+    room.pendingCardAction = { playerId: 'p2', cardName: 'FREMD', kind: 'choice', options: [] };
+    handlePlayCurseFromHand(room, 'p1', fluch.id, 'p2');
+    assert.ok(room.players[0].hand.includes(fluch.id), 'nicht in eine laufende Kartenaktion hinein');
+    done(room);
   }
 
   console.log('OK - Anhaltende Flueche: Tracker, Mieser-Spiegel/Ruestungs-Ausnahme, Geschlechtsumwandlung, Bereit-Invalidierung, Ablauf bei Sieg/Flucht, Wunschring.');

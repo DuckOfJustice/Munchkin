@@ -442,6 +442,10 @@ function publicState(room) {
     bigItems: [...BIG_ITEMS],
     doorCombatCards: Object.keys(DOOR_COMBAT_CARDS),
     combatReactionCards: Object.keys(COMBAT_REACTION_CARDS),
+    // Welche Tuerkarten als Fluch gelten (die Rohdaten fuehren die meisten als
+    // normale Tuerkarte) - damit der Client den "Fluch spielen"-Knopf zeigen
+    // kann, ohne eine eigene Namensliste zu pflegen.
+    curseCards: [...DOOR_OTHER_AS_CURSE],
     turnIndex: room.turnIndex,
     turnPlayerId: room.players[room.turnIndex] ? room.players[room.turnIndex].id : null,
     turnPhase: room.turnPhase,
@@ -704,13 +708,51 @@ function handleTakeRevealedDoor(room, playerId) {
   log(room, `${player.name} nimmt "${card(id).name}" auf die Hand. Phase 2: Auf Ärger aus sein.`, [id]);
 }
 
+// Fluchkarten aus der HAND: "Du darfst eine Fluchkarte jederzeit gegen eine
+// beliebige Person am Tisch ausspielen." Bis hierher war ein Fluch auf der
+// Hand eine tote Karte - er wirkte nur, wenn man ihn selbst aus dem Tuerstapel
+// zog (handleDrawDoor). Beute aus dem Raum und offen liegende Tuerkarten
+// bringen aber laufend welche auf die Hand.
+//
+// Unterschiede zum gezogenen Fluch, beide stehen so auf den Karten:
+//  * SCHUTZSANDALEN schuetzen NICHT ("Flueche von anderen Spielern wirken
+//    weiterhin auf dich") - deshalb hier keine curseProtectionItem-Pruefung.
+//  * Die Zugphase bleibt, wo sie ist (keepPhase): der Fluch gehoert zu keiner
+//    Phase und kann sogar waehrend eines fremden Zuges kommen.
+function handlePlayCurseFromHand(room, playerId, cardId, targetId) {
+  const player = findPlayer(room, playerId);
+  const target = findPlayer(room, targetId);
+  if (!player || !target || player.id === target.id) return;
+  if (!player.hand.includes(cardId)) return;
+  const c = card(cardId);
+  if (!c || !(c.category === 'curse' || DOOR_OTHER_AS_CURSE.has(c.name))) return;
+  // Nicht in eine laufende Entscheidung hineinplatzen - die wuerde sonst
+  // ueberschrieben (gleiche Regel wie bei den anderen Sofort-Karten).
+  if (room.pendingConsequence || room.pendingCardAction || room.pendingRoll) return;
+  if (room.winner) return;
+  removeFromHand(player, cardId);
+  discardCard(room, cardId);
+  room.pendingConsequence = {
+    playerId: target.id, kind: 'curse', cardId, text: c.text || c.name,
+    autoApplied: null, choice: null, keepPhase: true,
+  };
+  log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${target.name}!`, [cardId]);
+  autoApplyLossConsequence(room, target, [{ name: c.name, text: c.text, cardId }]);
+  refreshCombatReady(room); // ein Fluch kann Stufe/Ausruestung aendern
+  touchRoom(room);
+}
+
 function handleAckConsequence(room, playerId) {
   if (!room.pendingConsequence || room.pendingConsequence.playerId !== playerId) return;
   const pc = room.pendingConsequence;
   const wasCurse = pc.kind === 'curse';
   room.pendingConsequence = null;
   const player = findPlayer(room, playerId);
-  if (wasCurse) {
+  if (wasCurse && pc.keepPhase) {
+    // Aus der Hand gespielter Fluch (handlePlayCurseFromHand): er gehoert zu
+    // keiner Zugphase, der laufende Zug bleibt unangetastet.
+    log(room, `${player.name} hakt den Fluch ab.`);
+  } else if (wasCurse) {
     room.turnPhase = 'aerger';
     log(room, `${player.name} macht weiter mit Phase 2: Auf Ärger aus sein.`);
   } else {
@@ -3959,6 +4001,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'resolveCardCardChoice', ({ cardId }) => act(socket, (room, pid) => handleResolveCardCardChoice(room, pid, cardId)));
   onSafe(socket, 'useGuaranteedFlee', ({ cardId }) => act(socket, (room, pid) => handleUseGuaranteedFlee(room, pid, cardId)));
   onSafe(socket, 'playMonsterFromHand', ({ cardId }) => act(socket, (room, pid) => handlePlayMonsterFromHand(room, pid, cardId)));
+  onSafe(socket, 'playCurseFromHand', ({ cardId, targetId }) => act(socket, (room, pid) => handlePlayCurseFromHand(room, pid, cardId, targetId)));
   onSafe(socket, 'skipToLoot', () => act(socket, (room, pid) => handleSkipToLoot(room, pid)));
   onSafe(socket, 'lootRoom', () => act(socket, (room, pid) => handleLootRoom(room, pid)));
   onSafe(socket, 'setCombatModifier', ({ who, value }) => act(socket, (room, pid) => handleSetCombatModifier(room, pid, who, value)));
@@ -4025,7 +4068,7 @@ module.exports = {
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
   handleFleeReroll, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, endTurn,
-  handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee,
+  handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee, handlePlayCurseFromHand,
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
   SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS, newEquipped, handleEquipItem, handleUnequipItem, equippedItemIds,
   handlePlayCheat, handleRespondHelp, resolveCombatWin, applyPrimitiveAction,
