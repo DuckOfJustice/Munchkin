@@ -42,6 +42,14 @@ module.exports = () => {
     // "Du kannst keine Gegenstaende tragen, die mehr als eine Hand benoetigen."
     'WINZIGE HÄNDE': { kind: 'noTwoHandedItems', dauer: 'dauerhaft',
       hinweis: 'Keine Gegenstände, die zwei Hände brauchen, bis der Fluch endet.' },
+    // "-4 fuer deinen naechsten (oder aktuellen) Kampf ... ausser du bist ein
+    // Zwerg ... dann erhaeltst du durch den 'Fluch' stattdessen +4."
+    // amountFuerRasse wird in addActiveCurse EINMAL aufgeloest und als feste
+    // Zahl gespeichert - so bleibt der Eintrag reine Daten und geht
+    // unveraendert ueber publicState an den Client.
+    'ZWERGENBIER': { kind: 'combatMalus', amount: -4, amountFuerRasse: { 'ZWERG': 4 },
+      dauer: 'naechsterKampf',
+      hinweis: '-4 im nächsten Kampf (Zwerge bekommen stattdessen +4).' },
   };
 
   // Karten, die einen LAUFENDEN Kampf veraendern. Sie reiten auf der

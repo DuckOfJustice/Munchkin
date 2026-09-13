@@ -311,6 +311,9 @@ module.exports = (ctx) => {
     'RAUSCHPOCKEN': () => null,
     'TOURISTENFALLE': () => null,
     'MIESER SPIEGEL': () => null,
+    // ZWERGENBIER wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES) - kein Sofort-Effekt:
+    'ZWERGENBIER': () => null,
     'STINKER': () => null,
     // Braucht Datenpunkte/Mechaniken, die es hier nicht gibt (freie Handel-
     // Reihenfolge, wiederkehrender Rundenend-Hook, neue Kampfauslösung
@@ -346,7 +349,7 @@ module.exports = (ctx) => {
     'HUHN AUF DEINEM KOPF', 'NARRENGOLD', 'BLUTSCHLEIER', 'RAUSCHPOCKEN',
     'TOURISTENFALLE', 'EDELMUT', 'HUNGRIGER RUCKSACK', 'KLEINER FEHLER',
     'TEMPORÄRE ANMNESIE', 'DU STOLPERST ÜBER DEINE EIGENE TRUHE',
-    'ENTE DES SCHRECKENS', 'MIESER SPIEGEL', 'STINKER',
+    'ENTE DES SCHRECKENS', 'MIESER SPIEGEL', 'STINKER', 'ZWERGENBIER',
   ]);
 
   return { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE };

@@ -4,7 +4,7 @@
 // GUARANTEED_FLEE_MAX_MONSTER_LEVEL). Kuratiert statt per Regex - siehe die
 // Erklärung bei den anderen Kartentabellen.
 module.exports = (ctx) => {
-  const { card, hasRace, findPlayer, currentPlayer, isTopLevel } = ctx;
+  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants } = ctx;
 
   const TREASURE_POWER_OVERRIDES = {
     // --- Ziel-Auswahl (Spieler-Picker) ---
@@ -72,6 +72,28 @@ module.exports = (ctx) => {
     'WÜNSCHELSTAB': () => ({ type: 'chooseDiscardedCard' }),
     'GEDENKTAFEL': (player, room) => (room.combat ? null : { type: 'chooseDiscardedCard' }),
 
+    // "Zu einem beliebigen Zeitpunkt waehrend des Kampfes spielen. Durchsuche
+    // den Schatzabwurfstapel ... und tausche diese Karte gegen den ersten
+    // tragbaren Gegenstand, den du findest."
+    // ponytail: die Kartenwahl (openCardCardChoice) zeigt beide Ablagestapel
+    // und filtert nicht auf "tragbar" - wer die Regel streng nimmt, nimmt den
+    // obersten Gegenstand des Schatzstapels. Ein eigener gefilterter Waehler
+    // waere der Aufruestweg.
+    'EINHEITSGRÖSSE': (player, room) => (room.combat ? { type: 'chooseDiscardedCard' } : null),
+    // "Du kannst ihn auch als Wunschring einsetzen (z.B. um einen Fluch zu
+    // beenden) und hinterher abwerfen." Die Flucht-Seite der Karte laeuft
+    // ueber GUARANTEED_FLEE_CARDS weiter unten.
+    'DER ANDERE RING': (player) => {
+      const flueche = player.activeCurses || [];
+      if (!flueche.length) return null;
+      if (flueche.length === 1) return { type: 'clearCurse', index: 0 };
+      return {
+        type: 'choice',
+        options: flueche.map((f, i) => ({
+          id: `fluch-${i}`, label: `"${f.name}" beenden`, action: { type: 'clearCurse', index: i },
+        })),
+      };
+    },
     // "Beendet jeden Fluch. Jederzeit spielbar. Nur einmal einsetzbar." - mit
     // genau einem aktiven Fluch braucht es keinen Wahldialog dafür.
     'WUNSCHRING': (player) => {
@@ -88,6 +110,27 @@ module.exports = (ctx) => {
   };
 
   const COMBAT_POTION_OVERRIDES = {
+    // --- Clerical Errors ---------------------------------------------------
+    // "+5 fuer beide Seiten. Nur einmal einsetzbar." Der Text nennt keinen
+    // Spielzeitpunkt ("im Kampf"), deshalb greift COMBAT_PLAYABLE_RE nicht
+    // und die Karte braucht diesen kuratierten Eintrag.
+    'MONSTERFUTTER': () => ({ type: 'modifier', side: 'both', amount: 5 }),
+    // "Dieses feurige Gebraeu gewaehrt beiden Seiten +3, oder +6, wenn es zur
+    // Hilfe von Halblingen eingesetzt wird." Die Zahl steht hinter der Seite,
+    // parseCombatPotion findet sie deshalb nicht.
+    'SCHARFE PFEFFERSOSSE': (player, room) => ({
+      type: 'modifier', side: 'both',
+      amount: combatParticipants(room).some((p) => hasRace(p, 'HALBLING')) ? 6 : 3,
+    }),
+    // "Du hast die Goetter erfreut und sie zeigen dir ihre Anerkennung, indem
+    // sie alle Monster auf unschoene Weise toeten. Die Goetter nehmen sich
+    // allerdings auch den Schatz und die Stufen. Du kannst den Raum nicht
+    // pluendern." -> kein Schatz, keine Stufe, kein Pluendern.
+    'DEUS EX MASCHINENGEWEHR': () => ({ type: 'endCombatNoLevel' }),
+    // "Waehrend einem beliebigen Kampf spielen, nachdem jemand entschieden
+    // hat, im Kampf zu helfen. Dieser Munchkin wandert davon und kann nicht
+    // teilnehmen." Gleiche Wirkung wie der CYTILLESH-TRANK.
+    'TRANK DER APATHIE': (player, room) => (room.combat.helperId ? { type: 'removeHelper' } : null),
     // "Lege alle Monster des Kampfes ab. Du erhältst keinen Schatz, aber du
     // darfst den Raum durchsuchen."
     'FREUNDSCHAFTSTRANK': () => ({ type: 'endCombatNoLevel', thenLoot: true }),
@@ -161,6 +204,10 @@ module.exports = (ctx) => {
     // legt alle ihn angreifenden Monster ab und zieht sofort 2 Schaetze."
     // Feste 2 Schaetze - nicht der treasureCount der Monster.
     'MAHLZEIT!': () => ({ type: 'endCombatNoLevel', leavesTreasure: true, fixedTreasures: 2 }),
+    // "Waehrend beliebigem Kampf spielen. Ein Monster hat einen Tippfehler in
+    // seiner Beschreibung; daher wird es fuer alle Zwecke als Stufe 1
+    // behandelt. Seine Kraefte und sein Schatz bleiben unveraendert."
+    'TYPOGRAFISCHER FEHLER': () => ({ type: 'treatMonsterAsLevel1' }),
   };
 
   // "Ablegen, wenn der Weglaufen-Wurf misslingt. Du entkommst automatisch."

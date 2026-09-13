@@ -207,6 +207,11 @@ module.exports = (ctx) => {
     // "+5 gegen Frauen." (Der Zusatzschatz "fuer jede Frau, die hilft"
     // bleibt manuell - dafuer gibt es keinen Schatz-pro-Person-Weg.)
     'CHAUVINISTENSCHWEIN': { wennErfuellt: (p) => istGeschlecht(p, 'w'), bonus: 5 },
+    // Verstaerkerkarte statt Monster: "... aus der Hoelle." gibt "+5 fuer das
+    // Monster" (ueber das bonus-Feld) und "ein zusaetzliches +5 gegen
+    // Priester" - Letzteres haengt an den Kaempfenden und gehoert deshalb
+    // hierher. Siehe combat.enhancerIds in server.js.
+    '… aus der Hölle.': { classes: ['PRIESTER'], bonus: 5 },
     'GOTHYANKI': [
       { wennErfuellt: (p) => !!p.classCapCard, bonus: 5 },
       { wennErfuellt: (p) => !!p.raceCapCard, bonus: 5 },
@@ -234,6 +239,8 @@ module.exports = (ctx) => {
   const FLEE_ITEM_BONUS = {
     'STIEFEL ZUM ECHT SCHNELLEN DAVONLAUFEN': 2, // "Sie geben dir einen +2 Bonus auf Weglaufen."
     'TUBA DER VERZAUBERUNG': 3,                  // "... und gibt dir +3 auf Weglaufen."
+    // "Verleiht dir einen kranken Tritt, aber du hast jetzt -2 auf Weglaufen."
+    'AM FUSS BEFESTIGTER STREITKOLBEN': -2,
   };
   const FLEE_MONSTER_MOD = {
     'SCHNECKEN AUF SPEED': -2, // "Du hast -2 auf Weglaufen."
@@ -324,6 +331,10 @@ module.exports = (ctx) => {
     'ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT': (player, monsters) => (monsters.some((m) => m.name === 'KRAKZILLA') ? -4 : 0),
     // "+5 gegen die Laufende Nase und den Schatten."
     'SCHRECKLICHE SOCKEN': (player, monsters) => (monsters.some((m) => m.name === 'LAUFENDE NASE' || m.name === 'SCHATTEN') ? 5 : 0),
+    // "Zusaetzlich +3 gegen Untote." Der dritte Parameter sagt, ob im Kampf
+    // etwas Untotes steht - das schliesst die Verstaerkerkarte UNTOT ein
+    // ("Das Monster zaehlt jetzt als Untoter fuer alle Zwecke").
+    'GHOULPEITSCHE': (player, monsters, untot) => (untot ? 3 : 0),
   };
 
   // Karten, die angelegt werden, aber auf keinen der klassischen Plaetze
@@ -339,6 +350,10 @@ module.exports = (ctx) => {
     // "aber nur fuer Halblinge"
     'LIMBURGER UND SARDELLEN-SANDWICH': { slot: 'special', races: ['HALBLING'] },
     'SPIESSIGE KNIE': { slot: 'special' },
+    // Clerical Errors. Die Karte hat +4 und einen Goldwert, aber keinen
+    // slotKind in den Rohdaten - ohne Platz waere sie nicht anlegbar. "Am Fuss
+    // befestigt" ist kein Schuhwerk-Platz, also Spezialausruestung.
+    'AM FUSS BEFESTIGTER STREITKOLBEN': { slot: 'special' },
   };
   // Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
   // nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).

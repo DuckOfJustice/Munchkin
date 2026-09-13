@@ -387,12 +387,12 @@ function baseStrength(player) {
 // ITEM_CONDITIONAL_BONUS: siehe src/cards/passives.js (dort zusammen mit den
 // übrigen Dauerwirkungstabellen geladen, obwohl die Nutzung hier ist).
 
-function conditionalItemBonusSum(player, monsters) {
+function conditionalItemBonusSum(player, monsters, untot) {
   if (!player || !monsters || !monsters.length) return 0;
   return equippedItemIds(player).reduce((sum, id) => {
     const c = card(id);
     const fn = c && ITEM_CONDITIONAL_BONUS[c.name];
-    return sum + (fn ? fn(player, monsters) : 0);
+    return sum + (fn ? fn(player, monsters, !!untot) : 0);
   }, 0);
 }
 
@@ -1609,7 +1609,7 @@ const treasuresFactory = require('./src/cards/treasures.js');
 const {
   TREASURE_POWER_OVERRIDES, COMBAT_POTION_OVERRIDES, DOOR_COMBAT_CARDS,
   POST_FLEE_ESCAPE_CARDS, GUARANTEED_FLEE_CARDS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
-} = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel });
+} = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants });
 
 // ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES:
 // siehe src/cards/reactions.js.
@@ -2057,8 +2057,15 @@ function addActiveCurse(room, player, cardName, cardId) {
   // ponytail: defensiv statt eine Invariante vorauszusetzen - ältere
   // Test-Helper/Spielstände ohne activeCurses sollen nicht abstürzen.
   if (!player.activeCurses) player.activeCurses = [];
+  // ZWERGENBIER: "-4 ... ausser du bist ein Zwerg ... dann stattdessen +4".
+  // Einmal beim Eintragen aufgeloest, damit der Eintrag reine Daten bleibt.
+  let amount = regel.amount || 0;
+  if (regel.amountFuerRasse) {
+    const treffer = Object.keys(regel.amountFuerRasse).find((r) => hasRace(player, r));
+    if (treffer) amount = regel.amountFuerRasse[treffer];
+  }
   player.activeCurses.push({
-    cardId, name: cardName, kind: regel.kind, amount: regel.amount || 0, dauer: regel.dauer,
+    cardId, name: cardName, kind: regel.kind, amount, dauer: regel.dauer,
     // Klartext fuer die Anzeige - steht bei der Regel selbst (src/cards/
     // reactions.js), damit der Client die Wirkung nicht nachbauen muss.
     hinweis: regel.hinweis || '',
@@ -2180,9 +2187,19 @@ function monsterSeesRace(player, race) {
   });
 }
 
+// "Untot" im laufenden Kampf: entweder steht ein untotes Monster da
+// (UNDEAD_MONSTERS) oder jemand hat die Verstärkerkarte UNTOT gespielt
+// ("Das Monster zählt jetzt als Untoter für alle Zwecke"). Eine Stelle für
+// beide Nutzer: Priester-"Vertreiben" und die GHOULPEITSCHE.
+function combatHasUndead(room) {
+  if (!room.combat) return false;
+  if (combatHasMonster(room, UNDEAD_MONSTERS)) return true;
+  return (room.combat.enhancerIds || []).some((id) => { const c = card(id); return c && c.name === 'UNTOT'; });
+}
+
 function monsterTraitBonusSum(room) {
   const parts = combatParticipants(room);
-  return room.combat.monsterIds.reduce((sum, id) => {
+  return room.combat.monsterIds.concat(room.combat.enhancerIds || []).reduce((sum, id) => {
     const c = card(id);
     const regeln = c && MONSTER_TRAIT_BONUS[c.name];
     if (!regeln) return sum;
@@ -2391,7 +2408,7 @@ function classDiscardPower(room, player) {
   const name = Object.keys(table).find((n) => hasClass(player, n));
   if (!name) return null;
   const rule = table[name];
-  if (rule.requiresUndead && !combatHasMonster(room, UNDEAD_MONSTERS)) return null;
+  if (rule.requiresUndead && !combatHasUndead(room)) return null;
   const used = (c.classDiscards || {})[`${player.id}:${flee ? 'flee' : 'combat'}`] || 0;
   return Object.assign({ className: name, kind: flee ? 'flee' : 'combat', used, remaining: Math.max(0, rule.max - used) }, rule);
 }
@@ -2625,6 +2642,11 @@ function startCombat(room, actorId, monsterIds, opts) {
     classDiscards: {}, // "<playerId>:combat"/"<playerId>:flee" -> Anzahl bereits abgeworfener Karten
     fleeBonus: 0,      // Summe der Flugzauber-Karten
     treasureDelta: 0,  // Schatzbonus/-malus gespielter Monster-Verstärker
+    // Gespielte Monster-Verstärker. Die meisten wirken nur über ihr
+    // bonus-Feld (sofort in monsterModifier), zwei aber über den weiteren
+    // Kampfverlauf: "… aus der Hölle." (+5 gegen Priester, MONSTER_TRAIT_BONUS)
+    // und UNTOT ("Das Monster zählt jetzt als Untoter für alle Zwecke").
+    enhancerIds: [],
     ready: {},         // playerId -> true, sobald jemand die Auswertung freigibt
     readySignature: null,
   };
@@ -2701,7 +2723,13 @@ function combatTotals(room) {
   const sides = [actor, helper].filter(Boolean);
   // Eingestampfte Monster (siehe MONSTER_AUTO_KILL_BY_RACE) bringen keine
   // Stufe in die Rechnung ein.
-  const monsterLevel = monsters.reduce((sum, m) => sum + (monsterAutoKilled(m, sides) ? 0 : (m.level || 0)), 0);
+  // TYPOGRAFISCHER FEHLER setzt einzelne Monster auf Stufe 1 (levelOverrides).
+  const monsterLevel = c.monsterIds.reduce((sum, id) => {
+    const m = card(id);
+    if (!m || monsterAutoKilled(m, sides)) return sum;
+    const stufe = (c.levelOverrides && c.levelOverrides[id] != null) ? c.levelOverrides[id] : (m.level || 0);
+    return sum + stufe;
+  }, 0);
   const ignoreLevel = combatHasMonster(room, MONSTER_IGNORES_LEVEL);
   const ignoreBonuses = combatHasMonster(room, MONSTER_IGNORES_BONUSES);
   let playerStrength;
@@ -2717,7 +2745,7 @@ function combatTotals(room) {
       // (kein regulaerer Gegenstands-Slot, siehe Kommentar dort).
       const items = curseSuppressesItemBonuses(p)
         ? ((card(p.equipped.armor) || {}).bonus || 0)
-        : equippedBonusSum(p) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters);
+        : equippedBonusSum(p) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters, combatHasUndead(room));
       return sum + p.level + items + hellknightArmorBonus(p)
         + curseCombatModifier(p) - (ignoreLevel ? p.level : 0);
     }, 0) + c.actorModifier + backstabMalus(room);
@@ -2739,8 +2767,8 @@ function combatConditionalBonusFields(room) {
   const monsters = c.monsterIds.map(card);
   const totals = combatTotals(room);
   return {
-    actorConditionalBonus: conditionalItemBonusSum(actor, monsters),
-    helperConditionalBonus: helper ? conditionalItemBonusSum(helper, monsters) : 0,
+    actorConditionalBonus: conditionalItemBonusSum(actor, monsters, combatHasUndead(room)),
+    helperConditionalBonus: helper ? conditionalItemBonusSum(helper, monsters, combatHasUndead(room)) : 0,
     // Fertig gerechnete Summen: der Client hat sie früher selbst
     // nachgerechnet und würde die Monsterboni gegen Rassen/Klassen und die
     // Sonderregeln sonst nicht kennen - zwei Rechenwege, die auseinander-
@@ -2873,6 +2901,22 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.doubleActor = true;
       return 'Kampfstaerke der Munchkin-Seite verdoppelt';
     }
+    // TYPOGRAFISCHER FEHLER: "Ein Monster hat einen Tippfehler in seiner
+    // Beschreibung; daher wird es fuer alle Zwecke als Stufe 1 behandelt.
+    // Seine Kraefte und sein Schatz bleiben unveraendert."
+    // ponytail: WELCHES Monster waehlt die Karte nicht aus - hier trifft es
+    // das staerkste noch nicht heruntergesetzte (das ist immer die sinnvolle
+    // Wahl). Ein Monster-Waehler waere der Aufruestweg. "Fuer alle Zwecke"
+    // gilt hier fuer die Kampfrechnung; Regeln, die VOR dem Kampf an der
+    // gedruckten Stufe haengen (MONSTER_REFUSES), sind da laengst durch.
+    case 'treatMonsterAsLevel1': {
+      c.levelOverrides = c.levelOverrides || {};
+      const offen = c.monsterIds.filter((id) => c.levelOverrides[id] == null);
+      if (!offen.length) return '';
+      const ziel = offen.reduce((a, b) => (((card(a) || {}).level || 0) >= ((card(b) || {}).level || 0) ? a : b));
+      c.levelOverrides[ziel] = 1;
+      return `"${(card(ziel) || {}).name}" zählt jetzt als Stufe 1`;
+    }
     case 'removeHelper': {
       const helper = findPlayer(room, c.helperId);
       c.helperId = null;
@@ -2996,6 +3040,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
   if (isMonsterEnhancerCard(c)) {
     removeFromHand(player, cardId);
     room.combat.monsterModifier += c.bonus;
+    room.combat.enhancerIds = (room.combat.enhancerIds || []).concat(cardId);
     // "Wird das Monster besiegt, ziehe 2 zusätzliche Schätze" (GIGANTISCH,
     // URALT) bzw. "ziehe 1 Schatz weniger, mindestens 1" (BABY): der Wert
     // steckt in treasureCount der Verstärkerkarte. Aufgesammelt hier,
@@ -4366,6 +4411,7 @@ module.exports = {
   monsterVictoryExtras, baseStrength,
   monsterRefusesTarget, monsterPassOption, fleeModifierParts, monsterTraitBonusSum,
   istGeschlecht, GENDER_IMMUNE_ITEMS, pruefeSlipperVerlust, handleEquipItem,
+  applyCombatPotionAction, combatHasUndead, addActiveCurse, curseCombatModifier,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, endTurn,
