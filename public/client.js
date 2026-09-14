@@ -1386,10 +1386,15 @@
       const btn = mkBtn('Spielen', () => socket.emit('playRaceOrClass', { cardId: id }));
       wrap.appendChild(btn);
     }
-    // Generische "Sonderkraft nutzen"-Aktion für Schatzkarten mit
+    // Generische "Sonderkraft nutzen"-Aktion für Schatz-/Türkarten mit
     // automatisierter Fähigkeit (Sofort-Stufenaufstieg, kuratierte
-    // Einzelfälle - siehe TREASURE_POWER_NAMES/isInstantLevelUpText unten).
-    if (myTurn && !state.pendingCardAction && (hasTreasurePower(c) || hasDoorPower(c))) {
+    // Einzelfälle - welche das sind, sagt der Server über
+    // state.treasurePowerCards, siehe hasCardPower unten). Kein myTurn-Filter
+    // mehr: einige dieser Karten sind laut Kartentext "jederzeit spielbar"
+    // oder reagieren gerade auf ein fremdes Ereignis (HEIMSE DIE LORBEEREN
+    // EIN) - der Server prüft die eigentliche Bedingung ohnehin selbst und
+    // loggt nur einen Hinweis, wenn sie nicht erfüllt ist.
+    if (!state.pendingCardAction && !state.pendingConsequence && hasCardPower(c)) {
       const btn = mkBtn('✨ Sonderkraft nutzen', () => socket.emit('useCardPower', { cardId: id }));
       wrap.appendChild(btn);
     }
@@ -1523,10 +1528,15 @@
       btn.className = 'primary';
       wrap.appendChild(btn);
     }
-    // GEZINKTER WÜRFEL: nur, solange das Reaktionsfenster für genau diese
-    // Person offen ist (state.pendingRoll.holders).
-    if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId) && c.name === 'GEZINKTER WÜRFEL') {
-      const btn = mkBtn('🎲 Wurf ändern', () => {
+    // Würfel-Reaktionskarten (GEZINKTER WÜRFEL, KATZENINTERVENTION): nur,
+    // solange das Reaktionsfenster für genau diese Person offen ist
+    // (state.pendingRoll.holders). KATZENINTERVENTION würfelt serverseitig
+    // neu (state.rollRerollCards) - dafür braucht es keinen Wert-Prompt.
+    if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId)
+      && (state.rollReactionCards || []).includes(c.name)) {
+      const istNeuwurf = (state.rollRerollCards || []).includes(c.name);
+      const btn = mkBtn(istNeuwurf ? '🐈 Wurf neu würfeln lassen' : '🎲 Wurf ändern', () => {
+        if (istNeuwurf) { socket.emit('playReactionCard', { cardId: id }); return; }
         const v = Number(window.prompt('Neues Würfelergebnis (1-6)?', String(state.pendingRoll.roll)));
         if (v >= 1 && v <= 6) socket.emit('playReactionCard', { cardId: id, value: v });
       });
@@ -1584,49 +1594,18 @@
     if (typeof max !== 'number') return true;
     return state.combat.monsterIds.every((id) => (card(id).level || 0) <= max);
   }
-  // Kuratierte Einzelfälle aus TREASURE_POWER_OVERRIDES (server.js) - Namen
-  // müssen mit dort synchron gehalten werden.
-  const TREASURE_POWER_NAMES = new Set([
-    'KLAUE EINE STUFE', 'SINNIEREN', 'SINNLOSER AKT DER FREUNDLICHKEIT',
-    'JAMMER DEN SPIELLEITER AN', 'CHARAKTERSEITEN WECHSELN',
-    'ENTE DER VIELEN SACHEN',
-    'SCHATZHORT!', 'WÜNSCHELSTAB', 'GEDENKTAFEL', 'WUNSCHRING',
-  ]);
-  const INSTANT_LEVEL_UP_RE = /^\s*Steige\s+(?:eine|\d+)\s+Stufen?\s+auf\b/i;
-
-  function hasTreasurePower(c) {
-    if (!c || c.category !== 'treasure_other') return false;
-    if (TREASURE_POWER_NAMES.has(c.name)) return true;
-    return INSTANT_LEVEL_UP_RE.test(c.text || '');
-  }
-
-  // Tuerkarten mit aktiver Sonderkraft (server.js: DOOR_POWER_CARDS) - Namen
-  // muessen dort synchron gehalten werden.
-  const DOOR_POWER_NAMES = new Set(['GOTTLICHE INTERVENTION']);
-
-  function hasDoorPower(c) {
-    return !!c && DOOR_POWER_NAMES.has(c.name);
-  }
-
-  const COMBAT_POTION_NAMES = new Set([
-    'FREUNDSCHAFTSTRANK', 'POLLYVERWANDLUNGSTRANK', 'TRANK DER IRRELEVANZ',
-    'ENTLASSUNGSGLOCKE', 'CYTILLESH-TRANK', 'TRANK DES MUNDGERUCHS',
-    'YUPPIE-WASSER', 'FLÜSSIGKLINGE', 'VERZAUBERARMBAND',
-  ]);
-  const COMBAT_PLAYABLE_RE = /im\s+Kampf\b|Während\s+(eines\s+)?beliebige[nm]\s+Kampf(es)?\s+spielen/i;
-
-  function combatPotionAmountFound(rawText) {
-    const t = String(rawText || '').replace(/\\n/g, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<\/?[bi]>/gi, '');
-    return /\+\d+\s+für\s+beide\s+Seiten/i.test(t) ||
-      /\+\d+[,\s]+(?:für\s+)?(?:eine\s+der\s+Parteien,\s*)?egal[,\s]+(?:für\s+)?welche\s+Seite/i.test(t) ||
-      /\+\d+\s+nur\s+für\s+Monster/i.test(t) ||
-      /\+\d+\s+für\s+die\s+Munchkin-Seite/i.test(t);
+  // Sofortkraft-Schatz-/Türkarten (server.js: TREASURE_POWER_OVERRIDES,
+  // DOOR_POWER_CARDS, isInstantLevelUpCard) und Kampf-Tränke
+  // (isCombatPotionCard) - der Server veröffentlicht die fertigen Namen über
+  // publicState (state.treasurePowerCards/state.combatPotionCards), damit
+  // hier keine zweite, drift-anfällige Kopie liegt (siehe
+  // tests/card-clerical-ui.test.js).
+  function hasCardPower(c) {
+    return !!c && (state.treasurePowerCards || []).includes(c.name);
   }
 
   function isCombatPotion(c) {
-    if (!c || c.category !== 'treasure_other') return false;
-    if (COMBAT_POTION_NAMES.has(c.name)) return true;
-    return COMBAT_PLAYABLE_RE.test(c.text || '') && combatPotionAmountFound(c.text);
+    return !!c && (state.combatPotionCards || []).includes(c.name);
   }
 
   function mkBtn(label, onClick) {

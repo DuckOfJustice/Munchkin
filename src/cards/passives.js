@@ -278,6 +278,7 @@ module.exports = (ctx) => {
       { wennErfuellt: (p) => !!p.classCapCard, bonus: 5 },
       { wennErfuellt: (p) => !!p.raceCapCard, bonus: 5 },
     ],
+    'KAMIKAZE-KOBOLDE': { classes: ['ZAUBERER'], bonus: 3 },                        // "+3 gegen Zauberer."
   };
 
   // --- Monster, die die Kampfrechnung selbst verändern ---------------------
@@ -392,8 +393,9 @@ module.exports = (ctx) => {
     'VORPALE KLINGE': (player, monsters) => (monsters.some((m) => /^J/i.test(m.name || '')) ? 10 : 0),
     // "Gibt keinen Bonus gegen Krakzilla" - hebt den gedruckten Bonus (+4) wieder auf.
     'ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT': (player, monsters) => (monsters.some((m) => m.name === 'KRAKZILLA') ? -4 : 0),
-    // "+5 gegen die Laufende Nase und den Schatten."
-    'SCHRECKLICHE SOCKEN': (player, monsters) => (monsters.some((m) => m.name === 'LAUFENDE NASE' || m.name === 'SCHATTEN') ? 5 : 0),
+    // "+5 gegen die Laufende Nase und den Schatten." Gemeint ist DIE
+    // SCHATTENNASE - eine Karte namens SCHATTEN gibt es nicht.
+    'SCHRECKLICHE SOCKEN': (player, monsters) => (monsters.some((m) => m.name === 'LAUFENDE NASE' || m.name === 'DIE SCHATTENNASE') ? 5 : 0),
     // "Zusaetzlich +3 gegen Untote." Der dritte Parameter sagt, ob im Kampf
     // etwas Untotes steht - das schliesst die Verstaerkerkarte UNTOT ein
     // ("Das Monster zaehlt jetzt als Untoter fuer alle Zwecke").

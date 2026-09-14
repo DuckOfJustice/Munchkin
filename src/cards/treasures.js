@@ -59,8 +59,12 @@ module.exports = (ctx) => {
     // "Spielen, wenn ein Rivale einen Kampf gewinnt und eine Stufe aufsteigt.
     // Du tust das auch." - gleiche Bauform wie VERSTÜMMLE DIE LEICHEN, nur
     // strenger: es muss ein FREMDER Sieg gewesen sein.
-    // ponytail: room.lastCombatWinnerId wird beim Zugwechsel geleert, das
-    // Fenster ist also der laufende Zug - dieselbe Vereinfachung wie oben.
+    // room.lastCombatWinnerId wird NICHT sofort beim Zugwechsel geleert
+    // (sonst waere die Karte wirkungslos: der fremde Sieg liegt per
+    // Definition im fremden Zug, beim eigenen Zug waere das Feld schon
+    // wieder null) - das Fenster bleibt stattdessen eine ganze Runde offen
+    // (bis turnIndex wieder beim Sieger ankommt) oder wird vorher schon vom
+    // naechsten Sieg ueberschrieben (siehe endTurn/resolveCombatWin in server.js).
     'HEIMSE DIE LORBEEREN EIN': (player, room) => (
       room.lastCombatWinnerId && room.lastCombatWinnerId !== player.id
         ? { type: 'levelUp', amount: 1 } : null),

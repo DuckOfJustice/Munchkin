@@ -181,6 +181,8 @@ function createRoom() {
     turnIndex: 0,
     turnPhase: null, // tuer | aerger | pluendern | gabe
     combatHappenedThisTurn: false,
+    lastCombatWinnerId: null,
+    lastCombatWinnerTurnIndex: null,
     doorDeck: [], doorDiscard: [],
     treasureDeck: [], treasureDiscard: [],
     revealedDoorCard: null,
@@ -505,6 +507,15 @@ function publicState(room) {
     // normale Tuerkarte) - damit der Client den "Fluch spielen"-Knopf zeigen
     // kann, ohne eine eigene Namensliste zu pflegen.
     curseCards: [...DOOR_OTHER_AS_CURSE],
+    // Sofortkraft-Schatz-/Tuerkarten und Kampf-Traenke: siehe
+    // TREASURE_POWER_CARD_NAMES/COMBAT_POTION_CARD_NAMES oben - ersetzt die
+    // frueheren Namensspiegel in public/client.js.
+    treasurePowerCards: [...TREASURE_POWER_CARD_NAMES],
+    combatPotionCards: [...COMBAT_POTION_CARD_NAMES],
+    // Wuerfel-Reaktionskarten (GEZINKTER WÜRFEL, KATZENINTERVENTION) - welche
+    // davon neu wuerfeln statt den Wert zu setzen, steht in rollRerollCards.
+    rollReactionCards: [...ROLL_REACTION_CARDS],
+    rollRerollCards: [...ROLL_REROLL_CARDS],
     // ORK/GNOM/BARDE: Rassen- und Klassenkarten, die in den Rohdaten als
     // "door_other" gefuehrt werden - damit der Client den "Spielen"-Knopf
     // zeigt, ohne eine eigene Namensliste zu pflegen.
@@ -634,6 +645,7 @@ function startGame(room) {
   room.turnPhase = 'tuer';
   room.combatHappenedThisTurn = false;
   room.lastCombatWinnerId = null;
+  room.lastCombatWinnerTurnIndex = null;
   room.kartenSperren = [];
   room.revealedDoorCard = null;
   room.combat = null;
@@ -654,7 +666,17 @@ function endTurn(room) {
   room.players.forEach((p) => { p.halblingSaleUsed = false; });
   room.turnPhase = 'tuer';
   room.combatHappenedThisTurn = false;
-  room.lastCombatWinnerId = null;
+  // lastCombatWinnerId wird bewusst NICHT sofort hier geleert (anders als bis
+  // eben): HEIMSE DIE LORBEEREN EIN reagiert auf einen fremden Sieg, der per
+  // Definition im fremden Zug liegt - beim eigenen Zug war das Feld dann
+  // schon wieder null. Stattdessen laeuft das Fenster genau eine Runde: es
+  // wird geleert, sobald turnIndex wieder beim Sieger ankommt (alle anderen
+  // hatten dann je einen Zug zum Reagieren), oder vorher schon durch den
+  // naechsten Sieg ueberschrieben (siehe resolveCombatWin).
+  if (room.lastCombatWinnerId && room.turnIndex === room.lastCombatWinnerTurnIndex) {
+    room.lastCombatWinnerId = null;
+    room.lastCombatWinnerTurnIndex = null;
+  }
   room.kartenSperren = [];
   room.revealedDoorCard = null;
   log(room, `${currentPlayer(room).name} ist am Zug (Phase 1: Tür eintreten).`);
@@ -2798,17 +2820,23 @@ function handleThiefSteal(room, playerId, discardCardId, targetId) {
 
 // Was der Client anbieten darf - privat im yourInfo, damit dort keine zweite
 // Kopie der Regeln liegt.
+// STICH-O-MAT laesst auch Nicht-Diebe in den Ruecken fallen (handleThiefBackstab
+// pruefte das schon) - hier durfte bisher nur eine DIEB-Klasse ueberhaupt ein
+// Ergebnis bekommen, also blieb der Knopf fuer Nicht-Diebe unsichtbar. Der
+// Diebstahl (stealTargets) bleibt exklusiv fuer die DIEB-Klasse.
 function thiefPowerInfo(room, player) {
-  if (!hasClass(player, 'DIEB')) return null;
+  const dieb = hasClass(player, 'DIEB');
+  const stichOMat = equippedItemIds(player).some((id) => BACKSTAB_ITEMS.has((card(id) || {}).name));
+  if (!dieb && !stichOMat) return null;
   if (!player.hand.length) return { backstabTargets: [], stealTargets: [] }; // die Karte ist der Preis
   const c = room.combat;
   const schon = (c && c.backstabs) || {};
   const backstabTargets = (c ? combatParticipants(room) : [])
     .filter((p) => p.id !== player.id && !schon[`${player.id}:${p.id}`])
     .map((p) => ({ id: p.id, name: p.name }));
-  const stealTargets = room.players
+  const stealTargets = dieb ? room.players
     .filter((p) => p.id !== player.id && stealableItemIds(p, room).length)
-    .map((p) => ({ id: p.id, name: p.name }));
+    .map((p) => ({ id: p.id, name: p.name })) : [];
   return { backstabTargets, stealTargets };
 }
 
@@ -3087,6 +3115,18 @@ function isCombatPotionCard(c) {
   const t = normalizeCardText(c.text);
   return COMBAT_PLAYABLE_RE.test(t) && parseCombatPotion(c.text) != null;
 }
+
+// Vorab berechnete Kartenlisten fuer publicState (Clerical-Errors-Audit,
+// Task 1): public/client.js pflegte bisher eigene, handkopierte Kopien
+// dieser Namen - die sind auseinandergedriftet, 13 Karten lagen serverseitig
+// fertig implementiert, aber ohne Knopf tot auf der Hand. Jetzt gibt es nur
+// noch diese eine Quelle, siehe tests/card-clerical-ui.test.js.
+const TREASURE_POWER_CARD_NAMES = [...new Set([
+  ...Object.keys(TREASURE_POWER_OVERRIDES),
+  ...Object.keys(DOOR_POWER_CARDS),
+  ...ALL_CARDS.filter(isInstantLevelUpCard).map((c) => c.name),
+])];
+const COMBAT_POTION_CARD_NAMES = [...new Set(ALL_CARDS.filter(isCombatPotionCard).map((c) => c.name))];
 
 // Welche Phase nach EINEM DER SECHS Kampfende-Pfade folgt (Sieg, gelungene/
 // garantierte Flucht, verlorener Kampf, sowie die beiden Kartenkraefte, die
@@ -3676,8 +3716,10 @@ function resolveCombatWin(room) {
   };
   // HEIMSE DIE LORBEEREN EIN: "Spielen, wenn ein RIVALE einen Kampf gewinnt
   // und eine Stufe aufsteigt." - deshalb muss der Server wissen, wer zuletzt
-  // gewonnen hat. Wird wie combatHappenedThisTurn beim Zugwechsel geleert.
+  // gewonnen hat. Das Fenster bleibt eine Runde offen (siehe endTurn) oder
+  // bis zum naechsten Sieg, je nachdem was zuerst eintritt.
   room.lastCombatWinnerId = actor.id;
+  room.lastCombatWinnerTurnIndex = room.turnIndex;
   // UNFASSBAR REICH: je erbeuteter Schatzkarte einmal "behalten oder tauschen".
   if (c.schatzUmtausch && drawn.length) {
     const offen = drawn.slice();
@@ -4928,6 +4970,7 @@ module.exports = {
   parseAutoConsequence, isMonsterEnhancerCard, resolveConsequenceSpec, CONSEQUENCE_OVERRIDES,
   DOOR_OTHER_AS_CURSE, isInstantLevelUpCard, TREASURE_POWER_OVERRIDES,
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
+  TREASURE_POWER_CARD_NAMES, COMBAT_POTION_CARD_NAMES,
   POWER_GROUP_NAMES, GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   handlePlayRaceOrClass, raceItemBonusSum, monsterSeesRace, fleeIsAutomatic,

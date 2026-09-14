@@ -180,7 +180,12 @@ button.wide { width: 100%; }
 }
 .logcardlink:hover { text-decoration: underline; }
 
-.table { min-height: 60vh; }
+/* Kein festes min-height mehr: wenn gerade nur Zug-Aktionen + "Meine Figur"
+   sichtbar sind (kein Kampf/Aufdecken/Konsequenz), blieb sonst eine grosse,
+   funktionslose Leerflaeche zwischen den Ausruestungs-Slots und der
+   Handkarten-Leiste stehen. Der Inhalt bestimmt jetzt selbst seine Hoehe;
+   .layout hat ohnehin schon padding-bottom fuer die fixierte Handleiste. */
+.table { min-height: 0; }
 
 .tradebox {
   background: var(--panel); border: 1px solid var(--gold); border-radius: var(--radius); padding: 16px 18px;
@@ -266,6 +271,17 @@ button.wide { width: 100%; }
   max-height: 46vh; display: flex; flex-direction: column;
 }
 .hand-bar-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
+/* Handkraefte, die nicht an eine einzelne Karte gebunden sind (z.B. PRIESTER
+   "Auferstehung"): eigene Leiste ÜBER den Kartenkacheln statt einer Kachel
+   dazwischen - sonst wirkt der Button wie eine kaputte/zu kleine Karte neben
+   den echten Kacheln. Gold-Akzent wie .banner, damit klar ist: hier ist
+   gerade eine Sonderkraft nutzbar, unabhaengig von der Hand darunter. */
+.hand-powers {
+  display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
+  background: rgba(244, 201, 93, 0.1); border: 1px solid var(--gold);
+  border-radius: 10px; padding: 8px 10px; margin-bottom: 8px;
+}
+.hand-powers button { width: 100%; justify-content: flex-start; text-align: left; }
 .hand-bar-label { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
 .hand-list {
   /* align-items: stretch (statt flex-start): die Karten haben je nach Typ
