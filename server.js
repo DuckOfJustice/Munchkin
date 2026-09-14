@@ -1051,7 +1051,10 @@ function applyDeathConsequence(room, player) {
 // Adjektiv-Formen, wie sie in Gegenstands-Texten für Rassen-/Klassen-Boni
 // vorkommen (z.B. "+2 Bonus für Elfen"), gemappt auf den jeweiligen Karten-
 // namen der Rassen-/Klassenkarte selbst ("ELF").
-const RACE_ADJECTIVE_DE = { ELF: 'Elfen', ZWERG: 'Zwerge', HALBLING: 'Halblinge' };
+// ORK gehoert dazu, seit ORK spielbar ist: SCHÄDELHELM ist der Gegenstand,
+// den ROTZ-ELEMENTAR einem Ork abnehmen muss. GNOM/BARDE fehlen bewusst - zu
+// denen gibt es heute keinen Gegenstand mit "für Gnome/Barden" im Text.
+const RACE_ADJECTIVE_DE = { ELF: 'Elfen', ZWERG: 'Zwerge', HALBLING: 'Halblinge', ORK: 'Orks' };
 const CLASS_ADJECTIVE_DE = { ZAUBERER: 'Zauberer', PRIESTER: 'Priester', DIEB: 'Diebe', KRIEGER: 'Krieger' };
 
 function hasRace(player, substr) {
@@ -2449,8 +2452,18 @@ function monsterTraitBonusSum(room) {
     // Eine Karte darf mehrere Boni nennen ("+5 gegen Orks, +5 gegen Krieger") -
     // die addieren sich, siehe MONSTER_TRAIT_BONUS in src/cards/passives.js.
     return sum + [].concat(regeln).reduce((teil, rule) => {
-      const hit = parts.some((p) => (!traitImmun(p, 'races') && (rule.races || []).some((r) => monsterSeesRace(p, r)))
-        || (!traitImmun(p, 'classes') && (rule.classes || []).some((k) => hasClass(p, k)))
+      // traitImmun (SUPER MUNCHKIN/HALB-BLUT: "alle Vorteile, aber keine
+      // Nachteile") darf nur Nachteile abschalten. Clerical Errors hat
+      // Monster mit NEGATIVEM Bonus (DRECKIGE GÄNSE -3 gegen Barden,
+      // GIFTEFEU KUDZU-FLIEGENFALLE -4 gegen Elfen) - die zu unterdruecken
+      // macht die Kappen-Karte schlechter als gar keine.
+      const immun = rule.bonus > 0;
+      // nurKaempfer: Regeln, die laut Kartentext "dich" meinen (KALI: "es sei
+      // denn, DU verteidigst dich mit 2 Waffen"), duerfen nicht ueber die
+      // Helfer:in erfuellt werden - sonst macht Hilfe das Monster staerker.
+      const kandidaten = rule.nurKaempfer ? parts.filter((p) => p.id === room.combat.actorId) : parts;
+      const hit = kandidaten.some((p) => (!(immun && traitImmun(p, 'races')) && (rule.races || []).some((r) => monsterSeesRace(p, r)))
+        || (!(immun && traitImmun(p, 'classes')) && (rule.classes || []).some((k) => hasClass(p, k)))
         || (rule.wennErfuellt ? rule.wennErfuellt(p) : false));
       return teil + (hit ? rule.bonus : 0);
     }, 0);
@@ -4971,6 +4984,10 @@ module.exports = {
   DOOR_OTHER_AS_CURSE, isInstantLevelUpCard, TREASURE_POWER_OVERRIDES,
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
   TREASURE_POWER_CARD_NAMES, COMBAT_POTION_CARD_NAMES,
+  // publicState/createRoom: damit tests/card-clerical-ui.test.js die echte
+  // Nutzlast pruefen kann, die der Client bekommt - nicht nur die Tabellen,
+  // aus denen sie gebaut wird.
+  publicState, createRoom,
   POWER_GROUP_NAMES, GUARANTEED_FLEE_CARDS, ITEM_CONDITIONAL_BONUS,
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   handlePlayRaceOrClass, raceItemBonusSum, monsterSeesRace, fleeIsAutomatic,

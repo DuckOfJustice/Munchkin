@@ -78,7 +78,10 @@ module.exports = (ctx) => {
 
     // --- Eigene Tischwerte (keine Fremdeinwirkung auf andere Spieler) ---
     'GEMEINE GHOULE': () => ({ type: 'setLevelToTableMin' }),
-    'PACKRATTE': () => ({ type: 'discardMaxGoldItem' }),
+    // "Erzwungener Tausch! Wirf den Gegenstand mit dem hoechsten Wert ab, den
+    // du im Spiel hast, UND ziehe einen offenen Schatz." - der Schatz ist Teil
+    // der Schlimmen Dinge, nicht optional.
+    'PACKRATTE': () => ({ type: 'combo', actions: [{ type: 'discardMaxGoldItem' }, { type: 'drawTreasureN', n: 1 }] }),
     'ROTZ-ELEMENTAR': () => ({ type: 'discardTraitBonusItems', which: 'race' }),
     'DING MIT EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST': () => ({ type: 'discardTraitBonusItems', which: 'class' }),
     // "... und 1 kleinen Gegenstand" bleibt bewusst manuell (freie Auswahl über

@@ -1394,7 +1394,11 @@
     // oder reagieren gerade auf ein fremdes Ereignis (HEIMSE DIE LORBEEREN
     // EIN) - der Server prüft die eigentliche Bedingung ohnehin selbst und
     // loggt nur einen Hinweis, wenn sie nicht erfüllt ist.
-    if (!state.pendingCardAction && !state.pendingConsequence && hasCardPower(c)) {
+    // ...und nicht, solange dieselbe Karte gerade die garantierte Flucht
+    // anbietet (DER ANDERE RING hat beide Haelften): useCardPower legt die
+    // Karte ab, bevor die Wunschring-Wirkung greift - ein Fehlklick kostet
+    // dann die Flucht im Moment, in dem sie gebraucht wird.
+    if (!state.pendingCardAction && !state.pendingConsequence && hasCardPower(c) && !guaranteedFleeUsable(c)) {
       const btn = mkBtn('✨ Sonderkraft nutzen', () => socket.emit('useCardPower', { cardId: id }));
       wrap.appendChild(btn);
     }

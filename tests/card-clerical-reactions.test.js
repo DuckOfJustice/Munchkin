@@ -50,9 +50,17 @@ function makeRoom(players, extra) {
   assert.strictEqual(ergebnis, null, 'noch nichts aufgeloest');
 
   // Der uebergebene Wert wird bei der Katze ignoriert - sie wuerfelt neu.
-  handlePlayReactionCard(room, p.id, katze.id, 6);
-  assert.strictEqual(typeof ergebnis, 'number', 'der Wurf ist aufgeloest');
-  assert.ok(ergebnis >= 1 && ergebnis <= 6, 'und liegt im Wuerfelbereich');
+  // Math.random wird dafuer festgenagelt: ohne das waere "1 <= ergebnis <= 6"
+  // auch dann wahr, wenn die Katze den uebergebenen Wert einfach setzt - der
+  // Unterschied zum GEZINKTEN WÜRFEL waere untestbar.
+  const echtesRandom = Math.random;
+  Math.random = () => 0; // -> rollDie() === 1, also garantiert nicht die 6
+  try {
+    handlePlayReactionCard(room, p.id, katze.id, 6);
+  } finally {
+    Math.random = echtesRandom;
+  }
+  assert.strictEqual(ergebnis, 1, 'die Katze wuerfelt neu, statt die uebergebene 6 zu setzen');
   assert.deepStrictEqual(p.hand, [], 'die Karte ist verbraucht');
   assert.strictEqual(room.pendingRoll, null);
 }

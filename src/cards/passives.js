@@ -260,7 +260,7 @@ module.exports = (ctx) => {
     // es sei denn, du verteidigst dich mit (mindestens) 2 eigenen Waffen."
     'KALI': [
       { classes: ['PRIESTER'], bonus: 5 },
-      { wennErfuellt: (p) => p.equipped.hands.filter(Boolean).length < 2, bonus: 5 },
+      { wennErfuellt: (p) => p.equipped.hands.filter(Boolean).length < 2, bonus: 5, nurKaempfer: true },
     ],
     // "+3 gegen die, die keine Klasse haben."
     'RÜSSELKÄFER': { wennErfuellt: (p) => !p.classes.length, bonus: 3 },
@@ -367,8 +367,10 @@ module.exports = (ctx) => {
   // keiner einzigen Monsterkarte im Text. Deshalb diese kuratierte Liste; sie
   // ist die EINZIGE Stelle, an der "untot" in diesem Server definiert ist.
   // Stimmt sie nicht mit euren Karten überein, hier korrigieren.
+  // DIE SCHATTENNASE ist das einzige Monster, dessen eigener Text "untot"
+  // sagt ("... funktioniert auch fuer ihren Untoten Schatten").
   const UNDEAD_MONSTERS = new Set(['MR. BONES', 'UNTOTES PFERD', 'KÖNIG TUT', 'GRUFTIGE GEBRÜDER',
-    'SIEBENJÄHRIGER LICH']);
+    'SIEBENJÄHRIGER LICH', 'DIE SCHATTENNASE']);
 
   // ZAUBERER "Flugzauber": "Du darfst bis zu 3 Karten ablegen, nachdem du
   // deinen Weglaufwurf gemacht hast. Jede verleiht dir +1 Bonus auf Weglaufen."
