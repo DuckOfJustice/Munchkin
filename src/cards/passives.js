@@ -389,8 +389,11 @@ module.exports = (ctx) => {
   // "feuerimmun"-Kennzeichnung auf Monsterkarten, die es in den Daten nicht
   // gibt), bleiben bewusst manuell (siehe README, Abschnitt Item-Sonderfälle).
   const ITEM_CONDITIONAL_BONUS = {
-    // "+2 Bonus für Elfen" - Grundbonus ist 1, für Elfen kommt 1 dazu.
-    'GEILER HELM': (player, monsters) => (hasRace(player, 'ELF') ? 1 : 0),
+    // "+2 Bonus für Elfen" ist ein ZUSATZ zum Grundbonus, kein Gesamtwert:
+    // Grundbonus 1 für alle, Elfen also insgesamt +3. Genauso beim
+    // SCHÄDELHELM ("+2 Bonus für Orks", Grundbonus 2, Orks also +4).
+    'GEILER HELM': (player, monsters) => (hasRace(player, 'ELF') ? 2 : 0),
+    'SCHÄDELHELM': (player, monsters) => (hasRace(player, 'ORK') ? 2 : 0),
     // "+10 gegen alles, was mit dem Buchstaben J beginnt."
     'VORPALE KLINGE': (player, monsters) => (monsters.some((m) => /^J/i.test(m.name || '')) ? 10 : 0),
     // "Gibt keinen Bonus gegen Krakzilla" - hebt den gedruckten Bonus (+4) wieder auf.

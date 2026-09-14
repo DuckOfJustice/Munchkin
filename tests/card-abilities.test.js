@@ -678,7 +678,12 @@ function run() {
   const krakzilla = { name: 'KRAKZILLA' };
   const jMonster = { name: 'JABBERWOCK' };
   assert.strictEqual(ITEM_CONDITIONAL_BONUS['GEILER HELM'](makePlayer(), [{ name: 'X' }]), 0, 'ohne Elf kein Zusatzbonus');
-  assert.strictEqual(ITEM_CONDITIONAL_BONUS['GEILER HELM'](makePlayer({ races: [elfId] }), [{ name: 'X' }]), 1, 'Elf bekommt +1 Zusatzbonus');
+  assert.strictEqual(ITEM_CONDITIONAL_BONUS['GEILER HELM'](makePlayer({ races: [elfId] }), [{ name: 'X' }]), 2, 'Elf bekommt +2 Zusatzbonus (insgesamt +3)');
+  // SCHÄDELHELM ("+2 Bonus für Orks", Grundbonus 2): dieselbe Bauform wie der
+  // GEILER HELM - der Zusatz gilt nur fuer Orks, alle anderen bleiben bei 2.
+  const orkId = ALL_CARDS.find((c) => c.name === 'ORK' && c.category === 'door_other').id;
+  assert.strictEqual(ITEM_CONDITIONAL_BONUS['SCHÄDELHELM'](makePlayer(), [{ name: 'X' }]), 0, 'ohne Ork kein Zusatzbonus');
+  assert.strictEqual(ITEM_CONDITIONAL_BONUS['SCHÄDELHELM'](makePlayer({ races: [orkId] }), [{ name: 'X' }]), 2, 'Ork bekommt +2 Zusatzbonus (insgesamt +4)');
   assert.strictEqual(ITEM_CONDITIONAL_BONUS['VORPALE KLINGE'](makePlayer(), [jMonster]), 10, 'Monster mit J -> +10');
   assert.strictEqual(ITEM_CONDITIONAL_BONUS['VORPALE KLINGE'](makePlayer(), [krakzilla]), 0, 'Monster ohne J -> kein Zusatzbonus');
   assert.strictEqual(ITEM_CONDITIONAL_BONUS['ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT'](makePlayer(), [krakzilla]), -4, 'gegen Krakzilla wird der Grundbonus (+4) aufgehoben');
