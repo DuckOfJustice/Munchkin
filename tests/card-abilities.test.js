@@ -73,6 +73,20 @@ function run() {
   assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['FLÜSSIGKLINGE'](makePlayer()), { type: 'modifier', side: 'actor', amount: 4 });
 
   const elfId = findCard('ELF', 'race').id;
+  // LECKERER KUCHEN: +2 fuer beide Seiten, +4 vom Ork geworfen, Halblinge
+  // duerfen stattdessen essen (1 Stufe) - Halbling schlaegt Ork nicht, es
+  // bleibt eine Wahl mit dem jeweils richtigen Wurf-Bonus.
+  const halblingId = findCard('HALBLING', 'race').id;
+  const orkRasseId = ALL_CARDS.find((c) => c.name === 'ORK' && c.category === 'door_other').id;
+  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer()), { type: 'modifier', side: 'both', amount: 2 });
+  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer({ races: [orkRasseId] })), { type: 'modifier', side: 'both', amount: 4 }, 'vom Ork geworfen -> +4');
+  const kuchenHalbling = COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer({ races: [halblingId] }));
+  assert.strictEqual(kuchenHalbling.type, 'choice', 'Halbling bekommt die Wahl');
+  assert.deepStrictEqual(kuchenHalbling.options.map((o) => o.action), [
+    { type: 'modifier', side: 'both', amount: 2 },
+    { type: 'levelUp', amount: 1 },
+  ], 'werfen oder essen');
+
   const yuppieRoom = { players: [makePlayer({ id: 'p1', races: [elfId] }), makePlayer({ id: 'p2' })], combat: { actorId: 'p1', helperId: 'p2', monsterIds: [] } };
   assert.deepStrictEqual(
     COMBAT_POTION_OVERRIDES['YUPPIE-WASSER'](makePlayer({ id: 'p1', races: [elfId] }), { players: yuppieRoom.players, combat: yuppieRoom.combat }),
