@@ -17,7 +17,10 @@ module.exports = (ctx) => {
     // "Stirb, stirb, stirb - und setze auch deinen naechsten Zug aus."
     'KALI': () => ({ type: 'combo', actions: [{ type: 'death' }, { type: 'skipNextTurn' }] }),
     'TENTAKELDÄMON': () => ({ type: 'death' }), // "Wenn du gefangen wirst, stirbst du." (Kontext: Flucht ist bereits gescheitert)
-    'SIEBENJÄHRIGER LICH': () => ({ type: 'death' }), // "Wenn er dich erwischt, stirbst du ..."
+    // "Wenn er dich erwischt, stirbst du nicht nur, sondern verlierst auch
+    // eine Stufe." Der Tod kostet nur die Karten, die Stufe bleibt (siehe
+    // applyDeathConsequence) - die zusaetzliche Stufe ist also spuerbar.
+    'SIEBENJÄHRIGER LICH': () => ({ type: 'combo', actions: [{ type: 'death' }, { type: 'levelDelta', amount: 1 }] }),
     // Enthält zwar "stirbst", bezieht sich aber auf einen ZUKÜNFTIGEN Tod
     // (persistenter Fluch) - explizit NICHT automatisch:
     'VERFLUCHTER GEGENSTAND': () => null,

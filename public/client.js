@@ -570,7 +570,8 @@
       }
       row.appendChild(equipRow);
 
-      if (p.id !== myInfo.playerId && p.connected) {
+      // Im Kampf wird nicht gehandelt (siehe darfHandeln im Server).
+      if (p.id !== myInfo.playerId && p.connected && !state.combat) {
         const tradeBtn = document.createElement('button');
         tradeBtn.className = 'small'; tradeBtn.textContent = '🤝 Handeln';
         tradeBtn.style.marginTop = '6px';
@@ -707,6 +708,13 @@
     if (!box) return;
     box.innerHTML = '';
     if (!state || state.phase !== 'playing') return;
+    // Im Kampf wird nicht gehandelt (der Server weist es ohnehin ab) - dann
+    // auch keine Handelsflaeche zeigen, sondern nur den Grund.
+    if (state.combat) {
+      const offen = (myInfo.incomingTrades || []).length + (myInfo.outgoingTrades || []).length;
+      if (offen) box.appendChild(textNode('Im Kampf wird nicht gehandelt - offene Angebote warten bis danach.'));
+      return;
+    }
 
     // 1. Eigenes Angebot zusammenstellen
     if (tradeComposeTargetId) {
@@ -924,6 +932,13 @@
     if (c.ignoresLevel) notes.push('Gegen dieses Monster zählt eure Stufe nicht - nur eure Boni.');
     if (c.forbidsHelp) notes.push('Gegen dieses Monster darf niemand helfen.');
     if (c.doubleActor) notes.push('Doppelgänger: eure Kampfstärke zählt doppelt.');
+    // Die Zusage aus der Hilfe-Anfrage bleibt sichtbar, solange sie gilt -
+    // eingeloest wird sie beim Sieg (resolveCombatWin).
+    if (helper && c.helperReward) {
+      notes.push(`${helper.name} hilft für ${c.helperReward} der erbeuteten Schatzkarte(n).`);
+    } else if (helper) {
+      notes.push(`${helper.name} hilft ohne zugesagte Belohnung.`);
+    }
     // Anhaltende Flueche der Kaempfenden stecken schon in der Rechnung
     // (combatTotals) - ohne Hinweis wundert man sich nur ueber die Zahl.
     [actor, c.helperId ? state.players.find((p) => p.id === c.helperId) : null]
@@ -1023,22 +1038,41 @@
       }
 
       if (!c.helperId && !c.helperPending) {
+        // Zusage: wie viele der erbeuteten Schatzkarten die Helfer:in bekommt.
+        // Die Obergrenze ist die Schatzzahl des Kampfes - der Server klemmt
+        // denselben Wert noch einmal (Fremdeingabe).
+        // Dieselbe Rechnung wie kampfSchatzZahl im Server, inklusive der
+        // Untergrenze 1 bei negativen Verstaerkern (BABY: "mindestens 1").
+        const basisSchaetze = (c.monsterIds || []).reduce((sum, id) => sum + ((card(id) || {}).treasureCount || 0), 0);
+        const maxSchaetze = Math.max(0, c.treasureDelta ? Math.max(1, basisSchaetze + c.treasureDelta) : basisSchaetze);
+        const lohn = document.createElement('input');
+        lohn.type = 'number'; lohn.min = '0';
+        lohn.value = '0'; lohn.style.width = '4em'; lohn.title = 'Zugesagte Schatzkarten';
+        lohn.max = String(maxSchaetze);
         const helpSelect = document.createElement('select');
         helpSelect.innerHTML = '<option value="">Um Hilfe bitten...</option>' +
           state.players.filter((p) => p.id !== c.actorId && p.connected)
             .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-        helpSelect.onchange = () => { if (helpSelect.value) socket.emit('requestHelp', { targetId: helpSelect.value }); };
+        helpSelect.onchange = () => {
+          if (helpSelect.value) socket.emit('requestHelp', { targetId: helpSelect.value, reward: Number(lohn.value) || 0 });
+        };
         actions.appendChild(helpSelect);
+        actions.appendChild(textNode('Zusage:'));
+        actions.appendChild(lohn);
+        actions.appendChild(textNode(`Schatzkarte(n) (max. ${maxSchaetze})`));
       }
       if (c.helperPending) {
-        actions.appendChild(textNode(`Warte auf Antwort von ${state.players.find((p) => p.id === c.helperPending.targetId).name}...`));
+        actions.appendChild(textNode(`Warte auf Antwort von ${state.players.find((p) => p.id === c.helperPending.targetId).name}`
+          + `${c.helperPending.reward ? ` (Zusage: ${c.helperPending.reward} Schatzkarte(n))` : ' (ohne Belohnung)'}...`));
       }
     }
 
     if (c.helperPending && c.helperPending.targetId === myInfo.playerId) {
       const ask = document.createElement('div');
       const asker = state.players.find((p) => p.id === c.actorId);
-      ask.innerHTML = `<b>${escapeHtml(asker ? asker.name : '?')} bittet dich um Hilfe im Kampf!</b>`;
+      const zusage = c.helperPending.reward || 0;
+      ask.innerHTML = `<b>${escapeHtml(asker ? asker.name : '?')} bittet dich um Hilfe im Kampf!</b>`
+        + `<div class="hint">${zusage ? `Zugesagt: ${zusage} der erbeuteten Schatzkarte(n) für dich.` : 'Ohne Belohnung - alles bleibt bei der kämpfenden Person.'}</div>`;
       const yes = document.createElement('button'); yes.textContent = 'Helfen'; yes.className = 'primary';
       yes.onclick = () => socket.emit('respondHelp', { accept: true });
       const no = document.createElement('button'); no.textContent = 'Ablehnen';

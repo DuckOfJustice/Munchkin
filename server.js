@@ -1537,22 +1537,28 @@ function applyPrimitiveAction(room, player, action) {
       const capField = action.capField; // 'classCapCard' | 'powerGroupCapCard'
       const currentIds = [...player[arrField]];
       if (!currentIds.length) return `${action.label} war bereits leer - Fluch wirkungslos`;
-      currentIds.forEach((id) => discardCard(room, id));
-      player[arrField] = [];
-      if (player[capField]) { discardCard(room, player[capField]); player[capField] = null; }
       const matches = (action.category === 'class' || action.category === 'race')
         // TRAIT_DOOR_CARDS: ORK/GNOM/BARDE stehen als "door_other" in den
         // Rohdaten, zaehlen hier aber als Rassen- bzw. Klassenkarte.
         ? (cc) => cc.category === action.category
           || TRAIT_DOOR_CARDS[(cc.name || '').toUpperCase()] === action.category
         : (cc) => cc.category === 'door_other' && POWER_GROUP_NAMES.has((cc.name || '').toUpperCase());
+      // ERST suchen, DANN die eigene Karte ablegen: "Durchsuche den
+      // Ablegestapel, beginnend mit der obersten Karte." Am Tisch liegt die
+      // eigene Klasse zu diesem Zeitpunkt noch vor einem - wer zuerst ablegt,
+      // findet sie als oberste Karte sofort wieder und wechselt zu sich
+      // selbst.
+      let ersatz = null;
       for (let i = room.doorDiscard.length - 1; i >= 0; i--) {
         const cc = card(room.doorDiscard[i]);
-        if (cc && matches(cc)) {
-          room.doorDiscard.splice(i, 1);
-          player[arrField].push(cc.id);
-          return `${action.label} ersetzt durch "${cc.name}" (aus dem Ablagestapel)`;
-        }
+        if (cc && matches(cc)) { room.doorDiscard.splice(i, 1); ersatz = cc; break; }
+      }
+      currentIds.forEach((id) => discardCard(room, id));
+      player[arrField] = [];
+      if (player[capField]) { discardCard(room, player[capField]); player[capField] = null; }
+      if (ersatz) {
+        player[arrField].push(ersatz.id);
+        return `${action.label} ersetzt durch "${ersatz.name}" (aus dem Ablagestapel)`;
       }
       return `${action.label} verloren - keine passende Ersatzkarte im Ablagestapel gefunden`;
     }
@@ -2163,6 +2169,9 @@ function applyTargetAction(room, actor, target, action) {
       c.actorId = target.id;
       c.helperId = null;
       c.helperPending = null;
+      // Die Zusage gehoerte zur alten Kampfpaarung - sie geht nicht auf die
+      // neue kaempfende Person ueber.
+      c.helperReward = 0;
       c.ready = {};
       refreshCombatReady(room);
       return `${target.name} kämpft jetzt anstelle von ${actor.name}`;
@@ -3176,7 +3185,8 @@ function startCombat(room, actorId, monsterIds, opts) {
   room.combat = {
     actorId,
     helperId: null,
-    helperPending: null, // { targetId }
+    helperPending: null, // { targetId, compelled, reward }
+    helperReward: 0,     // zugesagte Schatzkarten fuer die Helfer:in
     monsterIds,
     actorModifier: 0,
     monsterModifier: 0,
@@ -3411,6 +3421,18 @@ const COMBAT_POTION_CARD_NAMES = [...new Set(ALL_CARDS.filter(isCombatPotionCard
 // ausdruecklich JEDEN Kampfausgang ab, nicht nur Sieg/Niederlage). EINE
 // Stelle statt an jeder Kampfende-Stelle einzeln dieselbe Bedingung zu
 // wiederholen, damit ein siebter Beendigungspfad sie nicht vergisst.
+// Ein Kampf endet nicht nur durch Sieg oder Flucht, sondern auch durch Karten,
+// die alle Monster entfernen (MAHLZEIT!, FREUNDSCHAFTSTRANK, DEUS EX
+// MASCHINENGEWEHR, MONSTER SIND BESCHÄFTIGT, Verzauberung, ...). Diese Wege
+// liefen frueher an clearNextCombatCurses vorbei - "(Nur) in deinem naechsten
+// Kampf"-Flueche (MIESER SPIEGEL, GESCHLECHTSUMWANDLUNG, ZWERGENBIER) hielten
+// dann einen Kampf zu lange. Deshalb enden ALLE diese Wege hier.
+function beendeKampfOhneSieg(room, c, thenLoot) {
+  clearNextCombatCurses(combatParticipants(room));
+  room.combat = null;
+  room.turnPhase = combatEndPhase(c, thenLoot);
+}
+
 function combatEndPhase(c, thenLoot) {
   return (thenLoot || (c && c.originalActorId)) ? 'pluendern' : 'gabe';
 }
@@ -3457,8 +3479,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
           monsterNames: monsters.map((m) => m.name),
         };
       }
-      room.combat = null;
-      room.turnPhase = combatEndPhase(c, action.thenLoot);
+      beendeKampfOhneSieg(room, c, action.thenLoot);
       return action.leavesTreasure
         ? `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`
         : `Kampf gegen ${names} beendet, kein Schatz`;
@@ -3515,6 +3536,8 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     case 'forceSelfAsHelper': {
       c.helperId = player.id;
       c.helperPending = null;
+      c.helperReward = 0; // "Du kannst keine Belohnung einfordern."
+
       refreshCombatReady(room);
       return `${player.name} draengt sich als Helfer in den Kampf (ohne Belohnung)`;
     }
@@ -3530,6 +3553,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     case 'removeHelper': {
       const helper = findPlayer(room, c.helperId);
       c.helperId = null;
+      c.helperReward = 0; // mit der Helfer:in faellt auch ihre Zusage weg
       return `${helper ? helper.name : 'Helfer'} verlässt den Kampf`;
     }
     // POLLYVERWANDLUNGSTRANK/TRANK DER IRRELEVANZ/ENTLASSUNGSGLOCKE nennen
@@ -3566,8 +3590,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       // Monster lag - genau wie bei ILLUSION. Aufruestweg waere ein
       // monsterModifier pro Monster-ID.
       if (!c.monsterIds.length) {
-        room.combat = null;
-        room.turnPhase = combatEndPhase(c, action.thenLoot);
+        beendeKampfOhneSieg(room, c, action.thenLoot);
         return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : ''}`;
       }
       refreshCombatReady(room);
@@ -3578,7 +3601,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       if (idx < 0) return 'Monster nicht im Kampf gefunden';
       const [dead] = c.monsterIds.splice(idx, 1);
       room.doorDiscard.push(dead);
-      if (c.monsterIds.length === 0) { room.combat = null; room.turnPhase = combatEndPhase(c, false); }
+      if (c.monsterIds.length === 0) beendeKampfOhneSieg(room, c, false);
       return `${action.name} sofort besiegt (kein Schatz)`;
     }
     // WANDERNDES MONSTER: "Dein Monster schliesst sich dem schon kaempfenden
@@ -3909,7 +3932,18 @@ function applyCombatReaction(room, player, cardId, regel) {
   }
 }
 
-function handleRequestHelp(room, playerId, targetId) {
+// Wie viele Schaetze bringt dieser Kampf sicher? Grundlage fuer die
+// Obergrenze der Helfer-Zusage - kartenspezifische Bonusschaetze
+// (monsterVictoryExtras) stehen beim Anfragen noch nicht fest und bleiben
+// deshalb aussen vor; sie landen dann bei der kaempfenden Person.
+function kampfSchatzZahl(room) {
+  const c = room.combat;
+  if (!c) return 0;
+  const basis = c.monsterIds.reduce((sum, id) => sum + ((card(id) || {}).treasureCount || 0), 0);
+  return Math.max(0, c.treasureDelta ? Math.max(1, basis + c.treasureDelta) : basis);
+}
+
+function handleRequestHelp(room, playerId, targetId, reward) {
   if (!room.combat) return;
   const c = room.combat;
   if (c.actorId !== playerId || c.helperId) return;
@@ -3928,8 +3962,11 @@ function handleRequestHelp(room, playerId, targetId) {
   // einer Belohnung" bildet der Server nirgends ab und bleibt daher aussen vor.
   const compelled = target.level > actor.level
     && actor.hand.some((id) => { const cc = card(id); return cc && cc.name === 'KNIESCHÜTZER DER VERLOCKUNG'; });
-  c.helperPending = { targetId, compelled };
-  log(room, `${actor.name} bittet ${target.name} um Hilfe${compelled ? ' (Knieschützer der Verlockung: kann nicht ablehnen)' : ''}.`);
+  // Zusage aus dem Client ist Fremdeingabe: ganze Zahl, nicht negativ, nicht
+  // mehr als der Kampf ueberhaupt hergibt.
+  const zusage = Math.max(0, Math.min(kampfSchatzZahl(room), Math.floor(Number(reward) || 0)));
+  c.helperPending = { targetId, compelled, reward: zusage };
+  log(room, `${actor.name} bittet ${target.name} um Hilfe${zusage ? ` (Zusage: ${zusage} Schatzkarte(n))` : ' (ohne Belohnung)'}${compelled ? ' - Knieschützer der Verlockung: kann nicht ablehnen' : ''}.`);
   touchRoom(room);
 }
 
@@ -3945,6 +3982,8 @@ function handleRespondHelp(room, playerId, accept) {
   }
   if (accept) {
     c.helperId = playerId;
+    // Die Zusage aus der Anfrage wird beim Sieg eingeloest (resolveCombatWin).
+    c.helperReward = c.helperPending.reward || 0;
     dryadeWirkung(room, findPlayer(room, playerId));
     // "In einem Kampf, bei dem der Helfer ... genötigt wurde, kannst du
     // nicht die Siegesstufe erreichen." Greift in resolveCombatWin.
@@ -4081,13 +4120,30 @@ function resolveCombatWin(room) {
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache
   // (README) etwas zugesagt - hier immer erst alles an die/den Angreifer:in,
   // Weitergabe von Schätzen kann jederzeit frei "gehandelt" werden.
-  drawn.forEach((id) => actor.hand.push(id));
+  // Zusage aus der Hilfe-Anfrage: die ersten N gezogenen Karten gehoeren der
+  // Helfer:in (weniger, wenn weniger Schaetze kommen als versprochen). Der
+  // Rest geht wie bisher an die kaempfende Person; darueber hinaus bleibt
+  // jede Weitergabe freier Handel.
+  const zusage = helper ? Math.max(0, Math.min(c.helperReward || 0, drawn.length)) : 0;
+  const fuerHelfer = drawn.slice(0, zusage);
+  const fuerActor = drawn.slice(zusage);
+  fuerActor.forEach((id) => actor.hand.push(id));
   actor.lastReward = {
     seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
-    cardIds: drawn,
+    cardIds: fuerActor,
     levelsGained,
     monsterNames: monsters.map((m) => m.name),
   };
+  if (fuerHelfer.length) {
+    fuerHelfer.forEach((id) => helper.hand.push(id));
+    helper.lastReward = {
+      seq: (helper.lastReward ? helper.lastReward.seq : 0) + 1,
+      cardIds: fuerHelfer,
+      levelsGained: 0,
+      monsterNames: monsters.map((m) => m.name),
+    };
+    log(room, `${helper.name} bekommt die zugesagten ${fuerHelfer.length} Schatzkarte(n) fuer die Hilfe.`, fuerHelfer);
+  }
   // HEIMSE DIE LORBEEREN EIN: "Spielen, wenn ein RIVALE einen Kampf gewinnt
   // und eine Stufe aufsteigt." - deshalb muss der Server wissen, wer zuletzt
   // gewonnen hat. Das Fenster bleibt eine Runde offen (siehe endTurn) oder
@@ -4095,9 +4151,11 @@ function resolveCombatWin(room) {
   room.lastCombatWinnerId = actor.id;
   room.lastCombatWinnerTurnIndex = room.turnIndex;
   // UNFASSBAR REICH: je erbeuteter Schatzkarte einmal "behalten oder tauschen".
-  if (c.schatzUmtausch && drawn.length) {
-    const offen = drawn.slice();
-    openQueuedCardAction(room, 'UNFASSBAR REICH', offen.map(() => actor.id), () => {
+  // Nur ueber die Karten, die die kaempfende Person auch behaelt - die
+  // zugesagten liegen schon bei der Helfer:in.
+  if (c.schatzUmtausch && fuerActor.length) {
+    const offen = fuerActor.slice();
+    openQueuedCardAction(room, 'UNFASSBAR REICH', fuerActor.map(() => actor.id), () => {
       const id = offen.shift();
       if (!id || !actor.hand.includes(id)) return null;
       return {
@@ -4839,8 +4897,10 @@ function handleEndTurnAction(room, playerId) {
 }
 
 // ---------------------------------------------------------------------------
-// Handel zwischen Spielenden - jederzeit möglich, nicht an Zug/Phase
-// gebunden, ganz wie am echten Tisch. Tauschbar sind Handkarten UND angelegte
+// Handel zwischen Spielenden - ausserhalb eines Kampfes jederzeit möglich und
+// nicht an die Zugreihenfolge gebunden, ganz wie am echten Tisch; im Kampf
+// dagegen gar nicht (siehe darfHandeln, gleiche Grenze wie beim Anlegen und
+// Verkaufen). Tauschbar sind Handkarten UND angelegte
 // Gegenstände; beim Empfänger landet alles auf der Hand (Anlegen bleibt eine
 // eigene Aktion, damit Größen-/Slot-Regeln weiter gelten).
 //
@@ -4878,10 +4938,21 @@ function tradeGoldSum(ids) {
   return ids.reduce((sum, id) => { const c = card(id); return sum + (c && typeof c.gold === 'number' ? c.gold : 0); }, 0);
 }
 
+// "Waehrend eines Kampfes wird nicht gehandelt." Sonst liesse sich die
+// Kampfrechnung mitten im Kampf ueber fremde Gegenstaende verschieben - genau
+// wie beim Anlegen (darfAusruesten) und Verkaufen.
+function darfHandeln(room, player) {
+  if (!room.combat) return true;
+  log(room, `${player.name} kann im Kampf nicht handeln.`);
+  touchRoom(room);
+  return false;
+}
+
 function handleProposeTrade(room, playerId, toId, offerCardIds) {
   const from = findPlayer(room, playerId);
   const to = findPlayer(room, toId);
   if (!from || !to || from.id === to.id || !to.connected) return;
+  if (!darfHandeln(room, from)) return;
   const ids = ownTradeIds(from, offerCardIds);
   if (!ids.length) return;
   if (!room.trades) room.trades = [];
@@ -4910,6 +4981,13 @@ function handleRespondTrade(room, playerId, tradeId, accept, counterCardIds) {
   const from = findPlayer(room, trade.fromId);
   const to = findPlayer(room, trade.toId);
   if (!from || !to) { room.trades = room.trades.filter((t) => t.id !== trade.id); return; }
+  // Auch Annehmen/Gegenangebot sind Handeln - ein vor dem Kampf gestelltes
+  // Angebot darf nicht mittendrin abgeschlossen werden. Zuruecknehmen
+  // (handleCancelTrade) bleibt erlaubt: es bewegt keine Karten.
+  // Nur die beiden Beteiligten pruefen - wer gar nicht zum Handel gehoert,
+  // faellt unten durch die Rollenpruefung und braucht keine Logzeile.
+  const antwortende = playerId === from.id ? from : (playerId === to.id ? to : null);
+  if (antwortende && !darfHandeln(room, antwortende)) return;
 
   // Schritt 2: die angefragte Seite antwortet auf das Angebot.
   if (trade.status === 'pending' && playerId === to.id) {
@@ -5335,7 +5413,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'proposeTrade', ({ toId, offerCardIds }) => act(socket, (room, pid) => handleProposeTrade(room, pid, toId, offerCardIds)));
   onSafe(socket, 'cancelTrade', ({ tradeId }) => act(socket, (room, pid) => handleCancelTrade(room, pid, tradeId)));
   onSafe(socket, 'respondTrade', ({ tradeId, accept, counterCardIds }) => act(socket, (room, pid) => handleRespondTrade(room, pid, tradeId, accept, counterCardIds)));
-  onSafe(socket, 'requestHelp', ({ targetId }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId)));
+  onSafe(socket, 'requestHelp', ({ targetId, reward }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId, reward)));
   onSafe(socket, 'respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
   onSafe(socket, 'setCombatReady', ({ ready }) => act(socket, (room, pid) => handleSetCombatReady(room, pid, ready !== false)));
   onSafe(socket, 'evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
