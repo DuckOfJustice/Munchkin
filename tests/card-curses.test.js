@@ -335,6 +335,17 @@ function run() {
     }
     assert.ok(wuerfe.every((w) => w >= 1 && w <= 5), 'mit dem Huhn faellt nie eine 6');
     assert.ok(wuerfe.includes(1) && wuerfe.includes(5), 'der Rest des Bereichs kommt vor');
+
+    // Gegenprobe: ohne Fluch muss der volle Bereich 1..6 erreichbar bleiben -
+    // rollWithWindow darf sich ohne Fluch nicht anders verhalten als vorher.
+    clearActiveCurse(room, p, 0);
+    const ohne = [];
+    for (let i = 0; i < 300; i++) {
+      let gesehen = null;
+      rollWithWindow(room, p, 'test', (r) => { gesehen = r; });
+      ohne.push(gesehen);
+    }
+    assert.ok(ohne.includes(6) && ohne.includes(1), 'ohne Fluch bleibt es bei 1..6');
     done(room);
   }
   {

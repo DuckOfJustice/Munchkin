@@ -690,9 +690,12 @@ function handlePrepReady(room, playerId, ready) {
   const player = findPlayer(room, playerId);
   if (!player) return;
   room.prepReady = room.prepReady || {};
-  if (ready === false) delete room.prepReady[playerId];
-  else room.prepReady[playerId] = true;
-  log(room, `${player.name} ist ${ready === false ? 'doch noch nicht' : 'bereit'}.`);
+  const vorher = !!room.prepReady[playerId];
+  const jetzt = ready !== false;
+  if (jetzt) room.prepReady[playerId] = true; else delete room.prepReady[playerId];
+  // Nur bei echter Aenderung loggen - sonst laesst sich der Spielverlauf mit
+  // einem Dauerklick auf "Bereit" zuspammen.
+  if (vorher !== jetzt) log(room, `${player.name} ist ${jetzt ? 'bereit' : 'doch noch nicht bereit'}.`);
   pruefeVorbereitungFertig(room);
 }
 
@@ -2489,6 +2492,20 @@ function addActiveCurse(room, player, cardName, cardId) {
     hinweis: regel.hinweis || '',
   });
   log(room, `${player.name} steht unter dem Fluch "${cardName}".`);
+  // WINZIGE HÄNDE: "Du kannst keine Gegenstaende tragen, die mehr als eine
+  // Hand benoetigen." Der haeufige Fall ist, dass der Zweihaender schon
+  // getragen wird - sonst wirkte der Fluch nur auf kuenftige Gegenstaende.
+  // Die Karte wandert zurueck auf die Hand (nicht auf den Ablagestapel): der
+  // Text nimmt sie einem nicht weg, man kann sie nur nicht mehr benutzen.
+  if (regel.kind === 'noTwoHandedItems') {
+    equippedItemIds(player).forEach((id) => {
+      const g = card(id);
+      if (!g || (g.handsCost || 0) < 2) return;
+      unequipSlotCard(player, id);
+      player.hand.push(id);
+      log(room, `"${g.name}" braucht zwei Haende - ${player.name} legt ihn zurueck auf die Hand.`, [id]);
+    });
+  }
 }
 
 // Rückgabewert statt eigenem log() - die aufrufende Stelle (applyPrimitiveAction
@@ -2785,8 +2802,12 @@ function handlePlayReactionCard(room, playerId, cardId, value) {
     if (!p || !c || !p.hand.includes(cardId) || !ROLL_REACTION_CARDS.has(c.name)) return;
     if (ROLL_REACTION_OWN_ROLL_ONLY.has(c.name) && playerId !== pr.playerId) return;
     // KATZENINTERVENTION wuerfelt neu, der GEZINKTE WÜRFEL setzt den Wert.
+    // Der Neuwurf ist ein Wurf DERSELBEN Person - ein "-1 auf alle Wuerfe"
+    // (HUHN AUF DEINEM KOPF) gilt also auch hier, sonst hebt die Katze den
+    // Fluch fuer diesen Wurf auf.
+    const werfer = findPlayer(room, pr.playerId);
     const neu = ROLL_REROLL_CARDS.has(c.name)
-      ? rollDie()
+      ? Math.max(1, rollDie() + curseRollModifier(werfer))
       : Math.max(1, Math.min(6, Math.round(Number(value) || pr.roll)));
     removeFromHand(p, cardId);
     discardCard(room, cardId);
@@ -3522,8 +3543,14 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       if (idx < 0) return 'Monster nicht im Kampf gefunden';
       const m = card(mId);
       c.monsterIds.splice(idx, 1);
-      if (action.returnToDoorDeckBottom) room.doorDeck.unshift(mId);
-      else if (!c.monsterIds.includes(mId)) room.doorDiscard.push(mId);
+      // KUMPEL kann dieselbe Karten-ID zweimal im Kampf haben: solange die
+      // zweite Kopie noch kaempft, darf die Karte weder auf den Ablagestapel
+      // noch zurueck in den Tuerstapel - sonst laege sie gleichzeitig im
+      // Stapel UND im Kampf (siehe discardMonsterIds).
+      if (!c.monsterIds.includes(mId)) {
+        if (action.returnToDoorDeckBottom) room.doorDeck.unshift(mId);
+        else room.doorDiscard.push(mId);
+      }
       const drawn = [];
       if (action.leavesTreasure) {
         const actor = findPlayer(room, c.actorId) || player;
@@ -3534,6 +3561,10 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
           cardIds: drawn, levelsGained: 0, monsterNames: [m.name],
         };
       }
+      // ponytail: der Anteil gespielter Verstaerker (monsterModifier,
+      // treasureDelta) bleibt im Kampf, auch wenn er auf dem entfernten
+      // Monster lag - genau wie bei ILLUSION. Aufruestweg waere ein
+      // monsterModifier pro Monster-ID.
       if (!c.monsterIds.length) {
         room.combat = null;
         room.turnPhase = combatEndPhase(c, action.thenLoot);
@@ -3576,6 +3607,10 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       // unbeteiligte Monster. Aufruestweg: monsterModifier pro monsterId
       // statt kampfweit fuehren, falls das je gebraucht wird.
       c.monsterModifier = 0;
+      // Der Verstaerker-Anteil gehoert zum ersetzten Monster und darf danach
+      // nicht mehr von KUMPEL verdoppelt werden.
+      c.enhancerBonus = 0;
+      c.enhancerTreasure = 0;
       refreshCombatReady(room);
       return `"${card(alt).name}" wird durch "${card(action.cardId).name}" ersetzt`;
     }
@@ -3783,9 +3818,11 @@ function handlePlayCombatCard(room, playerId, cardId) {
   // "Ein Monster" - bei mehreren im Kampf muss gesagt werden, welches (gleiche
   // Bauform wie die Monster-Wahl der MAGISCHEN LAMPE weiter oben).
   if (spec.type === 'removeOneMonster' && room.combat.monsterIds.length > 1) {
-    openCardChoice(room, player, c.name, room.combat.monsterIds.map((mId) => ({
-      id: `mon-${mId}`,
-      label: `"${card(mId).name}" verschwinden lassen`,
+    // KUMPEL kann dieselbe Karte zweimal im Kampf haben - dann braucht jede
+    // Option eine eigene ID, sonst sehen beide gleich aus.
+    openCardChoice(room, player, c.name, room.combat.monsterIds.map((mId, i) => ({
+      id: `mon-${i}-${mId}`,
+      label: `"${card(mId).name}"${room.combat.monsterIds.filter((x) => x === mId).length > 1 ? ` (${i + 1}.)` : ''} verschwinden lassen`,
       action: Object.assign({}, spec, { monsterId: mId }),
     })));
     room.pendingCardAction.sourceCardId = cardId;
@@ -4473,14 +4510,18 @@ function handleUseGuaranteedFlee(room, playerId, cardId) {
 // Ausrüstung, Verkauf, Rasse/Klasse, Ablegen
 // ---------------------------------------------------------------------------
 
-// Wann darf die Ausruestung geaendert werden? Gedruckte Regel: waehrend des
-// eigenen Zuges, aber nicht mitten im Kampf. Dazu die Vorbereitungsrunde vor
-// dem ersten Zug, in der alle gleichzeitig anlegen duerfen.
+// Wann darf die Ausruestung geaendert werden? Die harte Grenze im Regelwerk
+// ist der Kampf ("Du darfst deine Ausruestung nicht mitten im Kampf
+// wechseln") - genau dort haengt die Kampfrechnung, und genau dort war es
+// vorher frei manipulierbar. Ausserhalb eines Kampfes darf jederzeit
+// umgeruestet werden, auch im fremden Zug (so liest es der gedruckte
+// Ausruestungs-Abschnitt; das VERKAUFEN ist dagegen ausdruecklich an den
+// eigenen Zug gebunden, siehe handleSellItems).
+// ponytail: wer es strenger will ("nur im eigenen Zug"), haengt hier ein
+// `&& currentPlayer(room).id === player.id` an - eine Zeile. Die
+// Vorbereitungsrunde braucht das nicht: dort laeuft nie ein Kampf.
 function darfAusruesten(room, player) {
-  if (room.turnPhase === 'vorbereitung') return true;
-  if (room.combat) return false;
-  const dran = currentPlayer(room);
-  return !!dran && !!player && dran.id === player.id;
+  return !!player && !room.combat;
 }
 
 function handleEquipItem(room, playerId, cardId) {
@@ -4994,6 +5035,11 @@ function scheduleBotActionsIfNeeded(room) {
   // laeuft im Sekundentakt gegen Handler, die ihn abweisen.
   if (room.pendingRoll) return;
 
+  // In der Vorbereitungsrunde gibt es fuer Bots nichts zu tun (sie sind seit
+  // startGame bereit) - ohne dieses return plant der Scheduler im Sekundentakt
+  // Timer, deren Callback keine Phase trifft und nur broadcastState ausloest.
+  if (room.turnPhase === 'vorbereitung') return;
+
   // Eine an einen Bot gerichtete Kartenaktion muss der Server selbst
   // beantworten - sonst wartet die Partie ewig auf einen Dialog, den niemand
   // sieht. Bots waehlen bewusst simpel (erste Option / erstes Ziel); eine
@@ -5206,6 +5252,10 @@ io.on('connection', (socket) => {
     } else {
       player.connected = false;
       log(room, `${player.name} hat das Spiel verlassen.`);
+      // Wie beim Verbindungsabbruch: offene Reaktionsfenster und die
+      // Vorbereitungsrunde duerfen nicht auf jemanden warten, der weg ist.
+      loeseReaktionsfensterOhne(room, player.id);
+      pruefeVorbereitungFertig(room);
     }
     socket.leave(room.code);
     socket.data.roomCode = null;

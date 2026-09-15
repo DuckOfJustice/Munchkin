@@ -176,6 +176,10 @@
 
   function me() { return state.players.find((p) => p.id === myInfo.playerId); }
   function isMyTurn() { return state.turnPlayerId === myInfo.playerId; }
+  // Spiegelt darfAusruesten(room, player) im Server: Ausruestung aendert man
+  // ueberall, nur nicht mitten im Kampf. Verkaufen ist strenger (eigener Zug).
+  function darfAusruesten() { return !state.combat && state.phase !== 'gameend'; }
+  function darfVerkaufen() { return darfAusruesten() && isMyTurn() && state.turnPhase !== 'vorbereitung'; }
 
   function renderLobby() {
     $('lobbyCode').textContent = state.code;
@@ -1053,6 +1057,10 @@
   // ausserhalb von renderCombat: gewuerfelt wird auch ohne Kampf, und ohne
   // diesen Kasten gaebe es dann keinen "Passen"-Knopf - das Spiel haenge.
   // Das Ausspielen selbst passiert an der Handkarte (siehe handActionsFor).
+  // Wurf-Reaktionsfenster (GEZINKTER WÜRFEL, KATZENINTERVENTION). Bewusst
+  // ausserhalb von renderCombat: gewuerfelt wird auch ohne Kampf, und ohne
+  // diesen Kasten gaebe es dann keinen "Passen"-Knopf - das Spiel haenge.
+  // Das Ausspielen selbst passiert an der Handkarte (siehe handActionsFor).
   // Vorbereitungsrunde vor dem ersten Zug: alle legen gleichzeitig ihre
   // Ausruestung an und melden sich bereit.
   function renderPrep() {
@@ -1304,11 +1312,15 @@
         el.classList.add('clickable');
         el.title = 'Karte groß ansehen';
         el.onclick = () => openCardModal(cardId);
-        const btn = document.createElement('button');
-        btn.className = 'small'; btn.textContent = 'ablegen';
-        // stopPropagation: sonst oeffnet das Ablegen zugleich die Grossansicht.
-        btn.onclick = (e) => { e.stopPropagation(); socket.emit('unequipItem', { cardId }); };
-        el.appendChild(btn);
+        // Ablegen ist dieselbe Ausruestungsaenderung wie Anlegen - im Kampf
+        // weist der Server sie ab, dann gibt es hier auch keinen Knopf.
+        if (darfAusruesten()) {
+          const btn = document.createElement('button');
+          btn.className = 'small'; btn.textContent = 'ablegen';
+          // stopPropagation: sonst oeffnet das Ablegen zugleich die Grossansicht.
+          btn.onclick = (e) => { e.stopPropagation(); socket.emit('unequipItem', { cardId }); };
+          el.appendChild(btn);
+        }
       } else {
         el.innerHTML = `<b>${label}</b><span class="hint">leer</span>`;
       }
@@ -1365,10 +1377,7 @@
     wrap.style.marginTop = '4px';
 
     const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence && !state.pendingCardAction;
-    // Vorbereitungsrunde: alle legen gleichzeitig an (siehe darfAusruesten im
-    // Server). Sonst gilt die gedruckte Regel - nur im eigenen Zug, nie im
-    // Kampf.
-    const darfAnlegen = state.turnPhase === 'vorbereitung' || myTurn;
+    const darfAnlegen = darfAusruesten();
 
     const specialRule = (state.specialSlotItems || {})[c.name];
     const isBig = (state.bigItems || []).includes(c.name);
@@ -1679,7 +1688,8 @@
     sellSelection.forEach((id) => { sum += card(id).gold || 0; });
     $('sellSum').textContent = `Ausgewählt: ${sum} Goldstücke`;
     const btn = $('btnSell');
-    btn.disabled = sum < 1000;
+    // Verkaufen geht nur im eigenen Zug und nicht im Kampf (handleSellItems).
+    btn.disabled = sum < 1000 || !darfVerkaufen();
     btn.onclick = () => {
       socket.emit('sellItems', { cardIds: Array.from(sellSelection) });
       sellSelection.clear();

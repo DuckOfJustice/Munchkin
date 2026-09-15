@@ -756,15 +756,19 @@ function run() {
     assert.strictEqual(eigenerZug.players[0].equipped.armor, null, 'ablegen auch');
     done(eigenerZug);
 
+    // Ausserhalb eines Kampfes auch im fremden Zug - die gedruckte Grenze ist
+    // der Kampf, nicht der Zug (siehe darfAusruesten). Verkaufen dagegen
+    // bleibt an den eigenen Zug gebunden, siehe unten.
     const fremderZug = makeRoom({ turnIndex: 1 });
     fremderZug.players[0].hand = [ruestung.id];
     handleEquipItem(fremderZug, 'p1', ruestung.id);
-    assert.strictEqual(fremderZug.players[0].equipped.armor, null, 'im fremden Zug nicht');
+    assert.strictEqual(fremderZug.players[0].equipped.armor, ruestung.id, 'im fremden Zug, aber ohne Kampf: erlaubt');
     done(fremderZug);
 
     const imKampf = combatRoom('LAHMER GOBLIN', { hand: [ruestung.id] });
     handleEquipItem(imKampf.room, 'p1', ruestung.id);
-    assert.strictEqual(imKampf.room.players[0].equipped.armor, null, 'im Kampf erst recht nicht');
+    assert.strictEqual(imKampf.room.players[0].equipped.armor, null, 'im Kampf nicht - dort haengt die Kampfrechnung dran');
+    handleUnequipItem(imKampf.room, 'p1', imKampf.room.players[0].equipped.feet);
     handleSellItems(imKampf.room, 'p1', [gold.id]);
     done(imKampf.room);
 
