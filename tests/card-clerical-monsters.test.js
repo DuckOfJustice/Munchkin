@@ -111,6 +111,23 @@ const ZAUBERER = findCard('ZAUBERER', 'class');
   mitWaffen.equipped.hands = [waffe.id, zweite.id];
   assert.strictEqual(monsterStaerke('KALI', ohneWaffen) - monsterStaerke('KALI', mitWaffen), 5,
     'zwei Waffen nehmen Kali die Extra-5');
+
+  // "2 eigene WAFFEN", nicht "2 belegte Handplaetze": eine Zweihandwaffe
+  // belegt beide Plaetze, ist aber nur eine Waffe.
+  const zweihand = ALL_CARDS.find((c) => c.category === 'item' && c.handsCost === 2);
+  const nurZweihand = makePlayer({});
+  nurZweihand.equipped.hands = [zweihand.id, zweihand.id];
+  assert.strictEqual(monsterStaerke('KALI', nurZweihand), monsterStaerke('KALI', ohneWaffen),
+    'eine Zweihandwaffe allein reicht Kali nicht');
+
+  // Umgekehrt: das ZWEIHÄNDIGE SCHWERT kostet netto keine Hand und liegt
+  // deshalb in der Spezialausruestung - es zaehlt trotzdem als Waffe.
+  const schwert = findCard('ZWEIHÄNDIGES SCHWERT');
+  const mitSchwert = makePlayer({});
+  mitSchwert.equipped.hands = [waffe.id, null];
+  mitSchwert.equipped.special = [schwert.id];
+  assert.strictEqual(monsterStaerke('KALI', ohneWaffen) - monsterStaerke('KALI', mitSchwert), 5,
+    'Handwaffe + Zweihaendiges Schwert sind zwei Waffen');
 }
 
 // --- Weitere Dauerwirkungen -------------------------------------------------

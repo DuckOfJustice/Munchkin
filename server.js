@@ -668,7 +668,9 @@ function endTurn(room) {
   room.turnIndex = (room.turnIndex + 1) % room.players.length;
   // KALI: "setze auch deinen naechsten Zug aus". Die Schleife hat eine harte
   // Obergrenze, damit eine Runde, in der ALLE aussetzen, nicht haengt.
-  for (let i = 0; i < room.players.length && (currentPlayer(room).skipTurns || 0) > 0; i++) {
+  // Setzen ALLE aus, bleibt die letzte Person am Zug (sonst drehte sich die
+  // Runde im Kreis) - ihr Zaehler bleibt dann auch stehen.
+  for (let i = 0; i < room.players.length - 1 && (currentPlayer(room).skipTurns || 0) > 0; i++) {
     const aussetzer = currentPlayer(room);
     aussetzer.skipTurns -= 1;
     log(room, `${aussetzer.name} setzt diesen Zug aus.`);
@@ -711,7 +713,12 @@ function checkWin(room, player) {
 function handleDrawDoor(room, playerId) {
   const player = currentPlayer(room);
   if (!player || player.id !== playerId) return;
-  if (room.turnPhase !== 'tuer' || room.revealedDoorCard || room.combat || room.pendingConsequence) return;
+  // pendingRoll: der Amulett-Wurf laeuft, das Fluch-Ergebnis steht noch aus -
+  // die Fluchkarte hat revealedDoorCard schon geleert, pendingConsequence aber
+  // noch nicht gesetzt. Ohne diese Sperre liesse sich hier eine zweite Tuer
+  // ziehen, die der Wurf-Callback danach ueberschreibt.
+  if (room.turnPhase !== 'tuer' || room.revealedDoorCard || room.combat
+    || room.pendingConsequence || room.pendingRoll) return;
   const id = drawDoor(room);
   if (!id) { log(room, 'Türstapel ist leer.'); return; }
   room.revealedDoorCard = id;
@@ -1048,6 +1055,7 @@ function applyDeathConsequence(room, player) {
     player.hand = [];
     player.equipped = newEquipped();
   };
+  log(room, `${player.name} stirbt - Stufe ${player.level} bleibt, alle Karten sind weg (${anzahl}).`);
   if (!anzahl) return;
   const andere = room.players.filter((p) => p.id !== player.id).sort((a, b) => b.level - a.level);
   if (!andere.length) { alleAblegen(); return; }
@@ -1058,7 +1066,7 @@ function applyDeathConsequence(room, player) {
     if (!ids.length) return null;
     return { kind: 'chooseCard', prompt: `Eine Karte von ${player.name} nehmen`, candidateIds: ids, takeFrom: player.id };
   }, player.id, 'alles');
-  log(room, `${player.name} stirbt - die anderen plündern die Leiche (${anzahl} Karte(n)), Stufe ${player.level} bleibt.`);
+  log(room, `Die anderen plündern die Leiche von ${player.name} (${anzahl} Karte(n), höchste Stufe zuerst).`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1300,10 +1308,18 @@ function applyPrimitiveAction(room, player, action) {
       const echterIdx = room.treasureDiscard.length - 1 - idx;
       const [itemId] = room.treasureDiscard.splice(echterIdx, 1);
       player.hand.push(itemId);
+      // ponytail: die Ausnahme laeuft ueber denselben Marker wie SCHUMMELN!,
+      // und den gibt es nur einmal pro Person - wer schon einen geschummelten
+      // Gegenstand hat, bekommt sie nicht (und sieht das im Log). Der Marker
+      // hebt ausserdem nur die Gross- und Rassensperre auf, nicht Klasse/
+      // Geschlecht/"maximal moeglicher Bonus" wie auf der Karte. Aufruestweg:
+      // eine Liste geschummelter Gegenstaende statt eines einzelnen Feldes.
       let zusatz = '';
       if (player.attachments && !player.attachments.cheatedItemId) {
         player.attachments.cheatedItemId = itemId;
         zusatz = ' - die Anlege-Beschraenkungen gelten dafuer nicht';
+      } else {
+        zusatz = ' - die Beschraenkungs-Ausnahme entfaellt (es ist schon ein anderer Gegenstand geschummelt)';
       }
       return `"${card(itemId).name}" aus dem Schatz-Ablagestapel genommen${zusatz}`;
     }
@@ -2220,9 +2236,21 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
   // Schlimme Dinge mit Fremdbeteiligung (HIPPOGREIF/ANWALT/LEPRACHAUN/
   // NETZ-TROLL): die gewaehlte Karte kommt vom OPFER, nicht aus einem
   // Ablagestapel - siehe queuedTakeFromHand/queuedTakeItem.
+  // candidateIds ist eine Momentaufnahme: zwischen dem Oeffnen des Waehlers
+  // und der Antwort kann die Karte den Besitzer gewechselt haben (verkauft,
+  // gestohlen, gehandelt, von einer vorherigen Person aus derselben
+  // Warteschlange genommen). Ohne diese Pruefung liefe unequipSlotCard ins
+  // Leere und die Karte laege danach doppelt im Spiel.
+  const gehoert = (p, id) => p.hand.includes(id) || equippedItemIds(p).includes(id);
   if (pa.takeFrom) {
     const opfer = findPlayer(room, pa.takeFrom);
     if (!opfer) return;
+    if (!gehoert(opfer, chosenCardId)) {
+      log(room, `"${chosen ? chosen.name : chosenCardId}" gehoert ${opfer.name} nicht mehr - nichts genommen.`);
+      finishCardAction(room, pa);
+      touchRoom(room);
+      return;
+    }
     if (opfer.hand.includes(chosenCardId)) removeFromHand(opfer, chosenCardId);
     else unequipSlotCard(opfer, chosenCardId);
     clearCheatIfLost(opfer, chosenCardId);
@@ -2230,6 +2258,12 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
     log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" von ${opfer.name} genommen.`, [chosenCardId]);
   } else if (pa.discardOwn) {
     // SCHNECKEN AUF SPEED: die eigene Wahl geht direkt auf den Ablagestapel.
+    if (!gehoert(player, chosenCardId)) {
+      log(room, `"${chosen ? chosen.name : chosenCardId}" ist nicht mehr da - nichts abgelegt.`);
+      finishCardAction(room, pa);
+      touchRoom(room);
+      return;
+    }
     if (player.hand.includes(chosenCardId)) removeFromHand(player, chosenCardId);
     else unequipSlotCard(player, chosenCardId);
     discardCard(room, chosenCardId);
@@ -2639,6 +2673,8 @@ function reactionHolders(room, cardSet, darf) {
 // Fenster entsteht nur, wenn es wirklich jemanden gibt, der es nutzen
 // koennte. Obergrenze: genau zwei Ausloeser (Wurf, gelungene Flucht). Kommen
 // mehr dazu, lohnt sich ein echter Stack.
+// `purpose` ist ein reines Diagnosefeld (steht in room.pendingRoll und damit
+// im Zustand, den der Client bekommt) - keine Logik haengt daran.
 function rollWithWindow(room, player, purpose, onResolve) {
   const roll = rollDie();
   // Der GEZINKTE WÜRFEL gilt nur fuer den eigenen Wurf - wer nur ihn haelt,
@@ -2646,7 +2682,12 @@ function rollWithWindow(room, player, purpose, onResolve) {
   // ROLL_REACTION_OWN_ROLL_ONLY).
   const holders = reactionHolders(room, ROLL_REACTION_CARDS,
     (pid, name) => !ROLL_REACTION_OWN_ROLL_ONLY.has(name) || pid === player.id);
-  if (!holders.length) { onResolve(roll); return; }
+  // Ein zweites Fenster waehrend eines offenen wuerde das erste (samt seinem
+  // onResolve) ueberschreiben - dessen Wirkung fiele ersatzlos aus. Zwei
+  // Wuerfe koennen tatsaechlich zusammenfallen: autoApplyLossConsequence
+  // arbeitet mehrere Monster eines verlorenen Kampfes nacheinander ab. Der
+  // zweite Wurf laeuft dann synchron wie frueher.
+  if (!holders.length || room.pendingRoll) { onResolve(roll); return; }
   room.pendingRoll = { playerId: player.id, purpose, roll, holders, onResolve };
   log(room, `${player.name} würfelt ${roll} - es darf noch auf den Wurf reagiert werden.`);
 }
@@ -2713,6 +2754,25 @@ function handlePlayReactionCard(room, playerId, cardId, value) {
     log(room, `${p.name} spielt "${c.name}": ${actor.name} muss die Flucht noch einmal würfeln.`, [cardId]);
     touchRoom(room);
     handleAttemptFlee(room, actor.id, combat.fleeManualModifier || 0);
+  }
+}
+
+// Eine Person faellt weg (Verbindung verloren): sie kann auf nichts mehr
+// reagieren. Bleibt danach niemand mehr uebrig, loest sich das Fenster auf.
+function loeseReaktionsfensterOhne(room, playerId) {
+  const pr = room.pendingRoll;
+  if (pr && pr.holders.includes(playerId)) {
+    pr.holders = pr.holders.filter((id) => id !== playerId);
+    if (!pr.holders.length) resolvePendingRoll(room, pr.roll);
+  }
+  const c = room.combat;
+  if (c && c.escapeReactionOffer && c.escapeReactionOffer.includes(playerId)) {
+    c.escapeReactionOffer = c.escapeReactionOffer.filter((id) => id !== playerId);
+    if (!c.escapeReactionOffer.length) {
+      const actor = findPlayer(room, c.actorId);
+      c.escapeReactionOffer = null;
+      finishFleeSuccess(room, actor, c);
+    }
   }
 }
 
@@ -3783,6 +3843,10 @@ function hasenWurf(room, nachWurf) {
     if (!synchron && nachWurf) nachWurf();
   });
   synchron = false;
+  // Unterschied zum synchronen Weg: bei einer 6 setzt haseAnwenden ueber
+  // refreshCombatReady die Bereitschaft zurueck (die Monsterstaerke hat sich
+  // geaendert). Der erneute handleEvaluateCombat wartet dann, bis alle wieder
+  // bereit sind - gewollt, denn auf Stufe 15 will man neu entscheiden.
   return !!room.pendingRoll;
 }
 
@@ -3796,6 +3860,10 @@ function haseAnwenden(room, c, hase, wurf) {
 
 function handleEvaluateCombat(room, playerId) {
   if (!room.combat) return;
+  // Waehrend eines offenen Wurf-Fensters (Hase, Halbfinal-Schlag) nicht
+  // auswerten: der Wurf gehoert noch zu diesem Kampf, sein Callback wuerde
+  // sonst in einen bereits beendeten Kampf hineinschreiben.
+  if (room.pendingRoll) return;
   const c = room.combat;
   if (c.actorId !== playerId) return;
   // Erst auswerten, wenn niemand mehr eingreifen will.
@@ -5097,6 +5165,11 @@ io.on('connection', (socket) => {
     if (!player) return;
     player.connected = false;
     log(room, `${player.name} hat die Verbindung verloren.`);
+    // Offene Reaktionsfenster warten sonst ewig auf jemanden, der nicht mehr
+    // am Geraet ist - dieselbe Regel wie in reactionHolders (Getrennte
+    // oeffnen gar kein Fenster) und advanceCardActionQueue (Getrennte werden
+    // uebersprungen).
+    loeseReaktionsfensterOhne(room, player.id);
     broadcastState(room);
   });
 });

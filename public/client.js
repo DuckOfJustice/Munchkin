@@ -1198,7 +1198,10 @@
   function renderPhaseActions() {
     const box = $('phaseActions');
     box.innerHTML = '';
-    if (state.phase === 'gameend' || state.combat || state.pendingConsequence || state.pendingCardAction) return;
+    // pendingRoll: solange ein Wurf-Fenster offen ist, nimmt der Server keine
+    // Phasenaktion an (siehe handleDrawDoor) - dann auch keinen Knopf zeigen.
+    if (state.phase === 'gameend' || state.combat || state.pendingConsequence
+      || state.pendingCardAction || state.pendingRoll) return;
     if (!isMyTurn()) { box.appendChild(textNode('Warte, bis du an der Reihe bist...')); return; }
 
     if (state.turnPhase === 'tuer' && !state.revealedDoorCard) {

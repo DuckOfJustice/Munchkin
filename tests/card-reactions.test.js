@@ -215,6 +215,31 @@ function run() {
     done(room);
   }
 
+  {
+    // Zwei Wuerfe hintereinander (zwei Monster mit Wuerfel-Schlimme-Dinge in
+    // EINEM verlorenen Kampf): room.pendingRoll traegt nur EINEN. Das zweite
+    // Fenster darf das erste nicht ueberschreiben - sonst fiele dessen
+    // Wirkung ersatzlos aus. Der zweite Wurf laeuft deshalb synchron.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const p = makePlayer({ id: 'p1', level: 10, hand: [wuerfel.id] });
+    const room = makeRoom({ players: [p, makePlayer({ id: 'p2', name: 'B' })] });
+
+    applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    const ersterWurf = room.pendingRoll.roll;
+    assert.strictEqual(p.level, 10, 'der erste Wurf wartet im Fenster');
+
+    const zweiter = applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    const zweiterWurf = Number(/Würfelwurf (\d)/.exec(zweiter)[1]);
+    assert.strictEqual(room.pendingRoll.roll, ersterWurf, 'das offene Fenster bleibt unangetastet');
+    assert.strictEqual(p.level, 10 - zweiterWurf, 'der zweite Wurf wirkt sofort und geht nicht verloren');
+
+    // Der gezinkte Wuerfel gilt weiterhin dem ERSTEN Wurf.
+    handlePlayReactionCard(room, 'p1', wuerfel.id, 1);
+    assert.strictEqual(p.level, 10 - zweiterWurf - 1, 'danach wirkt der geaenderte erste Wurf');
+    assert.ok(!room.pendingRoll);
+    done(room);
+  }
+
   // -------------------------------------------------------------------
   // KLEBERFLÄSCHCHEN an der gelungenen Flucht (TOPFPFLANZE: automatische
   // Flucht, damit der Erfolg nicht vom Zufallswurf abhaengt)
