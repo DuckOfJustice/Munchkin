@@ -877,7 +877,7 @@
       const row = document.createElement('div');
       row.className = 'row gap wrap';
       const werfer = state.players.find((p) => p.id === state.pendingRoll.playerId);
-      row.appendChild(textNode(`${werfer ? werfer.name : '?'} hat ${state.pendingRoll.roll} gewürfelt - du darfst noch mit "GEZINKTER WÜRFEL" reagieren.`));
+      row.appendChild(textNode(`${werfer ? werfer.name : '?'} hat ${state.pendingRoll.roll} gewürfelt - du darfst noch mit einer Würfel-Reaktionskarte reagieren.`));
       row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
       div.appendChild(row);
     }
@@ -1537,7 +1537,11 @@
     // (state.pendingRoll.holders). KATZENINTERVENTION würfelt serverseitig
     // neu (state.rollRerollCards) - dafür braucht es keinen Wert-Prompt.
     if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId)
-      && (state.rollReactionCards || []).includes(c.name)) {
+      && (state.rollReactionCards || []).includes(c.name)
+      // GEZINKTER WÜRFEL: nur auf den eigenen Wurf ("nachdem DU ... wuerfeln
+      // musstest") - der Server weist es sonst ohnehin ab.
+      && !((state.rollReactionOwnRollOnly || []).includes(c.name)
+        && state.pendingRoll.playerId !== myInfo.playerId)) {
       const istNeuwurf = (state.rollRerollCards || []).includes(c.name);
       const btn = mkBtn(istNeuwurf ? '🐈 Wurf neu würfeln lassen' : '🎲 Wurf ändern', () => {
         if (istNeuwurf) { socket.emit('playReactionCard', { cardId: id }); return; }

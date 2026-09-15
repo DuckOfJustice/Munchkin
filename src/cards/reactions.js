@@ -14,6 +14,10 @@ module.exports = () => {
   const ROLL_REACTION_CARDS = new Set(['GEZINKTER WÜRFEL', 'KATZENINTERVENTION']);
   // Wer davon wuerfelt neu, statt den Wert zu setzen.
   const ROLL_REROLL_CARDS = new Set(['KATZENINTERVENTION']);
+  // "Spiel ihn, nachdem DU ... wuerfeln musstest" - der gezinkte Wuerfel gilt
+  // nur fuer den eigenen Wurf. Die KATZENINTERVENTION ausdruecklich nicht
+  // ("nachdem irgendjemand gewuerfelt hat").
+  const ROLL_REACTION_OWN_ROLL_ONLY = new Set(['GEZINKTER WÜRFEL']);
 
   // "Einsetzbar, wenn jemand erfolgreich (egal warum) einem Kampf entkommt.
   // Er muss seine Flucht noch einmal wuerfeln, sogar wenn sie das erste Mal
@@ -88,7 +92,8 @@ module.exports = () => {
   };
 
   return {
-    ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
+    ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ROLL_REACTION_OWN_ROLL_ONLY,
+    ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
     LINGERING_CURSES, COMBAT_REACTION_CARDS,
   };
 };
