@@ -91,7 +91,7 @@ module.exports = (ctx) => {
     // und filtert nicht auf "tragbar" - wer die Regel streng nimmt, nimmt den
     // obersten Gegenstand des Schatzstapels. Ein eigener gefilterter Waehler
     // waere der Aufruestweg.
-    'EINHEITSGRÖSSE': (player, room) => (room.combat ? { type: 'chooseDiscardedCard' } : null),
+    'EINHEITSGRÖSSE': (player, room) => (room.combat ? { type: 'takeFirstWearableFromTreasureDiscard' } : null),
     // "Du kannst ihn auch als Wunschring einsetzen (z.B. um einen Fluch zu
     // beenden) und hinterher abwerfen." Die Flucht-Seite der Karte laeuft
     // ueber GUARANTEED_FLEE_CARDS weiter unten.
@@ -148,6 +148,21 @@ module.exports = (ctx) => {
     // Spielzeitpunkt ("im Kampf"), deshalb greift COMBAT_PLAYABLE_RE nicht
     // und die Karte braucht diesen kuratierten Eintrag.
     'MONSTERFUTTER': () => ({ type: 'modifier', side: 'both', amount: 5 }),
+    // "Waehrend beliebigem Kampf spielen. +2 fuer beide Seiten oder +4 wenn
+    // von einem Ork geworfen. Aber ein Halbling kann ihn ESSEN und eine Stufe
+    // aufsteigen!" parseCombatPotion findet nur die +2 - der Ork-Zusatz und
+    // die Halbling-Wahl brauchen diesen Eintrag.
+    'LECKERER KUCHEN': (player) => {
+      const werfen = { type: 'modifier', side: 'both', amount: hasRace(player, 'ORK') ? 4 : 2 };
+      if (!hasRace(player, 'HALBLING')) return werfen;
+      return {
+        type: 'choice',
+        options: [
+          { id: 'werfen', label: `Kuchen werfen (+${werfen.amount} fuer beide Seiten)`, action: werfen },
+          { id: 'essen', label: 'Kuchen essen -> 1 Stufe aufsteigen', action: { type: 'levelUp', amount: 1 } },
+        ],
+      };
+    },
     // "Dieses feurige Gebraeu gewaehrt beiden Seiten +3, oder +6, wenn es zur
     // Hilfe von Halblingen eingesetzt wird." Die Zahl steht hinter der Seite,
     // parseCombatPotion findet sie deshalb nicht.
@@ -199,14 +214,14 @@ module.exports = (ctx) => {
     'FREUNDSCHAFTSTRANK': () => ({ type: 'endCombatNoLevel', thenLoot: true }),
     // "Verwandelt ein Monster in einen Papagei, der wegfliegt und seinen
     // Schatz zurücklässt." -> Schatz gehört der kämpfenden Person.
-    'POLLYVERWANDLUNGSTRANK': () => ({ type: 'endCombatNoLevel', leavesTreasure: true }),
+    'POLLYVERWANDLUNGSTRANK': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
     // "Bringt ein Monster dazu, verwirrt wegzulaufen und seinen Schatz
     // zurückzulassen." -> ebenfalls Schatz, aber keine Stufe.
-    'TRANK DER IRRELEVANZ': () => ({ type: 'endCombatNoLevel', leavesTreasure: true }),
+    'TRANK DER IRRELEVANZ': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
     // "Lege das Monster nach unten in den Türstapel zurück. Wenn es das
     // einzige Monster im Kampf war, ist der Kampf vorbei und der aktuelle
     // Spieler plündert den Raum." (kein Schatz - das Monster nimmt ihn mit)
-    'ENTLASSUNGSGLOCKE': () => ({ type: 'endCombatNoLevel', returnToDoorDeckBottom: true, thenLoot: true }),
+    'ENTLASSUNGSGLOCKE': () => ({ type: 'removeOneMonster', returnToDoorDeckBottom: true, thenLoot: true }),
     // "Der Helfer vergisst, dass er kämpft, geht und lässt den Hauptkämpfer
     // allein im Kampf zurück." (nur spielbar, wenn ein Helfer im Kampf ist)
     'CYTILLESH-TRANK': (player, room) => (room.combat.helperId ? { type: 'removeHelper' } : null),

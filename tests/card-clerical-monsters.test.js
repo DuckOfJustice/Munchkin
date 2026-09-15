@@ -111,6 +111,23 @@ const ZAUBERER = findCard('ZAUBERER', 'class');
   mitWaffen.equipped.hands = [waffe.id, zweite.id];
   assert.strictEqual(monsterStaerke('KALI', ohneWaffen) - monsterStaerke('KALI', mitWaffen), 5,
     'zwei Waffen nehmen Kali die Extra-5');
+
+  // "2 eigene WAFFEN", nicht "2 belegte Handplaetze": eine Zweihandwaffe
+  // belegt beide Plaetze, ist aber nur eine Waffe.
+  const zweihand = ALL_CARDS.find((c) => c.category === 'item' && c.handsCost === 2);
+  const nurZweihand = makePlayer({});
+  nurZweihand.equipped.hands = [zweihand.id, zweihand.id];
+  assert.strictEqual(monsterStaerke('KALI', nurZweihand), monsterStaerke('KALI', ohneWaffen),
+    'eine Zweihandwaffe allein reicht Kali nicht');
+
+  // Umgekehrt: das ZWEIHÄNDIGE SCHWERT kostet netto keine Hand und liegt
+  // deshalb in der Spezialausruestung - es zaehlt trotzdem als Waffe.
+  const schwert = findCard('ZWEIHÄNDIGES SCHWERT');
+  const mitSchwert = makePlayer({});
+  mitSchwert.equipped.hands = [waffe.id, null];
+  mitSchwert.equipped.special = [schwert.id];
+  assert.strictEqual(monsterStaerke('KALI', ohneWaffen) - monsterStaerke('KALI', mitSchwert), 5,
+    'Handwaffe + Zweihaendiges Schwert sind zwei Waffen');
 }
 
 // --- Weitere Dauerwirkungen -------------------------------------------------
@@ -153,3 +170,57 @@ const ZAUBERER = findCard('ZAUBERER', 'class');
 }
 
 console.log('card-clerical-monsters: ok');
+
+// --- Nachtraege aus dem Review (2026-09-14) ---------------------------------
+// Alle drei Faelle waren gruen, weil niemand sie gefragt hat: negative Boni
+// mit Kappen-Karte, eine "du"-Bedingung mit Helfer:in, und ein Monster, dessen
+// eigener Text es untot nennt.
+{
+  // SUPER MUNCHKIN/HALB-BLUT: "alle Vorteile, aber keine Nachteile" - ein
+  // NEGATIVER Monsterbonus ist ein Vorteil und darf nicht mit weggekappt
+  // werden, sonst ist die Kappen-Karte schlechter als gar keine.
+  const superM = findCard('SUPER MUNCHKIN', 'door_other');
+  const halbB = findCard('HALB-BLUT', 'door_other');
+  const basisG = monsterStaerke('DRECKIGE GÄNSE', makePlayer({}));
+  assert.strictEqual(
+    monsterStaerke('DRECKIGE GÄNSE', makePlayer({ classes: [BARDE.id], classCapCard: superM.id })) - basisG, -3,
+    'der Super-Barde behaelt die -3 gegen die dreckigen Gaense');
+  const basisK = monsterStaerke('GIFTEFEU KUDZU-FLIEGENFALLE', makePlayer({}));
+  assert.strictEqual(
+    monsterStaerke('GIFTEFEU KUDZU-FLIEGENFALLE', makePlayer({ races: [ELF.id], raceCapCard: halbB.id })) - basisK, -4,
+    'der Halb-Elf behaelt die -4');
+  // Der Nachteil bleibt dagegen gekappt: +5 gegen Priester zieht bei einem
+  // Super-Munchkin mit genau einer Klasse nicht.
+  assert.strictEqual(
+    monsterStaerke('TANTE PALADIN', makePlayer({ classes: [PRIESTER.id], classCapCard: superM.id }))
+    - monsterStaerke('TANTE PALADIN', makePlayer({})), 0,
+    'positive Monsterboni kappt SUPER MUNCHKIN weiterhin');
+
+  // KALI: "es sei denn, DU verteidigst dich mit 2 eigenen Waffen" - die
+  // Waffen der Helfer:in zaehlen nicht, und ihre leeren Haende duerfen das
+  // Monster nicht staerker machen (sonst bestraft Hilfe die kaempfende Person).
+  const waffe = findCard('VORPALE KLINGE');
+  const zweite = findCard('GHOULPEITSCHE');
+  const kali = findCard('KALI', 'monster');
+  function kaliMitHelfer(kaempferWaffen, helferWaffen) {
+    const a = makePlayer({ id: 'pA' });
+    const b = makePlayer({ id: 'pB', name: 'B' });
+    a.equipped.hands = kaempferWaffen;
+    b.equipped.hands = helferWaffen;
+    const room = makeRoom([a, b]);
+    room.combat = {
+      actorId: a.id, helperId: b.id, monsterIds: [kali.id],
+      actorModifier: 0, monsterModifier: 0, backstabbed: {},
+    };
+    return combatTotals(room).monsterStrength;
+  }
+  assert.strictEqual(kaliMitHelfer([waffe.id, zweite.id], []), kaliMitHelfer([waffe.id, zweite.id], [waffe.id, zweite.id]),
+    'die Haende der Helfer:in aendern an Kali nichts');
+  assert.strictEqual(kaliMitHelfer([], []) - kaliMitHelfer([waffe.id, zweite.id], []), 5,
+    'nur die Bewaffnung der kaempfenden Person nimmt Kali die Extra-5');
+
+  // DIE SCHATTENNASE: "... funktioniert auch fuer ihren Untoten Schatten" -
+  // das einzige Monster im ganzen Spiel, dessen Text "untot" sagt. Ohne den
+  // Eintrag liefen Priester-"Vertreiben" und GHOULPEITSCHE ins Leere.
+  assert.ok(UNDEAD_MONSTERS.has('DIE SCHATTENNASE'), 'der Schatten ist untot');
+}

@@ -50,9 +50,17 @@ function makeRoom(players, extra) {
   assert.strictEqual(ergebnis, null, 'noch nichts aufgeloest');
 
   // Der uebergebene Wert wird bei der Katze ignoriert - sie wuerfelt neu.
-  handlePlayReactionCard(room, p.id, katze.id, 6);
-  assert.strictEqual(typeof ergebnis, 'number', 'der Wurf ist aufgeloest');
-  assert.ok(ergebnis >= 1 && ergebnis <= 6, 'und liegt im Wuerfelbereich');
+  // Math.random wird dafuer festgenagelt: ohne das waere "1 <= ergebnis <= 6"
+  // auch dann wahr, wenn die Katze den uebergebenen Wert einfach setzt - der
+  // Unterschied zum GEZINKTEN WÜRFEL waere untestbar.
+  const echtesRandom = Math.random;
+  Math.random = () => 0; // -> rollDie() === 1, also garantiert nicht die 6
+  try {
+    handlePlayReactionCard(room, p.id, katze.id, 6);
+  } finally {
+    Math.random = echtesRandom;
+  }
+  assert.strictEqual(ergebnis, 1, 'die Katze wuerfelt neu, statt die uebergebene 6 zu setzen');
   assert.deepStrictEqual(p.hand, [], 'die Karte ist verbraucht');
   assert.strictEqual(room.pendingRoll, null);
 }
@@ -69,7 +77,7 @@ function makeRoom(players, extra) {
     const p = makePlayer({ level: 5 });
     p.equipped.special = [amulett.id];
     const room = makeRoom([p]);
-    const ziel = fluchZiel(room, p, fluch);
+    let ziel; fluchZiel(room, p, fluch, (o) => { ziel = o; });
     if (ziel === null) {
       geblockt++;
       assert.ok(p.equipped.special.includes(amulett.id), 'beim Blocken bleibt das Amulett');
@@ -93,12 +101,13 @@ function makeRoom(players, extra) {
   const c = makePlayer({ id: 'p3', name: 'C' });
   const room = makeRoom([a, b, c]);
   for (let i = 0; i < 50; i++) {
-    const ziel = fluchZiel(room, a, fluch);
+    let ziel; fluchZiel(room, a, fluch, (o) => { ziel = o; });
     assert.ok(ziel && ziel.id !== a.id, 'der Hut traegt den Fluch immer weiter');
   }
   // Allein am Tisch gibt es niemanden, auf den zurueckgeworfen werden koennte.
   const allein = makeRoom([a]);
-  assert.strictEqual(fluchZiel(allein, a, fluch).id, a.id);
+  let alleinZiel; fluchZiel(allein, a, fluch, (o) => { alleinZiel = o; });
+  assert.strictEqual(alleinZiel.id, a.id);
 }
 
 // --- HEIMSE DIE LORBEEREN EIN: nur nach einem FREMDEN Sieg -----------------

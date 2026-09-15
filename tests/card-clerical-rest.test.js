@@ -11,6 +11,7 @@ const {
   startCombat, hasenWurf, handlePlayCombatCard, handlePlayCurseFromHand,
   applyTargetAction, TREASURE_POWER_OVERRIDES, DOOR_COMBAT_CARDS,
   monsterPassOption, FLEE_ITEM_BONUS, applyPrimitiveAction, handleResolveCardChoice,
+  handleDrawDoor, handleResolveCardCardChoice, endTurn, CONSEQUENCE_OVERRIDES,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -92,6 +93,30 @@ function mitKampf(room, monsterIds, actorId) {
   handleResolveCardChoice(room, ohneZeug.id, wahl.id);
   assert.strictEqual(ohneZeug.hand.length, 1, 'genau eine Karte wird behalten');
   assert.strictEqual(room.treasureDiscard.length, 1, 'die andere geht auf den Ablagestapel');
+}
+
+// --- PACKRATTE ueber den echten Weg: Tuer ziehen -> "Geschenk annehmen" ----
+// Die Schatzwahl wird aus einer laufenden Wahl heraus geoeffnet. Frueher
+// raeumte die Abwicklung von handleResolveCardChoice sie sofort wieder weg -
+// der Zug lief ohne Auswahl weiter (siehe finishCardAction in server.js).
+{
+  const ratte = findCard('PACKRATTE', 'monster');
+  const p = makePlayer({});
+  const room = makeRoom([p], {
+    turnPhase: 'tuer',
+    doorDeck: [ratte.id],
+    treasureDeck: [findCard('WUNSCHRING').id, findCard('SCHLITTENGLOCKE').id],
+  });
+  handleDrawDoor(room, p.id);
+  assert.ok(room.pendingCardAction, 'kaempfen oder Geschenk annehmen');
+  const geschenk = room.pendingCardAction.options.find((o) => o.id === 'alt');
+  handleResolveCardChoice(room, p.id, geschenk.id);
+  assert.ok(room.pendingCardAction, 'die Wahl zwischen den zwei offenen Schaetzen steht an');
+  assert.strictEqual(room.pendingCardAction.options.length, 2);
+  handleResolveCardChoice(room, p.id, room.pendingCardAction.options[0].id);
+  assert.strictEqual(p.hand.length, 1, 'genau eine Karte wird behalten');
+  assert.strictEqual(room.treasureDiscard.length, 1, 'die andere geht auf den Ablagestapel');
+  assert.strictEqual(room.pendingCardAction, null, 'danach ist kein Dialog mehr offen');
 }
 
 // --- DER GANZ NORMALE HASE -------------------------------------------------
@@ -193,6 +218,82 @@ function mitKampf(room, monsterIds, actorId) {
   applyPrimitiveAction(room, p, { type: 'schatzTauschen', cardId: alt.id });
   assert.deepStrictEqual(p.hand, [neu.id], 'getauscht');
   assert.ok(room.treasureDiscard.includes(alt.id));
+}
+
+// --- Tod: Stufe bleibt, die anderen pluendern die Leiche -------------------
+// Gedruckte Regel: "Du verlierst alle deine Karten - die anderen pluendern die
+// Leiche. Stufe, Rasse und Klasse behaeltst du." Frueher setzte der Server auf
+// Stufe 1 und warf alles direkt auf die Ablagestapel.
+{
+  const ruestung = findCard('KETTEN-BIKINI');
+  const handkarte = findCard('MONSTERFUTTER');
+  const toter = makePlayer({ id: 'p1', level: 7, hand: [handkarte.id] });
+  toter.equipped.armor = ruestung.id;
+  const raeuber = makePlayer({ id: 'p2', name: 'B', level: 3 });
+  const room = makeRoom([toter, raeuber]);
+
+  applyPrimitiveAction(room, toter, { type: 'death' });
+  assert.strictEqual(toter.level, 7, 'der Tod kostet keine Stufe');
+  assert.ok(room.pendingCardAction, 'die Leiche wird gepluendert');
+  assert.strictEqual(room.pendingCardAction.playerId, 'p2');
+  assert.deepStrictEqual([...room.pendingCardAction.candidateIds].sort(), [handkarte.id, ruestung.id].sort());
+
+  handleResolveCardCardChoice(room, 'p2', ruestung.id);
+  assert.ok(raeuber.hand.includes(ruestung.id), 'die angelegte Ruestung wechselt den Besitzer');
+  assert.strictEqual(toter.equipped.armor, null);
+  handleResolveCardCardChoice(room, 'p2', handkarte.id);
+  assert.deepStrictEqual(raeuber.hand.sort(), [ruestung.id, handkarte.id].sort());
+  assert.strictEqual(toter.hand.length, 0, 'die Leiche ist leer');
+  assert.strictEqual(room.pendingCardAction, null, 'danach ist kein Dialog mehr offen');
+}
+{
+  // Allein am Tisch: nichts zu pluendern, alles geht auf die Ablagestapel.
+  const p = makePlayer({ id: 'p1', level: 5, hand: [findCard('MONSTERFUTTER').id] });
+  const room = makeRoom([p]);
+  applyPrimitiveAction(room, p, { type: 'death' });
+  assert.strictEqual(p.level, 5);
+  assert.strictEqual(p.hand.length, 0);
+  assert.strictEqual(room.treasureDiscard.length, 1);
+}
+
+// --- KALI: "Stirb, stirb, stirb - und setze auch deinen naechsten Zug aus" --
+{
+  const a = makePlayer({ id: 'p1', level: 4 });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([a, b, c], { turnIndex: 2, turnPhase: 'gabe' });
+  const spec = CONSEQUENCE_OVERRIDES['KALI'](a, room);
+  assert.deepStrictEqual(spec.actions.map((x) => x.type), ['death', 'skipNextTurn']);
+  applyPrimitiveAction(room, a, spec);
+  assert.strictEqual(a.level, 4, 'auch KALI kostet keine Stufe');
+  assert.strictEqual(a.skipTurns, 1);
+  endTurn(room); // p3 -> p1 (setzt aus) -> p2
+  assert.strictEqual(room.players[room.turnIndex].id, 'p2', 'p1 wird uebersprungen');
+  assert.strictEqual(a.skipTurns, 0, 'nur ein Zug faellt aus');
+  endTurn(room);
+  assert.strictEqual(room.players[room.turnIndex].id, 'p3');
+  endTurn(room);
+  assert.strictEqual(room.players[room.turnIndex].id, 'p1', 'danach ist p1 wieder normal dran');
+}
+
+// --- EINHEITSGRÖSSE: oberster TRAGBARER Gegenstand des Schatzstapels -------
+// Frueher ein Waehler ueber BEIDE Ablagestapel und alle Kartentypen - man
+// konnte ein Monster aus dem Tuerstapel ziehen oder die Karte selbst zurueck-
+// holen.
+{
+  const p = makePlayer({ id: 'p1' });
+  const room = makeRoom([p], {
+    doorDiscard: [findCard('MEDUSA', 'monster').id],
+    // alt -> neu: der SPASSBREMSE liegt oben, der KETTEN-BIKINI darunter.
+    treasureDiscard: [findCard('KETTEN-BIKINI').id, findCard('MONSTERFUTTER').id, findCard('SPASSBREMSE').id],
+  });
+  room.combat = { actorId: 'p1', helperId: null, monsterIds: [], enhancerIds: [], actorModifier: 0, monsterModifier: 0, treasureDelta: 0, backstabs: {}, mustFlee: false, classDiscards: {}, ready: {}, readySignature: null };
+  const spec = TREASURE_POWER_OVERRIDES['EINHEITSGRÖSSE'](p, room);
+  applyPrimitiveAction(room, p, spec);
+  assert.deepStrictEqual(p.hand, [findCard('SPASSBREMSE').id], 'der oberste tragbare Gegenstand');
+  assert.ok(!room.treasureDiscard.includes(findCard('SPASSBREMSE').id), 'und liegt nicht mehr im Ablagestapel');
+  assert.strictEqual(p.attachments.cheatedItemId, findCard('SPASSBREMSE').id, 'darf ohne die normalen Beschraenkungen angelegt werden');
+  assert.ok(!room.pendingCardAction, 'es gibt nichts zu waehlen');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

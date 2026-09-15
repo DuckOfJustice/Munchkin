@@ -11,7 +11,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, reactionHolders, rollWithWindow, ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS,
   newEquipped, handleAttemptFlee, handlePlayReactionCard, handlePassReaction, handleUseLamp,
-  handlePlayCombatCard, handleFleeReroll, botFleeRerollCard,
+  handlePlayCombatCard, handleFleeReroll, botFleeRerollCard, applyPrimitiveAction,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -101,13 +101,34 @@ function run() {
   }
   {
     // Eine verbundene, menschliche Person haelt die Karte -> Fenster offen.
-    const wuerfel = findCard('GEZINKTER WÜRFEL');
-    const room = makeRoom({ players: [makePlayer({ id: 'p1' }), makePlayer({ id: 'p2', hand: [wuerfel.id] })] });
+    // Die KATZENINTERVENTION gilt fuer JEDEN Wurf ("nachdem irgendjemand
+    // gewuerfelt hat"), also auch fuer den fremden von p1.
+    const katze = findCard('KATZENINTERVENTION');
+    const room = makeRoom({ players: [makePlayer({ id: 'p1' }), makePlayer({ id: 'p2', hand: [katze.id] })] });
     let gesehen = null;
     rollWithWindow(room, room.players[0], 'test', (roll) => { gesehen = roll; });
     assert.strictEqual(gesehen, null, 'mit Reaktionskarte darf noch nicht aufgeloest werden');
     assert.ok(room.pendingRoll, 'Fenster muss offen sein');
     assert.deepStrictEqual(reactionHolders(room, ROLL_REACTION_CARDS), ['p2']);
+  }
+  {
+    // GEZINKTER WÜRFEL: "Spiel ihn, nachdem DU ... wuerfeln musstest" - auf
+    // einen FREMDEN Wurf gibt es damit gar kein Fenster.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const room = makeRoom({ players: [makePlayer({ id: 'p1' }), makePlayer({ id: 'p2', hand: [wuerfel.id] })] });
+    let gesehen = null;
+    rollWithWindow(room, room.players[0], 'test', (roll) => { gesehen = roll; });
+    assert.ok(gesehen !== null, 'fremder Wurf: der gezinkte Wuerfel oeffnet kein Fenster');
+    assert.ok(!room.pendingRoll);
+  }
+  {
+    // Beim EIGENEN Wurf dagegen schon.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const room = makeRoom({ players: [makePlayer({ id: 'p1', hand: [wuerfel.id] }), makePlayer({ id: 'p2' })] });
+    let gesehen = null;
+    rollWithWindow(room, room.players[0], 'test', (roll) => { gesehen = roll; });
+    assert.strictEqual(gesehen, null, 'eigener Wurf: Fenster muss offen sein');
+    assert.deepStrictEqual(room.pendingRoll.holders, ['p1']);
   }
 
   // -------------------------------------------------------------------
@@ -116,23 +137,24 @@ function run() {
   {
     const wuerfel = findCard('GEZINKTER WÜRFEL');
     const room = fleeRoom(['LAHMER GOBLIN'], null, null);
-    room.players[1].hand = [wuerfel.id];
+    // Der Wuerfel liegt bei p1 - nur wer selbst wuerfelt, darf ihn spielen.
+    room.players[0].hand = [wuerfel.id];
     handleAttemptFlee(room, 'p1', 0);
-    assert.ok(room.pendingRoll, 'mit Karte auf einer fremden Hand muss der Wurf erst im Fenster stehen');
+    assert.ok(room.pendingRoll, 'mit eigener Karte muss der Wurf erst im Fenster stehen');
     assert.strictEqual(room.combat.actorId, 'p1', 'der Kampf selbst bleibt bis zur Aufloesung unveraendert stehen');
     assert.strictEqual(room.dieRoll, null, 'die Wuerfelanimation darf vor der Aufloesung noch nicht gesetzt sein');
 
     // Fremde Spielerin darf nicht mitreden.
-    handlePlayReactionCard(room, 'p1', wuerfel.id, 6);
+    handlePlayReactionCard(room, 'p2', wuerfel.id, 6);
     assert.ok(room.pendingRoll, 'nur die Halterin des Fensters darf reagieren');
 
-    // p2 aendert den Wurf auf 6 -> total 6, damit garantiert Erfolg.
-    const handVorher = room.players[1].hand.length;
-    handlePlayReactionCard(room, 'p2', wuerfel.id, 6);
+    // p1 aendert den eigenen Wurf auf 6 -> total 6, damit garantiert Erfolg.
+    const handVorher = room.players[0].hand.length;
+    handlePlayReactionCard(room, 'p1', wuerfel.id, 6);
     assert.ok(!room.pendingRoll, 'nach dem Spielen loest sich das Fenster auf');
     assert.strictEqual(room.dieRoll.roll, 6, 'der geaenderte Wurf muss uebernommen werden');
     assert.strictEqual(room.dieRoll.success, true, 'Wurf 6 muss gegen den Lahmen Goblin gelingen');
-    assert.strictEqual(room.players[1].hand.length, handVorher - 1, 'die Karte wird beim Spielen abgelegt');
+    assert.strictEqual(room.players[0].hand.length, handVorher - 1, 'die Karte wird beim Spielen abgelegt');
     assert.ok(room.treasureDiscard.includes(wuerfel.id), 'und landet auf dem Schatz-Ablagestapel');
     done(room);
   }
@@ -140,14 +162,81 @@ function run() {
     // Alle Halter:innen passen -> der urspruengliche Wurf gilt unveraendert.
     const wuerfel = findCard('GEZINKTER WÜRFEL');
     const room = fleeRoom(['FILZLAUSE'], null, null); // FLEE_IMPOSSIBLE: Erfolg ist unmoeglich, Ergebnis bleibt trotzdem eindeutig pruefbar
-    room.players[1].hand = [wuerfel.id];
+    room.players[0].hand = [wuerfel.id];
     handleAttemptFlee(room, 'p1', 0);
     assert.ok(room.pendingRoll);
     const urspruenglich = room.pendingRoll.roll;
-    handlePassReaction(room, 'p2');
+    handlePassReaction(room, 'p1');
     assert.ok(!room.pendingRoll, 'nachdem alle Halter:innen gepasst haben, loest sich das Fenster auf');
     assert.strictEqual(room.dieRoll.roll, urspruenglich, 'ohne Kartenspiel bleibt der urspruengliche Wurf stehen');
     assert.strictEqual(room.dieRoll.success, false, 'vor Filzlaeusen gibt es kein Entkommen, egal welcher Wurf');
+    done(room);
+  }
+
+  // -------------------------------------------------------------------
+  // Der Wuerfel gilt fuer JEDEN Wurf ("aus einem beliebigen Grund"), nicht
+  // nur fuer den Weglaufwurf: Konsequenz-Wuerfe laufen ueber wurfMitFenster.
+  // -------------------------------------------------------------------
+  {
+    // Ohne Karte am Tisch: synchron und sofort angewendet (bitgleich zu
+    // frueher - das schuetzt alle bestehenden Wuerfelpfade).
+    const p = makePlayer({ id: 'p1', level: 10 });
+    const room = makeRoom({ players: [p, makePlayer({ id: 'p2', name: 'B' })] });
+    const desc = applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    assert.ok(/Würfelwurf \d/.test(desc), desc);
+    assert.ok(p.level < 10 && p.level >= 4, 'Stufen sofort verloren');
+    assert.ok(!room.pendingRoll);
+    done(room);
+  }
+  {
+    // Mit eigenem GEZINKTEN WÜRFEL: erst Fenster, dann wirkt der GEAENDERTE
+    // Wurf.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const p = makePlayer({ id: 'p1', level: 10, hand: [wuerfel.id] });
+    const room = makeRoom({ players: [p, makePlayer({ id: 'p2', name: 'B' })] });
+    const desc = applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    assert.ok(room.pendingRoll, 'auf den Stufenverlust-Wurf darf reagiert werden');
+    assert.strictEqual(p.level, 10, 'vor der Aufloesung passiert nichts');
+    assert.ok(/reagiert/.test(desc), desc);
+    handlePlayReactionCard(room, 'p1', wuerfel.id, 1);
+    assert.strictEqual(p.level, 9, 'der geaenderte Wurf (1) kostet genau 1 Stufe');
+    assert.ok(!room.pendingRoll);
+    done(room);
+  }
+  {
+    // Passen laesst den urspruenglichen Wurf gelten.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const p = makePlayer({ id: 'p1', level: 10, hand: [wuerfel.id] });
+    const room = makeRoom({ players: [p, makePlayer({ id: 'p2', name: 'B' })] });
+    applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    const wurf = room.pendingRoll.roll;
+    handlePassReaction(room, 'p1');
+    assert.strictEqual(p.level, 10 - wurf, 'ohne Kartenspiel gilt der urspruengliche Wurf');
+    done(room);
+  }
+
+  {
+    // Zwei Wuerfe hintereinander (zwei Monster mit Wuerfel-Schlimme-Dinge in
+    // EINEM verlorenen Kampf): room.pendingRoll traegt nur EINEN. Das zweite
+    // Fenster darf das erste nicht ueberschreiben - sonst fiele dessen
+    // Wirkung ersatzlos aus. Der zweite Wurf laeuft deshalb synchron.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const p = makePlayer({ id: 'p1', level: 10, hand: [wuerfel.id] });
+    const room = makeRoom({ players: [p, makePlayer({ id: 'p2', name: 'B' })] });
+
+    applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    const ersterWurf = room.pendingRoll.roll;
+    assert.strictEqual(p.level, 10, 'der erste Wurf wartet im Fenster');
+
+    const zweiter = applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    const zweiterWurf = Number(/Würfelwurf (\d)/.exec(zweiter)[1]);
+    assert.strictEqual(room.pendingRoll.roll, ersterWurf, 'das offene Fenster bleibt unangetastet');
+    assert.strictEqual(p.level, 10 - zweiterWurf, 'der zweite Wurf wirkt sofort und geht nicht verloren');
+
+    // Der gezinkte Wuerfel gilt weiterhin dem ERSTEN Wurf.
+    handlePlayReactionCard(room, 'p1', wuerfel.id, 1);
+    assert.strictEqual(p.level, 10 - zweiterWurf - 1, 'danach wirkt der geaenderte erste Wurf');
+    assert.ok(!room.pendingRoll);
     done(room);
   }
 

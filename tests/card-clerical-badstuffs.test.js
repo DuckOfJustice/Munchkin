@@ -229,5 +229,35 @@ const spec = (name, player, room) => {
   assert.strictEqual(p.activeCurses[0].amount, -5);
 }
 
+// --- Nachtraege aus dem Review (2026-09-14) ---------------------------------
+// PACKRATTE: "Erzwungener Tausch! Wirf den Gegenstand mit dem hoechsten Wert
+// ab, den du im Spiel hast, UND ziehe einen offenen Schatz." Der Schatz war
+// nicht implementiert - die Schlimmen Dinge waren ein reiner Verlust.
+{
+  const helm = findCard('GEILER HELM');
+  const beute = findCard('WUNSCHRING');
+  const p = makePlayer({});
+  p.equipped.head = helm.id;
+  const room = makeRoom([p]);
+  room.treasureDeck = [beute.id];
+  applyPrimitiveAction(room, p, spec('PACKRATTE', p, room));
+  assert.strictEqual(p.equipped.head, null, 'der teuerste Gegenstand ist weg');
+  assert.deepStrictEqual(p.hand, [beute.id], 'dafuer kommt der offene Schatz auf die Hand');
+}
+
+// --- ROTZ-ELEMENTAR: "Du verlierst alle Gegenstaende, die einen Bonus fuer
+// deine aktuelle(n) Rasse(n) gewaehren." Fuer ORK gab es kein Adjektiv in
+// RACE_ADJECTIVE_DE, also behielt ein Ork den SCHÄDELHELM ("+2 Bonus fuer
+// Orks") einfach. ---------------------------------------------------------
+{
+  const ork = findCard('ORK', 'door_other');
+  const helm = findCard('SCHÄDELHELM');
+  const p = makePlayer({ races: [ork.id] });
+  p.equipped.head = helm.id;
+  const room = makeRoom([p]);
+  const desc = applyPrimitiveAction(room, p, spec('ROTZ-ELEMENTAR', p, room));
+  assert.strictEqual(p.equipped.head, null, `der Ork-Helm haette weg gemusst: ${desc}`);
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-clerical-badstuffs: ok');

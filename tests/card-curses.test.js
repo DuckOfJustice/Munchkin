@@ -12,6 +12,7 @@ const {
   handleDrawDoor, resolveCombatWin, applyPrimitiveAction, TREASURE_POWER_OVERRIDES,
   CONSEQUENCE_OVERRIDES, LINGERING_CURSES, refreshCombatReady, combatAllReady,
   handleSetCombatReady, handlePlayCurseFromHand, handleAckConsequence,
+  rollWithWindow, equippedItemIds,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -70,7 +71,10 @@ function run() {
   {
     const streitkolben = findCard('SCHARFER STREITKOLBEN'); // +4, keine Ruestung
     const { room, m } = combatRoom('LAHMER GOBLIN', { hand: [streitkolben.id] });
-    handleEquipItem(room, 'p1', streitkolben.id);
+    // Im Kampf darf nicht mehr umgeruestet werden (darfAusruesten) - hier ist
+    // der Gegenstand nur Vorbedingung, also direkt anlegen.
+    room.players[0].hand = [];
+    room.players[0].equipped.hands[0] = streitkolben.id;
     assert.strictEqual(combatTotals(room).playerStrength, 5 + 4, 'Stufe 5 plus Gegenstand +4 ohne Fluch');
 
     addActiveCurse(room, room.players[0], 'MIESER SPIEGEL', findCard('MIESER SPIEGEL').id);
@@ -84,7 +88,8 @@ function run() {
   {
     const mithril = findCard('MITHRIL-RÜSTUNG'); // +3, Ruestung
     const { room } = combatRoom('LAHMER GOBLIN', { hand: [mithril.id] });
-    handleEquipItem(room, 'p1', mithril.id);
+    room.players[0].hand = [];
+    room.players[0].equipped.armor = mithril.id;
     addActiveCurse(room, room.players[0], 'MIESER SPIEGEL', findCard('MIESER SPIEGEL').id);
     assert.strictEqual(combatTotals(room).playerStrength, 5 + 3,
       'Ruestungsbonus ist die ausdrueckliche Ausnahme');
@@ -311,6 +316,49 @@ function run() {
       assert.ok(p.activeCurses[0].hinweis && p.activeCurses[0].hinweis.length > 10,
         `${name} braucht einen lesbaren Hinweis fuer die Anzeige`);
     });
+    done(room);
+  }
+
+  // -------------------------------------------------------------------
+  // HUHN AUF DEINEM KOPF: "-1 auf alle Wuerfe" - gilt jetzt mechanisch
+  // (rollWithWindow), WINZIGE HÄNDE sperren zweihaendige Gegenstaende.
+  // -------------------------------------------------------------------
+  {
+    const room = makeRoom();
+    const p = room.players[0];
+    addActiveCurse(room, p, 'HUHN AUF DEINEM KOPF', findCard('HUHN AUF DEINEM KOPF').id);
+    const wuerfe = [];
+    for (let i = 0; i < 300; i++) {
+      let gesehen = null;
+      rollWithWindow(room, p, 'test', (r) => { gesehen = r; });
+      wuerfe.push(gesehen);
+    }
+    assert.ok(wuerfe.every((w) => w >= 1 && w <= 5), 'mit dem Huhn faellt nie eine 6');
+    assert.ok(wuerfe.includes(1) && wuerfe.includes(5), 'der Rest des Bereichs kommt vor');
+
+    // Gegenprobe: ohne Fluch muss der volle Bereich 1..6 erreichbar bleiben -
+    // rollWithWindow darf sich ohne Fluch nicht anders verhalten als vorher.
+    clearActiveCurse(room, p, 0);
+    const ohne = [];
+    for (let i = 0; i < 300; i++) {
+      let gesehen = null;
+      rollWithWindow(room, p, 'test', (r) => { gesehen = r; });
+      ohne.push(gesehen);
+    }
+    assert.ok(ohne.includes(6) && ohne.includes(1), 'ohne Fluch bleibt es bei 1..6');
+    done(room);
+  }
+  {
+    const zweihand = ALL_CARDS.find((c) => c.category === 'item' && c.handsCost === 2);
+    const einhand = ALL_CARDS.find((c) => c.category === 'item' && c.handsCost === 1);
+    const room = makeRoom();
+    const p = room.players[0];
+    p.hand = [zweihand.id, einhand.id];
+    addActiveCurse(room, p, 'WINZIGE HÄNDE', findCard('WINZIGE HÄNDE').id);
+    handleEquipItem(room, 'p1', zweihand.id);
+    assert.ok(!equippedItemIds(p).includes(zweihand.id), 'zweihaendig geht mit winzigen Haenden nicht');
+    handleEquipItem(room, 'p1', einhand.id);
+    assert.ok(equippedItemIds(p).includes(einhand.id), 'einhaendig schon');
     done(room);
   }
 

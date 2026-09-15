@@ -19,10 +19,14 @@ if (testFiles.length === 0) {
 let failed = 0;
 for (const file of testFiles) {
   console.log(`\n=== ${file} ===`);
-  const result = spawnSync(process.execPath, [path.join(__dirname, file)], { stdio: 'inherit' });
+  // timeout: ohne den haengt ein blockierender Test npm test endlos, statt
+  // fehlzuschlagen (z.B. ein offener Timer oder ein Socket, der nie antwortet).
+  const result = spawnSync(process.execPath, [path.join(__dirname, file)], { stdio: 'inherit', timeout: 120000 });
   if (result.status !== 0) {
     failed++;
-    console.error(`FEHLGESCHLAGEN: ${file}`);
+    console.error(result.error && result.error.code === 'ETIMEDOUT'
+      ? `FEHLGESCHLAGEN (Zeitueberschreitung nach 120s): ${file}`
+      : `FEHLGESCHLAGEN: ${file}`);
   }
 }
 

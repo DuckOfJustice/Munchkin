@@ -73,6 +73,20 @@ function run() {
   assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['FLÜSSIGKLINGE'](makePlayer()), { type: 'modifier', side: 'actor', amount: 4 });
 
   const elfId = findCard('ELF', 'race').id;
+  // LECKERER KUCHEN: +2 fuer beide Seiten, +4 vom Ork geworfen, Halblinge
+  // duerfen stattdessen essen (1 Stufe) - Halbling schlaegt Ork nicht, es
+  // bleibt eine Wahl mit dem jeweils richtigen Wurf-Bonus.
+  const halblingId = findCard('HALBLING', 'race').id;
+  const orkRasseId = ALL_CARDS.find((c) => c.name === 'ORK' && c.category === 'door_other').id;
+  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer()), { type: 'modifier', side: 'both', amount: 2 });
+  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer({ races: [orkRasseId] })), { type: 'modifier', side: 'both', amount: 4 }, 'vom Ork geworfen -> +4');
+  const kuchenHalbling = COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer({ races: [halblingId] }));
+  assert.strictEqual(kuchenHalbling.type, 'choice', 'Halbling bekommt die Wahl');
+  assert.deepStrictEqual(kuchenHalbling.options.map((o) => o.action), [
+    { type: 'modifier', side: 'both', amount: 2 },
+    { type: 'levelUp', amount: 1 },
+  ], 'werfen oder essen');
+
   const yuppieRoom = { players: [makePlayer({ id: 'p1', races: [elfId] }), makePlayer({ id: 'p2' })], combat: { actorId: 'p1', helperId: 'p2', monsterIds: [] } };
   assert.deepStrictEqual(
     COMBAT_POTION_OVERRIDES['YUPPIE-WASSER'](makePlayer({ id: 'p1', races: [elfId] }), { players: yuppieRoom.players, combat: yuppieRoom.combat }),
@@ -615,7 +629,9 @@ function run() {
   assert.ok(deathRoom.treasureDiscard.includes(deathTreasureCard.id), 'Schatzkarte aus der Hand gehört auf den Schatz-Ablagestapel');
   deathRoom.doorDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'door', 'auf dem Tür-Ablagestapel darf nur type=door liegen'));
   deathRoom.treasureDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'treasure', 'auf dem Schatz-Ablagestapel darf nur type=treasure liegen'));
-  assert.strictEqual(deathRoom.players[0].level, 1, 'Tod setzt auf Stufe 1 zurück');
+  // Gedruckte Regel: "Du behaeltst deine Stufe, Rasse und Klasse." Frueher
+  // setzte der Tod hier auf Stufe 1 zurueck.
+  assert.strictEqual(deathRoom.players[0].level, 7, 'Tod laesst die Stufe unveraendert');
   assert.strictEqual(deathRoom.players[0].hand.length, 0, 'Tod leert die Hand');
 
   // -------------------------------------------------------------------
@@ -678,7 +694,12 @@ function run() {
   const krakzilla = { name: 'KRAKZILLA' };
   const jMonster = { name: 'JABBERWOCK' };
   assert.strictEqual(ITEM_CONDITIONAL_BONUS['GEILER HELM'](makePlayer(), [{ name: 'X' }]), 0, 'ohne Elf kein Zusatzbonus');
-  assert.strictEqual(ITEM_CONDITIONAL_BONUS['GEILER HELM'](makePlayer({ races: [elfId] }), [{ name: 'X' }]), 1, 'Elf bekommt +1 Zusatzbonus');
+  assert.strictEqual(ITEM_CONDITIONAL_BONUS['GEILER HELM'](makePlayer({ races: [elfId] }), [{ name: 'X' }]), 2, 'Elf bekommt +2 Zusatzbonus (insgesamt +3)');
+  // SCHÄDELHELM ("+2 Bonus für Orks", Grundbonus 2): dieselbe Bauform wie der
+  // GEILER HELM - der Zusatz gilt nur fuer Orks, alle anderen bleiben bei 2.
+  const orkId = ALL_CARDS.find((c) => c.name === 'ORK' && c.category === 'door_other').id;
+  assert.strictEqual(ITEM_CONDITIONAL_BONUS['SCHÄDELHELM'](makePlayer(), [{ name: 'X' }]), 0, 'ohne Ork kein Zusatzbonus');
+  assert.strictEqual(ITEM_CONDITIONAL_BONUS['SCHÄDELHELM'](makePlayer({ races: [orkId] }), [{ name: 'X' }]), 2, 'Ork bekommt +2 Zusatzbonus (insgesamt +4)');
   assert.strictEqual(ITEM_CONDITIONAL_BONUS['VORPALE KLINGE'](makePlayer(), [jMonster]), 10, 'Monster mit J -> +10');
   assert.strictEqual(ITEM_CONDITIONAL_BONUS['VORPALE KLINGE'](makePlayer(), [krakzilla]), 0, 'Monster ohne J -> kein Zusatzbonus');
   assert.strictEqual(ITEM_CONDITIONAL_BONUS['ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT'](makePlayer(), [krakzilla]), -4, 'gegen Krakzilla wird der Grundbonus (+4) aufgehoben');

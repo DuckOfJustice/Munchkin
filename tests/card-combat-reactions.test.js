@@ -8,7 +8,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, combatTotals, handlePlayCombatCard, handleResolveCardChoice,
   handleResolveCardTarget, handleAttemptFlee, handleAckConsequence, resolveCombatWin,
-  newEquipped, handleEquipItem, equippedItemIds, COMBAT_REACTION_CARDS,
+  newEquipped, equippedItemIds, COMBAT_REACTION_CARDS,
   handleSetCombatReady, scheduleBotActionsIfNeeded,
 } = require('../server.js');
 
@@ -89,6 +89,79 @@ function run() {
     done(room);
   }
 
+  // KUMPEL, zweite Haelfte: "... und mit den gleichen Monsterverstaerker-
+  // Karten." Ein vorher gespielter Verstaerker muss also doppelt zaehlen -
+  // Kampfbonus wie Schatzzahl. Traenke (monsterModifier aus anderer Quelle)
+  // duerfen dagegen NICHT mitverdoppelt werden.
+  {
+    const goblin = byName('LAHMER GOBLIN');     // Stufe 1, 1 Schatz
+    const gigantisch = byName('GIGANTISCH');    // +10, 2 Extraschaetze
+    const kumpel = byName('KUMPEL');
+    const a = makePlayer('a', { hand: [gigantisch.id, kumpel.id] });
+    const room = combatRoom([a, makePlayer('b')], [goblin.id]);
+    handlePlayCombatCard(room, 'a', gigantisch.id);
+    assert.strictEqual(combatTotals(room).monsterStrength, 1 + 10, 'Verstaerker zaehlt einmal');
+    room.combat.monsterModifier += 5;           // ein Trank auf die Monsterseite
+    handlePlayCombatCard(room, 'a', kumpel.id);
+    assert.strictEqual(combatTotals(room).monsterStrength, (1 + 10) + (1 + 10) + 5,
+      'der Zwilling bringt Stufe UND Verstaerker mit, der Trank bleibt einmalig');
+    resolveCombatWin(room);
+    // 1 Schatz je Goblin (2) + 2 Extraschaetze je Verstaerker-Kopie (4).
+    assert.strictEqual(a.hand.length, 6, 'auch die Extraschaetze des Verstaerkers zaehlen doppelt');
+    done(room);
+  }
+
+  // POLLYVERWANDLUNGSTRANK: "Verwandelt EIN Monster in einen Papagei, der
+  // wegfliegt und seinen Schatz zuruecklaesst." Bei zwei Monstern darf er
+  // nicht den ganzen Kampf beenden (und nicht den Schatz beider ausschuetten).
+  {
+    const goblin = byName('LAHMER GOBLIN');   // Stufe 1, 1 Schatz
+    const drache = byName('PLUTONIUMDRACHE'); // Stufe 20, 5 Schaetze
+    const polly = byName('POLLYVERWANDLUNGSTRANK');
+    const a = makePlayer('a', { hand: [polly.id] });
+    const room = combatRoom([a, makePlayer('b')], [goblin.id, drache.id]);
+    handlePlayCombatCard(room, 'a', polly.id);
+    assert.ok(room.pendingCardAction, 'bei zwei Monstern muss eines gewaehlt werden');
+    const wahl = room.pendingCardAction.options.find((o) => o.label.includes(drache.name));
+    handleResolveCardChoice(room, 'a', wahl.id);
+    assert.ok(room.combat, 'der Kampf laeuft weiter');
+    assert.deepStrictEqual(room.combat.monsterIds, [goblin.id], 'nur der Drache ist weg');
+    assert.strictEqual(a.hand.length, 5, 'sein Schatz (5) bleibt liegen, der des Goblins nicht');
+    done(room);
+  }
+  {
+    // Einziges Monster: wie bisher - Kampf vorbei, Schatz bleibt liegen.
+    const goblin = byName('LAHMER GOBLIN');
+    const polly = byName('POLLYVERWANDLUNGSTRANK');
+    const a = makePlayer('a', { hand: [polly.id] });
+    const room = combatRoom([a, makePlayer('b')], [goblin.id]);
+    handlePlayCombatCard(room, 'a', polly.id);
+    assert.strictEqual(room.combat, null, 'kein Monster mehr -> Kampf vorbei');
+    assert.strictEqual(a.hand.length, 1, '1 zurueckgelassener Schatz');
+    assert.strictEqual(a.level, 5, 'aber keine Stufe');
+    done(room);
+  }
+
+  // ENTLASSUNGSGLOCKE auf eine KUMPEL-Kopie: die Karte darf NICHT in den
+  // Tuerstapel zurueck, solange die zweite Kopie noch kaempft - sonst laege
+  // dieselbe ID gleichzeitig im Stapel und im Kampf.
+  {
+    const goblin = byName('LAHMER GOBLIN');
+    const kumpel = byName('KUMPEL');
+    const glocke = byName('ENTLASSUNGSGLOCKE');
+    const a = makePlayer('a', { hand: [kumpel.id, glocke.id] });
+    const room = combatRoom([a, makePlayer('b')], [goblin.id]);
+    handlePlayCombatCard(room, 'a', kumpel.id);
+    assert.strictEqual(room.combat.monsterIds.length, 2, 'Testvoraussetzung: zwei Kopien');
+    handlePlayCombatCard(room, 'a', glocke.id);
+    assert.ok(room.pendingCardAction, 'zwei Monster -> Wahl');
+    handleResolveCardChoice(room, 'a', room.pendingCardAction.options[0].id);
+    assert.deepStrictEqual(room.combat.monsterIds, [goblin.id], 'eine Kopie kaempft weiter');
+    assert.ok(!room.doorDeck.includes(goblin.id), 'und liegt nicht gleichzeitig im Tuerstapel');
+    assert.ok(!room.doorDiscard.includes(goblin.id), 'und auch nicht im Ablagestapel');
+    done(room);
+  }
+
   // -------------------------------------------------------------------
   // WANDERNDES MONSTER: haengt ein Monster von der Hand an den Kampf an.
   // -------------------------------------------------------------------
@@ -157,7 +230,10 @@ function run() {
     const a = makePlayer('a', { hand: [hilfMir.id] });
     const b = makePlayer('b', { hand: [ruestung.id] });
     const room = combatRoom([a, b], [byName('LAHMER GOBLIN').id]);
-    handleEquipItem(room, 'b', ruestung.id);
+    // Direkt angelegt statt ueber handleEquipItem: im Kampf darf niemand mehr
+    // umruesten (darfAusruesten), und hier ist die Ruestung nur Vorbedingung.
+    b.hand = b.hand.filter((id) => id !== ruestung.id);
+    b.equipped.armor = ruestung.id;
     assert.ok(equippedItemIds(b).includes(ruestung.id), 'Testvoraussetzung: B traegt die Ruestung');
     handlePlayCombatCard(room, 'a', hilfMir.id);
     assert.strictEqual(room.pendingCardAction.kind, 'targetPlayer');
@@ -195,7 +271,8 @@ function run() {
     const b = makePlayer('b', { hand: [ruestung.id] });
     const c = makePlayer('c', { hand: [hilfMir.id] });   // steht NICHT im Kampf
     const room = combatRoom([a, b, c], [byName('LAHMER GOBLIN').id]);
-    handleEquipItem(room, 'b', ruestung.id);
+    b.hand = b.hand.filter((id) => id !== ruestung.id);
+    b.equipped.armor = ruestung.id;
     handlePlayCombatCard(room, 'c', hilfMir.id);
     assert.ok(c.hand.includes(hilfMir.id), 'die Karte bleibt auf der Hand');
     assert.strictEqual(room.pendingCardAction, null, 'und es wird keine Zielauswahl geoeffnet');

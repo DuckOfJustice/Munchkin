@@ -176,6 +176,10 @@
 
   function me() { return state.players.find((p) => p.id === myInfo.playerId); }
   function isMyTurn() { return state.turnPlayerId === myInfo.playerId; }
+  // Spiegelt darfAusruesten(room, player) im Server: Ausruestung aendert man
+  // ueberall, nur nicht mitten im Kampf. Verkaufen ist strenger (eigener Zug).
+  function darfAusruesten() { return !state.combat && state.phase !== 'gameend'; }
+  function darfVerkaufen() { return darfAusruesten() && isMyTurn() && state.turnPhase !== 'vorbereitung'; }
 
   function renderLobby() {
     $('lobbyCode').textContent = state.code;
@@ -430,7 +434,9 @@
         tuer: 'Phase 1: Tür eintreten', aerger: 'Phase 2: Auf Ärger aus sein',
         pluendern: 'Phase 3: Raum plündern', gabe: 'Phase 4: Milde Gabe', kampf: 'Kampf!',
       }[state.turnPhase] || '';
-      $('turnBanner').textContent = `${tp ? tp.name : '?'} ist am Zug - ${phaseLabel}`;
+      $('turnBanner').textContent = state.turnPhase === 'vorbereitung'
+        ? 'Vorbereitung: Ausrüstung anlegen - die erste Runde startet, sobald alle bereit sind.'
+        : `${tp ? tp.name : '?'} ist am Zug - ${phaseLabel}`;
     }
 
     playDoorReveal();
@@ -441,6 +447,8 @@
     renderDiscardPeek();
     renderReveal();
     renderCombat();
+    renderPrep();
+    renderRollReaction();
     renderConsequence();
     renderCardAction();
     renderPhaseActions();
@@ -517,9 +525,9 @@
     const badges = document.createElement('div');
     badges.className = 'row gap wrap';
     badges.style.marginBottom = '12px';
-    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)')));
-    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
-    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
+    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
+    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
     if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
     body.appendChild(badges);
     if ((p.activeCurses || []).length) {
@@ -869,18 +877,9 @@
       div.appendChild(el);
     });
 
-    // Bedingtes Reaktionsfenster: GEZINKTER WÜRFEL (auf den Weglaufwurf) und
-    // KLEBERFLÄSCHCHEN (auf eine gelungene Flucht). Beide Felder kommen
-    // direkt vom Server - das eigentliche Ausspielen passiert an der
-    // jeweiligen Handkarte (siehe handActionsFor), hier nur Hinweis + Passen.
-    if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId)) {
-      const row = document.createElement('div');
-      row.className = 'row gap wrap';
-      const werfer = state.players.find((p) => p.id === state.pendingRoll.playerId);
-      row.appendChild(textNode(`${werfer ? werfer.name : '?'} hat ${state.pendingRoll.roll} gewürfelt - du darfst noch mit "GEZINKTER WÜRFEL" reagieren.`));
-      row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
-      div.appendChild(row);
-    }
+    // KLEBERFLÄSCHCHEN (auf eine gelungene Flucht) - das Wurf-Fenster steht
+    // in renderRollReaction, weil gewuerfelt auch ausserhalb eines Kampfes
+    // wird (Dungeon-Casino, Amulett, Schlimme Dinge).
     if (c.escapeReactionOffer && c.escapeReactionOffer.includes(myInfo.playerId)) {
       const row = document.createElement('div');
       row.className = 'row gap wrap';
@@ -1054,6 +1053,56 @@
     box.appendChild(div);
   }
 
+  // Wurf-Reaktionsfenster (GEZINKTER WÜRFEL, KATZENINTERVENTION). Bewusst
+  // ausserhalb von renderCombat: gewuerfelt wird auch ohne Kampf, und ohne
+  // diesen Kasten gaebe es dann keinen "Passen"-Knopf - das Spiel haenge.
+  // Das Ausspielen selbst passiert an der Handkarte (siehe handActionsFor).
+  // Wurf-Reaktionsfenster (GEZINKTER WÜRFEL, KATZENINTERVENTION). Bewusst
+  // ausserhalb von renderCombat: gewuerfelt wird auch ohne Kampf, und ohne
+  // diesen Kasten gaebe es dann keinen "Passen"-Knopf - das Spiel haenge.
+  // Das Ausspielen selbst passiert an der Handkarte (siehe handActionsFor).
+  // Vorbereitungsrunde vor dem ersten Zug: alle legen gleichzeitig ihre
+  // Ausruestung an und melden sich bereit.
+  function renderPrep() {
+    const box = $('prepArea');
+    box.innerHTML = '';
+    if (state.turnPhase !== 'vorbereitung') return;
+    const bereit = state.prepReady || {};
+    const div = document.createElement('div');
+    div.className = 'consequencebox';
+    div.innerHTML = '<h3>⚔️ Vorbereitung</h3>'
+      + '<p>Legt jetzt eure Ausrüstung an - danach geht das nur noch im eigenen Zug und nie im Kampf.</p>';
+    const liste = document.createElement('div');
+    liste.className = 'row gap wrap';
+    state.players.forEach((p) => {
+      liste.appendChild(smallTag(`${bereit[p.id] ? '✅' : '⏳'} ${p.name}`, bereit[p.id] ? '#2e7d32' : '#777'));
+    });
+    div.appendChild(liste);
+    const row = document.createElement('div');
+    row.className = 'row gap wrap';
+    row.style.marginTop = '8px';
+    const btn = mkBtn(bereit[myInfo.playerId] ? 'Doch noch nicht bereit' : 'Bereit', () => socket.emit('prepReady', { ready: !bereit[myInfo.playerId] }));
+    if (!bereit[myInfo.playerId]) btn.className = 'primary';
+    row.appendChild(btn);
+    div.appendChild(row);
+    box.appendChild(div);
+  }
+
+  function renderRollReaction() {
+    const box = $('rollReactionArea');
+    box.innerHTML = '';
+    if (!state.pendingRoll || !state.pendingRoll.holders.includes(myInfo.playerId)) return;
+    const div = document.createElement('div');
+    div.className = 'consequencebox';
+    const werfer = state.players.find((p) => p.id === state.pendingRoll.playerId);
+    const row = document.createElement('div');
+    row.className = 'row gap wrap';
+    row.appendChild(textNode(`${werfer ? werfer.name : '?'} hat ${state.pendingRoll.roll} gewürfelt - du darfst noch mit einer Würfel-Reaktionskarte reagieren.`));
+    row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
+    div.appendChild(row);
+    box.appendChild(div);
+  }
+
   function renderConsequence() {
     const box = $('consequenceArea');
     box.innerHTML = '';
@@ -1187,7 +1236,10 @@
   function renderPhaseActions() {
     const box = $('phaseActions');
     box.innerHTML = '';
-    if (state.phase === 'gameend' || state.combat || state.pendingConsequence || state.pendingCardAction) return;
+    // pendingRoll: solange ein Wurf-Fenster offen ist, nimmt der Server keine
+    // Phasenaktion an (siehe handleDrawDoor) - dann auch keinen Knopf zeigen.
+    if (state.phase === 'gameend' || state.combat || state.pendingConsequence
+      || state.pendingCardAction || state.pendingRoll || state.turnPhase === 'vorbereitung') return;
     if (!isMyTurn()) { box.appendChild(textNode('Warte, bis du an der Reihe bist...')); return; }
 
     if (state.turnPhase === 'tuer' && !state.revealedDoorCard) {
@@ -1225,13 +1277,13 @@
 
     const badges = $('myBadges');
     badges.innerHTML = '';
-    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)')));
-    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
-    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
+    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
+    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
     if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
-    if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)'));
-    if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)'));
-    if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)'));
+    if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)', p.raceCapCard));
+    if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)', p.classCapCard));
+    if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)', p.powerGroupCapCard));
     curseTags(p, badges);
 
     const equip = $('myEquip');
@@ -1260,11 +1312,15 @@
         el.classList.add('clickable');
         el.title = 'Karte groß ansehen';
         el.onclick = () => openCardModal(cardId);
-        const btn = document.createElement('button');
-        btn.className = 'small'; btn.textContent = 'ablegen';
-        // stopPropagation: sonst oeffnet das Ablegen zugleich die Grossansicht.
-        btn.onclick = (e) => { e.stopPropagation(); socket.emit('unequipItem', { cardId }); };
-        el.appendChild(btn);
+        // Ablegen ist dieselbe Ausruestungsaenderung wie Anlegen - im Kampf
+        // weist der Server sie ab, dann gibt es hier auch keinen Knopf.
+        if (darfAusruesten()) {
+          const btn = document.createElement('button');
+          btn.className = 'small'; btn.textContent = 'ablegen';
+          // stopPropagation: sonst oeffnet das Ablegen zugleich die Grossansicht.
+          btn.onclick = (e) => { e.stopPropagation(); socket.emit('unequipItem', { cardId }); };
+          el.appendChild(btn);
+        }
       } else {
         el.innerHTML = `<b>${label}</b><span class="hint">leer</span>`;
       }
@@ -1321,10 +1377,11 @@
     wrap.style.marginTop = '4px';
 
     const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence && !state.pendingCardAction;
+    const darfAnlegen = darfAusruesten();
 
     const specialRule = (state.specialSlotItems || {})[c.name];
     const isBig = (state.bigItems || []).includes(c.name);
-    if ((c.category === 'item' || specialRule) && myTurn) {
+    if ((c.category === 'item' || specialRule) && darfAnlegen) {
       const label = specialRule
         ? `Anlegen (${(state.specialSlots[specialRule.slot] || {}).label || specialRule.slot}${specialRule.races ? `, nur ${specialRule.races.join('/')}` : ''}${isBig ? ', Großer Gegenstand' : ''})`
         : `Anlegen${isBig ? ' (Großer Gegenstand)' : ''}`;
@@ -1394,7 +1451,11 @@
     // oder reagieren gerade auf ein fremdes Ereignis (HEIMSE DIE LORBEEREN
     // EIN) - der Server prüft die eigentliche Bedingung ohnehin selbst und
     // loggt nur einen Hinweis, wenn sie nicht erfüllt ist.
-    if (!state.pendingCardAction && !state.pendingConsequence && hasCardPower(c)) {
+    // ...und nicht, solange dieselbe Karte gerade die garantierte Flucht
+    // anbietet (DER ANDERE RING hat beide Haelften): useCardPower legt die
+    // Karte ab, bevor die Wunschring-Wirkung greift - ein Fehlklick kostet
+    // dann die Flucht im Moment, in dem sie gebraucht wird.
+    if (!state.pendingCardAction && !state.pendingConsequence && hasCardPower(c) && !guaranteedFleeUsable(c)) {
       const btn = mkBtn('✨ Sonderkraft nutzen', () => socket.emit('useCardPower', { cardId: id }));
       wrap.appendChild(btn);
     }
@@ -1533,7 +1594,11 @@
     // (state.pendingRoll.holders). KATZENINTERVENTION würfelt serverseitig
     // neu (state.rollRerollCards) - dafür braucht es keinen Wert-Prompt.
     if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId)
-      && (state.rollReactionCards || []).includes(c.name)) {
+      && (state.rollReactionCards || []).includes(c.name)
+      // GEZINKTER WÜRFEL: nur auf den eigenen Wurf ("nachdem DU ... wuerfeln
+      // musstest") - der Server weist es sonst ohnehin ab.
+      && !((state.rollReactionOwnRollOnly || []).includes(c.name)
+        && state.pendingRoll.playerId !== myInfo.playerId)) {
       const istNeuwurf = (state.rollRerollCards || []).includes(c.name);
       const btn = mkBtn(istNeuwurf ? '🐈 Wurf neu würfeln lassen' : '🎲 Wurf ändern', () => {
         if (istNeuwurf) { socket.emit('playReactionCard', { cardId: id }); return; }
@@ -1623,7 +1688,8 @@
     sellSelection.forEach((id) => { sum += card(id).gold || 0; });
     $('sellSum').textContent = `Ausgewählt: ${sum} Goldstücke`;
     const btn = $('btnSell');
-    btn.disabled = sum < 1000;
+    // Verkaufen geht nur im eigenen Zug und nicht im Kampf (handleSellItems).
+    btn.disabled = sum < 1000 || !darfVerkaufen();
     btn.onclick = () => {
       socket.emit('sellItems', { cardIds: Array.from(sellSelection) });
       sellSelection.clear();
@@ -1761,10 +1827,16 @@
     });
   }
 
-  function smallTag(text, color) {
+  // cardId optional: macht die Marke anklickbar und oeffnet die Grossansicht.
+  function smallTag(text, color, cardId) {
     const span = document.createElement('span');
     span.className = 'tag'; span.style.background = color; span.style.color = 'white';
     span.textContent = text;
+    if (cardId) {
+      span.style.cursor = 'pointer';
+      span.title = 'Karte ansehen';
+      span.onclick = () => openCardModal(cardId);
+    }
     return span;
   }
   function textNode(text) { const s = document.createElement('span'); s.className = 'hint'; s.textContent = text; return s; }

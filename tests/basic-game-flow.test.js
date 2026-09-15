@@ -67,6 +67,12 @@ async function main() {
         }
         return;
       }
+      // Vorbereitungsrunde vor dem ersten Zug: alle legen an und melden sich
+      // bereit (dieser Testclient hat nichts anzulegen).
+      if (s.turnPhase === 'vorbereitung') {
+        if (!s.prepReady || !s.prepReady[myId]) socket.emit('prepReady', { ready: true });
+        return;
+      }
       if (s.turnPlayerId !== myId) return;
       if (s.turnPhase === 'tuer') socket.emit(s.revealedDoorCard ? 'takeRevealedDoor' : 'drawDoor');
       else if (s.turnPhase === 'aerger') socket.emit('skipToLoot');

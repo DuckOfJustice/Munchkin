@@ -28,6 +28,17 @@ module.exports = (ctx) => {
     'ANWALT': (p) => hasClass(p, 'DIEB'),
     // "Greift niemanden mit Stufe 2 oder niedriger an."
     'SIEBENJÄHRIGER LICH': (p) => p.level <= 2,
+    // "Greift keine Spielerinnen oder geschlechtsumgewandelte Spieler an. Sie
+    // erhalten stattdessen 1 Schatz." Alle starten maennlich, geaendert wird
+    // das Geschlecht nur durch Karten - "geschlechtsumgewandelt" ist hier also
+    // deckungsgleich mit "weiblich". Den Schatz gibt MONSTER_REFUSES_TREASURE.
+    'AMAZONE': (p) => istGeschlecht(p, 'w'),
+  };
+
+  // Monster aus MONSTER_REFUSES, die beim Weiterziehen trotzdem etwas
+  // dalassen: Kartenname -> Anzahl Schatzkarten.
+  const MONSTER_REFUSES_TREASURE = {
+    'AMAZONE': 1,
   };
 
   // --- Monster, die eine Rasse automatisch totstampft ----------------------
@@ -208,6 +219,20 @@ module.exports = (ctx) => {
   // sein 'in den Ruecken fallen' hinzu."
   const BACKSTAB_ITEMS = new Set(['STICH-O-MAT']);
 
+  // KALI: "es sei denn, du verteidigst dich mit (mindestens) 2 eigenen
+  // Waffen." Gezaehlt werden VERSCHIEDENE Handgegenstaende: eine Zweihand-
+  // waffe belegt zwar beide Plaetze, ist aber nur eine Waffe. Das
+  // ZWEIHÄNDIGE SCHWERT liegt in der Spezialausruestung (es kostet netto
+  // keine Hand, siehe FREE_HAND_ITEMS) und zaehlt trotzdem mit.
+  // ponytail: "Waffe" gegen "Schild" kennen die Kartendaten nicht - ein
+  // Schild in der Hand zaehlt hier mit. Kuratierte Ausnahmeliste waere der
+  // Aufruestweg.
+  const waffenAnzahl = (p) => {
+    const ids = new Set((p.equipped.hands || []).filter(Boolean));
+    (p.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
+    return ids.size;
+  };
+
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
   // die Rasse/Klasse hat (Angreifer:in oder Helfer:in) - nicht einmal pro
@@ -260,7 +285,7 @@ module.exports = (ctx) => {
     // es sei denn, du verteidigst dich mit (mindestens) 2 eigenen Waffen."
     'KALI': [
       { classes: ['PRIESTER'], bonus: 5 },
-      { wennErfuellt: (p) => p.equipped.hands.filter(Boolean).length < 2, bonus: 5 },
+      { wennErfuellt: (p) => waffenAnzahl(p) < 2, bonus: 5, nurKaempfer: true },
     ],
     // "+3 gegen die, die keine Klasse haben."
     'RÜSSELKÄFER': { wennErfuellt: (p) => !p.classes.length, bonus: 3 },
@@ -367,8 +392,10 @@ module.exports = (ctx) => {
   // keiner einzigen Monsterkarte im Text. Deshalb diese kuratierte Liste; sie
   // ist die EINZIGE Stelle, an der "untot" in diesem Server definiert ist.
   // Stimmt sie nicht mit euren Karten überein, hier korrigieren.
+  // DIE SCHATTENNASE ist das einzige Monster, dessen eigener Text "untot"
+  // sagt ("... funktioniert auch fuer ihren Untoten Schatten").
   const UNDEAD_MONSTERS = new Set(['MR. BONES', 'UNTOTES PFERD', 'KÖNIG TUT', 'GRUFTIGE GEBRÜDER',
-    'SIEBENJÄHRIGER LICH']);
+    'SIEBENJÄHRIGER LICH', 'DIE SCHATTENNASE']);
 
   // ZAUBERER "Flugzauber": "Du darfst bis zu 3 Karten ablegen, nachdem du
   // deinen Weglaufwurf gemacht hast. Jede verleiht dir +1 Bonus auf Weglaufen."
@@ -387,8 +414,11 @@ module.exports = (ctx) => {
   // "feuerimmun"-Kennzeichnung auf Monsterkarten, die es in den Daten nicht
   // gibt), bleiben bewusst manuell (siehe README, Abschnitt Item-Sonderfälle).
   const ITEM_CONDITIONAL_BONUS = {
-    // "+2 Bonus für Elfen" - Grundbonus ist 1, für Elfen kommt 1 dazu.
-    'GEILER HELM': (player, monsters) => (hasRace(player, 'ELF') ? 1 : 0),
+    // "+2 Bonus für Elfen" ist ein ZUSATZ zum Grundbonus, kein Gesamtwert:
+    // Grundbonus 1 für alle, Elfen also insgesamt +3. Genauso beim
+    // SCHÄDELHELM ("+2 Bonus für Orks", Grundbonus 2, Orks also +4).
+    'GEILER HELM': (player, monsters) => (hasRace(player, 'ELF') ? 2 : 0),
+    'SCHÄDELHELM': (player, monsters) => (hasRace(player, 'ORK') ? 2 : 0),
     // "+10 gegen alles, was mit dem Buchstaben J beginnt."
     'VORPALE KLINGE': (player, monsters) => (monsters.some((m) => /^J/i.test(m.name || '')) ? 10 : 0),
     // "Gibt keinen Bonus gegen Krakzilla" - hebt den gedruckten Bonus (+4) wieder auf.
@@ -442,7 +472,7 @@ module.exports = (ctx) => {
   };
 
   return {
-    CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_AUTO_KILL_BY_RACE,
+    CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
     MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
     MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
     FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,

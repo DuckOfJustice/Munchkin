@@ -86,7 +86,7 @@ function makeRoom(players, monsterIds) {
   const p = makePlayer({});
   assert.strictEqual(TREASURE_POWER_OVERRIDES['EINHEITSGRÖSSE'](p, makeRoom([p])), null, 'ausserhalb des Kampfes nicht');
   const imKampf = makeRoom([p], [findCard('MEDUSA', 'monster').id]);
-  assert.strictEqual(TREASURE_POWER_OVERRIDES['EINHEITSGRÖSSE'](p, imKampf).type, 'chooseDiscardedCard');
+  assert.strictEqual(TREASURE_POWER_OVERRIDES['EINHEITSGRÖSSE'](p, imKampf).type, 'takeFirstWearableFromTreasureDiscard');
 }
 
 // --- DER ANDERE RING als Wunschring-Ersatz ---------------------------------
