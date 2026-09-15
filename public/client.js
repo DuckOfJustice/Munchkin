@@ -22,6 +22,29 @@
     }
   }
 
+  // "Meine Figur" + Handkarten stehen fest am unteren Rand (#bottomDock) und
+  // sind je nach Inhalt (Anzahl Ausrüstungsteile, Sonderkräfte, Handkarten...)
+  // unterschiedlich hoch. Damit das Spielfeld (weißer Bereich: Tür eintreten,
+  // Kampf, Konsequenz, ...) beim Runterscrollen niemals darunter verschwindet
+  // und komplett sichtbar wird, messen wir die tatsächliche Dock-Höhe und
+  // reservieren per CSS-Variable exakt so viel Platz am Ende der Spalte -
+  // statt eines geratenen festen Werts, der bei viel/wenig Inhalt entweder zu
+  // knapp oder unnötig groß wäre.
+  function setupDockHeightTracking() {
+    const dock = document.getElementById('bottomDock');
+    if (!dock) return;
+    const apply = () => {
+      document.documentElement.style.setProperty('--dock-h', `${dock.offsetHeight + 24}px`);
+    };
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(apply).observe(dock);
+    } else {
+      window.addEventListener('resize', apply);
+    }
+    apply();
+  }
+  setupDockHeightTracking();
+
   const CATEGORY_LABELS = {
     monster: 'Monster', curse: 'Fluch', race: 'Rasse', class: 'Klasse',
     item: 'Gegenstand', treasure_other: 'Schatz', door_other: 'Türkarte',
@@ -132,6 +155,31 @@
       if (state) render();
     });
   }
+
+  // "Meine Figur" laesst sich einklappen - eingeklappt bleiben nur Stufe,
+  // Kampfwert und Rasse/Klasse sichtbar (.mypanel-head), die Ausruestungs-
+  // slots verschwinden. Praktisch, wenn gerade nur die Handkarten/Zugaktionen
+  // wichtig sind und die feste Leiste am unteren Rand weniger Platz brauchen
+  // soll. Der Zustand wird wie handSort pro Geraet gemerkt.
+  let myPanelCollapsed = false;
+  try { myPanelCollapsed = localStorage.getItem('munchkin_mypanel_collapsed') === '1'; } catch (e) { /* ignore */ }
+  const myPanel = $('myPanel');
+  const myPanelToggle = $('myPanelToggle');
+  function applyMyPanelCollapsed() {
+    if (myPanel) myPanel.classList.toggle('collapsed', myPanelCollapsed);
+    if (myPanelToggle) {
+      myPanelToggle.textContent = myPanelCollapsed ? '▸' : '▾';
+      myPanelToggle.title = myPanelCollapsed ? 'Ausrüstung anzeigen' : 'Ausrüstung ausblenden';
+    }
+  }
+  if (myPanelToggle) {
+    myPanelToggle.addEventListener('click', () => {
+      myPanelCollapsed = !myPanelCollapsed;
+      try { localStorage.setItem('munchkin_mypanel_collapsed', myPanelCollapsed ? '1' : '0'); } catch (err) { /* ignore */ }
+      applyMyPanelCollapsed();
+    });
+  }
+  applyMyPanelCollapsed();
 
   socket.on('connect', () => {
     if (session && session.code) {
@@ -489,17 +537,39 @@
     state.players.forEach((p) => {
       const row = document.createElement('div');
       row.className = 'prow clickable' + (p.id === state.turnPlayerId ? ' active-turn' : '');
-      const equip = equippedIdsOf(p).length;
+      const equipIds = equippedIdsOf(p);
       row.innerHTML = `<span>${escapeHtml(p.name)}${p.isBot ? ' 🤖' : ''}</span>` +
         `<span>` +
         (p.id === state.turnPlayerId ? '<span class="tag turn">Zug</span> ' : '') +
         (p.id === myInfo.playerId ? '<span class="tag you">Du</span> ' : '') +
         (!p.connected ? '<span class="tag off">offline</span> ' : '') +
-        `<span class="tag">Stufe ${p.level}</span> <span class="tag">⚔ ${p.strength}</span> <span class="tag">🎒 ${equip}</span>` +
+        `<span class="tag">Stufe ${p.level}</span> <span class="tag">⚔ ${p.strength}</span>` +
         (p.activeCurses && p.activeCurses.length ? ` <span class="tag">🌀 Fluch x${p.activeCurses.length}</span>` : '') +
         `</span>`;
       row.title = 'Klicken für Ausrüstung';
       row.addEventListener('click', () => openPlayerModal(p.id));
+
+      // Kleine Vorschau-Icons der getragenen Gegenstaende direkt in der Zeile
+      // (statt nur einer Anzahl) - eigener Klick pro Icon oeffnet die
+      // Grossansicht DIESER Karte, ohne die Zeile selbst auszuloesen.
+      const equipRow = document.createElement('div');
+      equipRow.className = 'prow-equip';
+      if (equipIds.length) {
+        equipIds.forEach((id) => {
+          const c = card(id);
+          const img = document.createElement('img');
+          img.className = 'eqicon'; img.alt = ''; img.src = cardImageUrl(id);
+          img.title = `${c.name}${c.bonus ? ` (+${c.bonus})` : ''}`;
+          img.onerror = () => img.remove();
+          img.onclick = (e) => { e.stopPropagation(); openCardModal(id); };
+          equipRow.appendChild(img);
+        });
+      } else {
+        equipRow.classList.add('eqicon-none');
+        equipRow.textContent = 'keine Ausrüstung';
+      }
+      row.appendChild(equipRow);
+
       if (p.id !== myInfo.playerId && p.connected) {
         const tradeBtn = document.createElement('button');
         tradeBtn.className = 'small'; tradeBtn.textContent = '🤝 Handeln';
@@ -1243,16 +1313,16 @@
     if (!isMyTurn()) { box.appendChild(textNode('Warte, bis du an der Reihe bist...')); return; }
 
     if (state.turnPhase === 'tuer' && !state.revealedDoorCard) {
-      const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = '🚪 Tür eintreten (Karte aufdecken)';
+      const btn = document.createElement('button'); btn.className = 'primary phase-btn'; btn.textContent = '🚪 Tür eintreten (Karte aufdecken)';
       btn.onclick = () => socket.emit('drawDoor');
       box.appendChild(btn);
     } else if (state.turnPhase === 'aerger') {
-      const skip = document.createElement('button'); skip.className = 'primary'; skip.textContent = 'Kein Monster spielen -> weiter';
+      const skip = document.createElement('button'); skip.className = 'primary phase-btn'; skip.textContent = 'Kein Monster spielen -> weiter';
       skip.onclick = () => socket.emit('skipToLoot');
       box.appendChild(skip);
       box.appendChild(textNode('Du kannst stattdessen unten bei einer Monster-Karte in deiner Hand "Als Monster spielen" wählen.'));
     } else if (state.turnPhase === 'pluendern') {
-      const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = '📦 Raum plündern (verdeckt ziehen)';
+      const btn = document.createElement('button'); btn.className = 'primary phase-btn'; btn.textContent = '📦 Raum plündern (verdeckt ziehen)';
       btn.onclick = () => socket.emit('lootRoom');
       box.appendChild(btn);
     } else if (state.turnPhase === 'gabe') {
@@ -1263,7 +1333,7 @@
       if (over > 0) {
         box.appendChild(textNode(`Milde Gabe: bitte noch ${over} Karte(n) ablegen (max. ${limit} auf der Hand).`));
       } else {
-        const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = 'Zug beenden';
+        const btn = document.createElement('button'); btn.className = 'primary phase-btn'; btn.textContent = 'Zug beenden';
         btn.onclick = () => socket.emit('endTurn');
         box.appendChild(btn);
       }
@@ -1274,6 +1344,11 @@
     const p = me();
     if (!p) return;
     $('myLevel').textContent = p.level;
+    // Im eingeklappten Zustand bleibt nur .mypanel-head sichtbar - die
+    // Kampfstaerke gehoert deshalb (wie Stufe und Rasse/Klasse) dort hinein,
+    // nicht in die (dann versteckte) Ausruestungsreihe.
+    const strengthTag = $('myStrength');
+    if (strengthTag) strengthTag.textContent = `⚔ ${p.strength}`;
 
     const badges = $('myBadges');
     badges.innerHTML = '';

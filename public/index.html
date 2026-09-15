@@ -90,12 +90,6 @@
       <div id="cardActionArea"></div>
       <div id="phaseActions" class="row gap wrap"></div>
       <div id="tradeArea"></div>
-
-      <section class="mypanel">
-        <h3>Meine Figur - Stufe <span id="myLevel"></span></h3>
-        <div id="myBadges" class="row gap wrap"></div>
-        <div id="myEquip" class="row gap wrap"></div>
-      </section>
     </main>
 
     <aside class="logpane">
@@ -104,21 +98,38 @@
     </aside>
   </div>
 
-  <div id="hand-bar" class="hand-bar">
-    <div class="hand-bar-top">
-      <div class="hand-bar-label">Deine Hand</div>
-      <label class="switch" id="handSortToggle">
-        <span class="switch-text">Nach Typ sortieren</span>
-        <input type="checkbox" id="handSortInput">
-        <span class="switch-track"><span class="switch-knob"></span></span>
-      </label>
-    </div>
-    <div id="handPowers" class="hand-powers hidden"></div>
-    <div id="myHand" class="hand-list"></div>
-    <div class="hand-bar-bottom">
-      <div class="row gap" id="sellBar">
-        <span id="sellSum">Ausgewählt: 0 Goldstücke</span>
-        <button id="btnSell" class="small" disabled>Verkaufen (je 1000 = 1 Stufe)</button>
+  <!-- Fixiert am unteren Bildschirmrand, "Meine Figur" schwebt direkt ÜBER
+       der Handkarten-Leiste statt irgendwo in der Spielfeld-Spalte - beides
+       zusammen in einem eigenen Dock, damit "Meine Figur" die tatsächliche
+       (variable) Höhe der Handleiste nie erraten muss: sie sitzt einfach
+       davor in derselben Flex-Spalte. -->
+  <div id="bottomDock" class="bottom-dock">
+    <section class="mypanel floating" id="myPanel">
+      <div class="mypanel-head">
+        <h3>Meine Figur - Stufe <span id="myLevel"></span></h3>
+        <span id="myStrength" class="tag"></span>
+        <div id="myBadges" class="row gap wrap"></div>
+      </div>
+      <div id="myEquip" class="row gap wrap"></div>
+      <button id="myPanelToggle" class="ghost small mypanel-toggle" title="Ausrüstung ein-/ausklappen">▾</button>
+    </section>
+
+    <div id="hand-bar" class="hand-bar">
+      <div class="hand-bar-top">
+        <div class="hand-bar-label">Deine Hand</div>
+        <label class="switch" id="handSortToggle">
+          <span class="switch-text">Nach Typ sortieren</span>
+          <input type="checkbox" id="handSortInput">
+          <span class="switch-track"><span class="switch-knob"></span></span>
+        </label>
+      </div>
+      <div id="handPowers" class="hand-powers hidden"></div>
+      <div id="myHand" class="hand-list"></div>
+      <div class="hand-bar-bottom">
+        <div class="row gap" id="sellBar">
+          <span id="sellSum">Ausgewählt: 0 Goldstücke</span>
+          <button id="btnSell" class="small" disabled>Verkaufen (je 1000 = 1 Stufe)</button>
+        </div>
       </div>
     </div>
   </div>

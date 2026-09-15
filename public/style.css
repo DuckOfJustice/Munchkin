@@ -135,6 +135,20 @@ button.wide { width: 100%; }
 .playerlist .prow.clickable { cursor: pointer; transition: border-color 0.12s ease; }
 .playerlist .prow.clickable:hover { border-color: var(--door-bright); }
 .playerlist .prow > button { flex: 1 0 100%; }
+/* Kleine Ausruestungs-Icons je Spieler:in in der Seitenleiste - macht auf
+   einen Blick sichtbar, WAS jemand traegt, statt nur eine Anzahl ("🎒 2"),
+   und nutzt die vorher meist leere Flaeche unter der Spielerliste. Eigener
+   Klick pro Icon (Grossansicht der Karte) - die Zeile selbst bleibt
+   zusaetzlich als Ganzes klickbar (oeffnet alle Slots inkl. leerer, siehe
+   openPlayerModal). */
+.prow-equip { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.prow-equip .eqicon {
+  width: 30px; height: 30px; object-fit: cover; border-radius: 7px;
+  border: 1px solid var(--border); cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.prow-equip .eqicon:hover { transform: scale(1.18); border-color: var(--door-bright); z-index: 1; }
+.prow-equip .eqicon-none { color: var(--text-dim); font-size: 0.78em; }
 .tag { font-size: 0.7em; padding: 2px 8px; border-radius: 999px; background: var(--panel-alt); color: var(--text-dim); }
 .tag.you { background: var(--door); color: white; }
 .tag.off { background: var(--danger); color: white; }
@@ -149,7 +163,12 @@ button.wide { width: 100%; }
 
 .layout {
   display: grid; grid-template-columns: 260px 1fr 300px; gap: 20px;
-  padding: 20px 28px; padding-bottom: 250px; align-items: start;
+  padding: 20px 28px; align-items: start;
+  /* --dock-h wird per JS (setupDockHeightTracking in client.js) auf die
+     tatsaechliche Hoehe von #bottomDock gesetzt, damit das Spielfeld beim
+     Runterscrollen nie unter der fixierten Leiste verschwindet - der
+     400px-Wert ist nur ein Fallback, bis JS geladen/gemessen hat. */
+  padding-bottom: var(--dock-h, 400px);
   max-width: 1900px; margin: 0 auto;
 }
 @media (max-width: 1100px) {
@@ -157,7 +176,7 @@ button.wide { width: 100%; }
   .logpane { grid-column: 1 / -1; order: 3; position: static; }
 }
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; padding: 14px; padding-bottom: 250px; }
+  .layout { grid-template-columns: 1fr; padding: 14px; padding-bottom: var(--dock-h, 460px); }
   .sidebar, .logpane { order: 2; position: static; }
 }
 
@@ -186,6 +205,29 @@ button.wide { width: 100%; }
    Handkarten-Leiste stehen. Der Inhalt bestimmt jetzt selbst seine Hoehe;
    .layout hat ohnehin schon padding-bottom fuer die fixierte Handleiste. */
 .table { min-height: 0; }
+
+/* Die Haupt-Zugaktion (Tuer eintreten, Raum pluendern, Zug beenden, ...) ist
+   der wichtigste Knopf auf dem Bildschirm, wenn man am Zug ist - deshalb
+   deutlich groesser als normale Knoepfe, mittig in der freien Flaeche, und
+   mit einem dezenten Puls, der die Aufmerksamkeit dorthin lenkt, ohne zu
+   nerven (pausiert bei Hover, respektiert prefers-reduced-motion). */
+#phaseActions { justify-content: center; padding: 28px 0; }
+#phaseActions button.phase-btn {
+  font-size: 1.35em; padding: 20px 38px; border-radius: 18px;
+  box-shadow: 0 10px 28px rgba(224,122,63,0.4);
+  animation: phasePulse 2.4s ease-in-out infinite;
+}
+#phaseActions button.phase-btn:hover { animation-play-state: paused; transform: translateY(-3px) scale(1.03); }
+@keyframes phasePulse {
+  0%, 100% { box-shadow: 0 10px 28px rgba(224,122,63,0.4); transform: scale(1); }
+  50% { box-shadow: 0 14px 38px rgba(224,122,63,0.62); transform: scale(1.025); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #phaseActions button.phase-btn { animation: none; }
+}
+@media (max-width: 640px) {
+  #phaseActions button.phase-btn { font-size: 1.1em; padding: 16px 28px; }
+}
 
 .tradebox {
   background: var(--panel); border: 1px solid var(--gold); border-radius: var(--radius); padding: 16px 18px;
@@ -255,7 +297,51 @@ button.wide { width: 100%; }
 .cat-treasure_other { --tile-accent: var(--c-treasure_other); }
 .cat-door_other { --tile-accent: var(--c-door_other); }
 
-.mypanel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+/* "Meine Figur" laut Screenshot-Markierung (blaues Rechteck) NICHT in der
+   Spielfeld-Spalte, sondern als eigene, volle Bildschirmbreite einnehmende
+   Leiste direkt UEBER der Handkarten-Leiste - und wie diese dauerhaft
+   fixiert ("soll immer im Vordergrund bleiben"), damit die eigene Figur
+   auch waehrend eines langen Kampfs/Aufdeckens sichtbar bleibt, ohne separat
+   sticky positioniert werden zu muessen. Beides zusammen steckt im
+   gemeinsamen Flex-Dock #bottomDock (siehe dort), das die eigentliche
+   Fixierung uebernimmt - .mypanel.floating selbst ist nur noch ein normales
+   Flex-Kind darin. */
+#bottomDock {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+  display: flex; flex-direction: column;
+}
+.mypanel.floating {
+  background: var(--panel); border-top: 1px solid var(--border);
+  border-radius: 0; margin: 0; max-width: none; padding: 10px 24px;
+  box-shadow: 0 -6px 20px rgba(0,0,0,0.3);
+  display: flex; align-items: center; flex-wrap: wrap; gap: 18px;
+}
+.mypanel.floating h3 { margin: 0; text-align: left; white-space: nowrap; font-size: 1em; flex-shrink: 0; }
+.mypanel.floating .mypanel-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0;
+}
+.mypanel.floating #myBadges { flex-shrink: 0; }
+.mypanel.floating .row.gap.wrap { justify-content: flex-start; }
+/* Die Ausruestungs-Slots duerfen (anders als Titel/Abzeichen) nie umbrechen -
+   sonst waechst die Leiste bei 6 Slots + langen Kartennamen unkontrolliert in
+   die Hoehe. Stattdessen scrollt diese eine Reihe bei Bedarf seitlich, die
+   Leistenhoehe bleibt so immer vorhersehbar (wichtig, weil #layout dafuer
+   unten feststehenden Platz reserviert, siehe padding-bottom). */
+#myEquip { flex: 1 1 auto; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; justify-content: flex-start; }
+/* Ein-/Ausklapp-Knopf für die Ausrüstungsslots: eingeklappt bleiben nur Stufe,
+   Kampfwert und Rasse/Klasse sichtbar (.mypanel-head) - praktisch, wenn
+   gerade nur die Handkarten/Zugaktionen wichtig sind und die Leiste möglichst
+   wenig Platz beanspruchen soll. Der Zustand wird pro Gerät gemerkt. */
+.mypanel-toggle { margin-left: auto; flex-shrink: 0; font-size: 1.1em; padding: 4px 10px; }
+.mypanel.floating.collapsed #myEquip { display: none; }
+.mypanel.floating.collapsed .mypanel-toggle { transform: rotate(-90deg); }
+@media (max-width: 900px) {
+  /* Auf schmalen Screens reicht die Breite nicht fuer eine Zeile - Titel und
+     Abzeichen duerfen dann umbrechen, die Ausruestungsreihe bekommt ihre
+     eigene volle Zeile (bleibt aber weiterhin seitlich scrollbar). */
+  .mypanel.floating { padding: 10px 14px; gap: 8px 16px; }
+  #myEquip { flex-basis: 100%; }
+}
 
 /* -------- Handkarten-Leiste (unten fixiert, wie bei Wizard) -------- */
 /* max-height + überall überlaufsicher (overflow-y: auto statt hidden) -
@@ -263,9 +349,11 @@ button.wide { width: 100%; }
    viel Inhalt (Bild+Name+Meta+Aktionsknöpfe), darum werden sie zusätzlich per
    clamp() an die Fensterhöhe angepasst, damit auf niedrigen/kleinen Screens
    nichts mehr aus der Leiste rausklippt - im äußersten Fall bleibt die Hand
-   selbst vertikal scrollbar statt Inhalte unsichtbar abzuschneiden. */
+   selbst vertikal scrollbar statt Inhalte unsichtbar abzuschneiden.
+   Die Fixierung am Bildschirmrand uebernimmt jetzt #bottomDock (der
+   gemeinsame Container mit "Meine Figur" darueber) - hier nur noch der
+   optische Rest (Hintergrund, Rahmen, Schatten, max-Hoehe). */
 .hand-bar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
   background: var(--bg-alt); border-top: 1px solid var(--border);
   padding: 10px 16px 14px; box-shadow: 0 -8px 24px rgba(0,0,0,0.35);
   max-height: 46vh; display: flex; flex-direction: column;
@@ -327,10 +415,16 @@ button.wide { width: 100%; }
 
 .equipslot {
   background: var(--bg-alt); border: 1px dashed var(--border); border-radius: 10px;
-  padding: 6px 10px; font-size: 0.8em; min-width: 96px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px 10px; font-size: 0.8em; min-width: 108px; width: 108px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  /* Leer und belegt sollen gleich gross wirken - sonst "springt" die Reihe je
+     nachdem, ob gerade Bild+Name+Ablegen-Knopf drinstehen oder nur "leer".
+     min-height statt height: ein sehr langer Kartenname darf die Kachel noch
+     wachsen lassen, schrumpft sie aber nie unter diese gemeinsame Basisgroesse. */
+  min-height: 128px;
 }
 .equipslot.filled { border-style: solid; border-color: var(--gold); }
-.equipslot .eqimg { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
+.equipslot .eqimg { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
 /* Getragene Karten sind anklickbar (Grossansicht) - der Ablegen-Knopf darin
    bleibt ein eigener Klick, siehe stopPropagation im Client. */
 .equipslot.clickable { cursor: pointer; transition: border-color 0.12s ease; }
