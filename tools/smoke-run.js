@@ -74,6 +74,12 @@ function schritt() {
   // Ein Kampf wartet auf die Bestaetigung aller menschlichen Zuschauer
   // (combatReadyRequired) - ohne die laeuft auch der Bot nicht weiter.
   if (k && k.actorId !== meId && !(k.ready || {})[meId]) return act('setCombatReady', { ready: true });
+  // Vorbereitungsrunde vor dem ersten Zug: bereit melden (die Testfigur legt
+  // nichts an - ihre Ausruestung kommt erst aus den Kaempfen).
+  if (state.turnPhase === 'vorbereitung') {
+    if (!state.prepReady || !state.prepReady[meId]) return act('prepReady', { ready: true });
+    return;
+  }
   if (state.turnPlayerId !== meId) return;   // sonst sind die Bots dran
   if (k) {
     if (k.helperPending && k.helperPending.targetId === meId) return act('respondHelp', { accept: false });

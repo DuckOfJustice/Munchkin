@@ -430,7 +430,9 @@
         tuer: 'Phase 1: Tür eintreten', aerger: 'Phase 2: Auf Ärger aus sein',
         pluendern: 'Phase 3: Raum plündern', gabe: 'Phase 4: Milde Gabe', kampf: 'Kampf!',
       }[state.turnPhase] || '';
-      $('turnBanner').textContent = `${tp ? tp.name : '?'} ist am Zug - ${phaseLabel}`;
+      $('turnBanner').textContent = state.turnPhase === 'vorbereitung'
+        ? 'Vorbereitung: Ausrüstung anlegen - die erste Runde startet, sobald alle bereit sind.'
+        : `${tp ? tp.name : '?'} ist am Zug - ${phaseLabel}`;
     }
 
     playDoorReveal();
@@ -441,6 +443,7 @@
     renderDiscardPeek();
     renderReveal();
     renderCombat();
+    renderPrep();
     renderRollReaction();
     renderConsequence();
     renderCardAction();
@@ -1050,6 +1053,33 @@
   // ausserhalb von renderCombat: gewuerfelt wird auch ohne Kampf, und ohne
   // diesen Kasten gaebe es dann keinen "Passen"-Knopf - das Spiel haenge.
   // Das Ausspielen selbst passiert an der Handkarte (siehe handActionsFor).
+  // Vorbereitungsrunde vor dem ersten Zug: alle legen gleichzeitig ihre
+  // Ausruestung an und melden sich bereit.
+  function renderPrep() {
+    const box = $('prepArea');
+    box.innerHTML = '';
+    if (state.turnPhase !== 'vorbereitung') return;
+    const bereit = state.prepReady || {};
+    const div = document.createElement('div');
+    div.className = 'consequencebox';
+    div.innerHTML = '<h3>⚔️ Vorbereitung</h3>'
+      + '<p>Legt jetzt eure Ausrüstung an - danach geht das nur noch im eigenen Zug und nie im Kampf.</p>';
+    const liste = document.createElement('div');
+    liste.className = 'row gap wrap';
+    state.players.forEach((p) => {
+      liste.appendChild(smallTag(`${bereit[p.id] ? '✅' : '⏳'} ${p.name}`, bereit[p.id] ? '#2e7d32' : '#777'));
+    });
+    div.appendChild(liste);
+    const row = document.createElement('div');
+    row.className = 'row gap wrap';
+    row.style.marginTop = '8px';
+    const btn = mkBtn(bereit[myInfo.playerId] ? 'Doch noch nicht bereit' : 'Bereit', () => socket.emit('prepReady', { ready: !bereit[myInfo.playerId] }));
+    if (!bereit[myInfo.playerId]) btn.className = 'primary';
+    row.appendChild(btn);
+    div.appendChild(row);
+    box.appendChild(div);
+  }
+
   function renderRollReaction() {
     const box = $('rollReactionArea');
     box.innerHTML = '';
@@ -1201,7 +1231,7 @@
     // pendingRoll: solange ein Wurf-Fenster offen ist, nimmt der Server keine
     // Phasenaktion an (siehe handleDrawDoor) - dann auch keinen Knopf zeigen.
     if (state.phase === 'gameend' || state.combat || state.pendingConsequence
-      || state.pendingCardAction || state.pendingRoll) return;
+      || state.pendingCardAction || state.pendingRoll || state.turnPhase === 'vorbereitung') return;
     if (!isMyTurn()) { box.appendChild(textNode('Warte, bis du an der Reihe bist...')); return; }
 
     if (state.turnPhase === 'tuer' && !state.revealedDoorCard) {
@@ -1335,10 +1365,14 @@
     wrap.style.marginTop = '4px';
 
     const myTurn = isMyTurn() && state.turnPhase && !state.combat && !state.pendingConsequence && !state.pendingCardAction;
+    // Vorbereitungsrunde: alle legen gleichzeitig an (siehe darfAusruesten im
+    // Server). Sonst gilt die gedruckte Regel - nur im eigenen Zug, nie im
+    // Kampf.
+    const darfAnlegen = state.turnPhase === 'vorbereitung' || myTurn;
 
     const specialRule = (state.specialSlotItems || {})[c.name];
     const isBig = (state.bigItems || []).includes(c.name);
-    if ((c.category === 'item' || specialRule) && myTurn) {
+    if ((c.category === 'item' || specialRule) && darfAnlegen) {
       const label = specialRule
         ? `Anlegen (${(state.specialSlots[specialRule.slot] || {}).label || specialRule.slot}${specialRule.races ? `, nur ${specialRule.races.join('/')}` : ''}${isBig ? ', Großer Gegenstand' : ''})`
         : `Anlegen${isBig ? ' (Großer Gegenstand)' : ''}`;

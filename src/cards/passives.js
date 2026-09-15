@@ -28,6 +28,17 @@ module.exports = (ctx) => {
     'ANWALT': (p) => hasClass(p, 'DIEB'),
     // "Greift niemanden mit Stufe 2 oder niedriger an."
     'SIEBENJÄHRIGER LICH': (p) => p.level <= 2,
+    // "Greift keine Spielerinnen oder geschlechtsumgewandelte Spieler an. Sie
+    // erhalten stattdessen 1 Schatz." Alle starten maennlich, geaendert wird
+    // das Geschlecht nur durch Karten - "geschlechtsumgewandelt" ist hier also
+    // deckungsgleich mit "weiblich". Den Schatz gibt MONSTER_REFUSES_TREASURE.
+    'AMAZONE': (p) => istGeschlecht(p, 'w'),
+  };
+
+  // Monster aus MONSTER_REFUSES, die beim Weiterziehen trotzdem etwas
+  // dalassen: Kartenname -> Anzahl Schatzkarten.
+  const MONSTER_REFUSES_TREASURE = {
+    'AMAZONE': 1,
   };
 
   // --- Monster, die eine Rasse automatisch totstampft ----------------------
@@ -461,7 +472,7 @@ module.exports = (ctx) => {
   };
 
   return {
-    CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_AUTO_KILL_BY_RACE,
+    CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
     MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
     MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
     FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,

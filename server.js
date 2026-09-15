@@ -531,6 +531,8 @@ function publicState(room) {
     turnIndex: room.turnIndex,
     turnPlayerId: room.players[room.turnIndex] ? room.players[room.turnIndex].id : null,
     turnPhase: room.turnPhase,
+    // Vorbereitungsrunde: wer ist schon bereit? (siehe handlePrepReady)
+    prepReady: room.prepReady || {},
     doorDeckCount: room.doorDeck.length,
     // Ablagestapel komplett: sie liegen am echten Tisch offen, jede:r darf sie
     // durchsehen (der Client zeigt sie auf Klick). Reihenfolge alt -> neu, die
@@ -646,7 +648,16 @@ function startGame(room) {
     }
   });
   room.turnIndex = 0;
-  room.turnPhase = 'tuer';
+  // Vorbereitungsrunde: Ausruestung darf sonst nur im eigenen Zug geaendert
+  // werden (darfAusruesten) - ohne diese Phase startete die erste Person mit
+  // nacktem Charakter in den ersten Kampf, waehrend alle anderen bis zu ihrem
+  // Zug warten muessten. Hier legen alle gleichzeitig an; die erste Runde
+  // beginnt, sobald alle bereit sind.
+  room.turnPhase = 'vorbereitung';
+  room.prepReady = {};
+  // Bots legen ohnehin nichts an - sie sind sofort bereit und blockieren die
+  // Partie nicht.
+  room.players.forEach((p) => { if (p.isBot) room.prepReady[p.id] = true; });
   room.combatHappenedThisTurn = false;
   room.lastCombatWinnerId = null;
   room.lastCombatWinnerTurnIndex = null;
@@ -659,7 +670,30 @@ function startGame(room) {
   room.logs = [];
   room.trades = [];
   log(room, `Das Spiel beginnt mit ${room.players.length} Spieler:innen. Jede:r hat 4 Tür- und 4 Schatzkarten auf der Hand.`);
-  log(room, `${currentPlayer(room).name} ist am Zug (Phase 1: Tür eintreten).`);
+  log(room, 'Vorbereitung: Ausrüstung anlegen - die erste Runde beginnt, sobald alle bereit sind.');
+  pruefeVorbereitungFertig(room);
+}
+
+// Die Vorbereitungsrunde endet, sobald alle Verbundenen bereit sind. Getrennte
+// zaehlen nicht mit - sonst haengt die Partie an jemandem, der nicht am Geraet
+// ist (gleiche Regel wie bei reactionHolders und der Kartenwarteschlange).
+function pruefeVorbereitungFertig(room) {
+  if (room.turnPhase !== 'vorbereitung') return;
+  const offen = room.players.filter((p) => p.connected && !room.prepReady[p.id]);
+  if (offen.length) return;
+  room.turnPhase = 'tuer';
+  log(room, `Alle sind bereit - ${currentPlayer(room).name} ist am Zug (Phase 1: Tür eintreten).`);
+}
+
+function handlePrepReady(room, playerId, ready) {
+  if (room.turnPhase !== 'vorbereitung') return;
+  const player = findPlayer(room, playerId);
+  if (!player) return;
+  room.prepReady = room.prepReady || {};
+  if (ready === false) delete room.prepReady[playerId];
+  else room.prepReady[playerId] = true;
+  log(room, `${player.name} ist ${ready === false ? 'doch noch nicht' : 'bereit'}.`);
+  pruefeVorbereitungFertig(room);
 }
 
 function endTurn(room) {
@@ -737,7 +771,18 @@ function handleDrawDoor(room, playerId) {
     if (monsterRefusesTarget(id, player)) {
       room.doorDiscard.push(id);
       room.turnPhase = 'aerger';
-      log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter. Phase 2: Auf Ärger aus sein.`, [id]);
+      // AMAZONE: "Sie erhalten stattdessen 1 Schatz."
+      const geschenk = MONSTER_REFUSES_TREASURE[c.name] || 0;
+      const gezogen = [];
+      for (let i = 0; i < geschenk; i++) { const t = drawTreasure(room); if (t) gezogen.push(t); }
+      gezogen.forEach((tid) => player.hand.push(tid));
+      if (gezogen.length) {
+        player.lastReward = {
+          seq: (player.lastReward ? player.lastReward.seq : 0) + 1,
+          cardIds: gezogen, levelsGained: 0, monsterNames: [c.name],
+        };
+      }
+      log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter${gezogen.length ? `, laesst aber ${gezogen.length} Schatzkarte(n) da` : ''}. Phase 2: Auf Ärger aus sein.`, [id]);
     } else if (monsterPassOption(id, player)) {
       // "Kaempfen oder vorbeigehen und winken" - Halblinge bekommen die Wahl
       // gar nicht angeboten (monsterPassOption), die muessen kaempfen.
@@ -2202,7 +2247,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -2392,7 +2437,7 @@ function combatHasMonster(room, nameSet) {
 // der ersten Benutzung der Tabellen (curseProtectionItem gleich darunter).
 const passivesFactory = require('./src/cards/passives.js');
 const {
-  CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_AUTO_KILL_BY_RACE,
+  CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
   MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
   MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
   FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,
@@ -2473,12 +2518,21 @@ function curseSuppressesItemBonuses(player) {
   return (player.activeCurses || []).some((f) => f.kind === 'noItemBonusExceptArmor');
 }
 
-// ponytail: 'rollMalus' (HUHN AUF DEINEM KOPF) und 'noTwoHandedItems'
-// (WINZIGE HÄNDE) werden getrackt und angezeigt, aber nicht mechanisch
-// durchgesetzt (kein Abzug in rollDie, keine Anlege-Sperre in
-// handleEquipItem) - wie die übrigen Dauer-Mali ohne eigenen Tracker vorher
-// bleiben sie bewusst manuell. Ausbauweg: rollDie um curseRollModifier(player)
-// ergänzen bzw. handleEquipItem für zweihändige Gegenstände sperren.
+// HUHN AUF DEINEM KOPF: "-1 auf alle Wuerfe." Gilt fuer jeden Wurf, den die
+// Person selbst macht - deshalb zentral in rollWithWindow, durch das
+// inzwischen alle Wuerfe laufen. Der Wert bleibt bei mindestens 1: ein
+// Wuerfel zeigt keine 0, und mehrere Karten lesen den Wurf als 1..6
+// (3.872 ORKS: "bei einer 1 oder 2").
+function curseRollModifier(player) {
+  return (player && player.activeCurses || [])
+    .filter((f) => f.kind === 'rollMalus')
+    .reduce((sum, f) => sum + (f.amount || 0), 0);
+}
+
+// WINZIGE HÄNDE: "Du kannst keine zweihaendigen Gegenstaende benutzen."
+function curseBlocksTwoHanded(player) {
+  return (player.activeCurses || []).some((f) => f.kind === 'noTwoHandedItems');
+}
 
 // --- Monster, die bestimmte Munchkins gar nicht angreifen ------------------
 // siehe MONSTER_REFUSES in src/cards/passives.js. Das Monster zieht weiter:
@@ -2676,7 +2730,8 @@ function reactionHolders(room, cardSet, darf) {
 // `purpose` ist ein reines Diagnosefeld (steht in room.pendingRoll und damit
 // im Zustand, den der Client bekommt) - keine Logik haengt daran.
 function rollWithWindow(room, player, purpose, onResolve) {
-  const roll = rollDie();
+  const malus = curseRollModifier(player);
+  const roll = Math.max(1, rollDie() + malus);
   // Der GEZINKTE WÜRFEL gilt nur fuer den eigenen Wurf - wer nur ihn haelt,
   // bekommt bei fremden Wuerfen gar kein Fenster (siehe
   // ROLL_REACTION_OWN_ROLL_ONLY).
@@ -2689,7 +2744,7 @@ function rollWithWindow(room, player, purpose, onResolve) {
   // zweite Wurf laeuft dann synchron wie frueher.
   if (!holders.length || room.pendingRoll) { onResolve(roll); return; }
   room.pendingRoll = { playerId: player.id, purpose, roll, holders, onResolve };
-  log(room, `${player.name} würfelt ${roll} - es darf noch auf den Wurf reagiert werden.`);
+  log(room, `${player.name} würfelt ${roll}${malus ? ` (${malus} durch einen Fluch)` : ''} - es darf noch auf den Wurf reagiert werden.`);
 }
 
 // Wuerfelwurf fuer Stellen, die ihr Ergebnis als Text zurueckgeben muessen
@@ -3122,6 +3177,8 @@ function startCombat(room, actorId, monsterIds, opts) {
     // Kampfverlauf: "… aus der Hölle." (+5 gegen Priester, MONSTER_TRAIT_BONUS)
     // und UNTOT ("Das Monster zählt jetzt als Untoter für alle Zwecke").
     enhancerIds: [],
+    enhancerBonus: 0,      // Anteil der Verstaerker am monsterModifier (KUMPEL)
+    enhancerTreasure: 0,   // dasselbe fuer treasureDelta
     ready: {},         // playerId -> true, sobald jemand die Auswertung freigibt
     readySignature: null,
   };
@@ -3454,6 +3511,37 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.helperId = null;
       return `${helper ? helper.name : 'Helfer'} verlässt den Kampf`;
     }
+    // POLLYVERWANDLUNGSTRANK/TRANK DER IRRELEVANZ/ENTLASSUNGSGLOCKE nennen
+    // ausdruecklich EIN Monster ("Verwandelt ein Monster ...", "Wenn es das
+    // einzige Monster im Kampf war, ist der Kampf vorbei"). endCombatNoLevel
+    // legt dagegen ALLE ab und schuettet bei leavesTreasure auch deren Schatz
+    // aus - bei zwei Monstern war das viel zu stark.
+    case 'removeOneMonster': {
+      const mId = action.monsterId || c.monsterIds[0];
+      const idx = c.monsterIds.indexOf(mId);
+      if (idx < 0) return 'Monster nicht im Kampf gefunden';
+      const m = card(mId);
+      c.monsterIds.splice(idx, 1);
+      if (action.returnToDoorDeckBottom) room.doorDeck.unshift(mId);
+      else if (!c.monsterIds.includes(mId)) room.doorDiscard.push(mId);
+      const drawn = [];
+      if (action.leavesTreasure) {
+        const actor = findPlayer(room, c.actorId) || player;
+        for (let i = 0; i < (m.treasureCount || 0); i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+        drawn.forEach((id) => actor.hand.push(id));
+        actor.lastReward = {
+          seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
+          cardIds: drawn, levelsGained: 0, monsterNames: [m.name],
+        };
+      }
+      if (!c.monsterIds.length) {
+        room.combat = null;
+        room.turnPhase = combatEndPhase(c, action.thenLoot);
+        return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : ''}`;
+      }
+      refreshCombatReady(room);
+      return `"${m.name}" verschwindet${drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : ''} - der Kampf geht weiter`;
+    }
     case 'killMonsterInCombat': {
       const idx = c.monsterIds.findIndex((id) => { const m = card(id); return m && m.name === action.name; });
       if (idx < 0) return 'Monster nicht im Kampf gefunden';
@@ -3608,14 +3696,23 @@ function handlePlayCombatCard(room, playerId, cardId) {
     // ihm +10." ponytail: verdoppelt wird der Kampfbonus, den die Karte
     // ausdruecklich nennt - der Schatzbonus bleibt wie gedruckt.
     const trottel = room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'RAPIER-TROTTEL');
-    room.combat.monsterModifier += trottel ? c.bonus * 2 : c.bonus;
+    const zuschlag = trottel ? c.bonus * 2 : c.bonus;
+    room.combat.monsterModifier += zuschlag;
+    // Getrennt mitgezaehlt, weil KUMPEL ("ein weiteres Monster mit den
+    // gleichen Monsterverstaerker-Karten") genau diesen Anteil ein zweites
+    // Mal braucht - monsterModifier enthaelt auch Traenke, die nicht
+    // mitverdoppelt werden duerfen.
+    room.combat.enhancerBonus = (room.combat.enhancerBonus || 0) + zuschlag;
     room.combat.enhancerIds = (room.combat.enhancerIds || []).concat(cardId);
     // "Wird das Monster besiegt, ziehe 2 zusätzliche Schätze" (GIGANTISCH,
     // URALT) bzw. "ziehe 1 Schatz weniger, mindestens 1" (BABY): der Wert
     // steckt in treasureCount der Verstärkerkarte. Aufgesammelt hier,
     // ausgezahlt in resolveCombatWin.
     const delta = typeof c.treasureCount === 'number' ? c.treasureCount : 0;
-    if (delta) room.combat.treasureDelta = (room.combat.treasureDelta || 0) + delta;
+    if (delta) {
+      room.combat.treasureDelta = (room.combat.treasureDelta || 0) + delta;
+      room.combat.enhancerTreasure = (room.combat.enhancerTreasure || 0) + delta;
+    }
     room.doorDiscard.push(cardId);
     log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${trottel ? c.bonus * 2 : c.bonus} für das Monster${trottel ? ' - der Rapier-Trottel verdoppelt' : ''}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
     announceCardPlay(room, player, cardId, `${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster`);
@@ -3683,6 +3780,20 @@ function handlePlayCombatCard(room, playerId, cardId) {
     touchRoom(room);
     return;
   }
+  // "Ein Monster" - bei mehreren im Kampf muss gesagt werden, welches (gleiche
+  // Bauform wie die Monster-Wahl der MAGISCHEN LAMPE weiter oben).
+  if (spec.type === 'removeOneMonster' && room.combat.monsterIds.length > 1) {
+    openCardChoice(room, player, c.name, room.combat.monsterIds.map((mId) => ({
+      id: `mon-${mId}`,
+      label: `"${card(mId).name}" verschwinden lassen`,
+      action: Object.assign({}, spec, { monsterId: mId }),
+    })));
+    room.pendingCardAction.sourceCardId = cardId;
+    log(room, `${player.name} spielt "${c.name}" im Kampf - Monster-Wahl nötig.`, [cardId]);
+    announceCardPlay(room, player, cardId, 'Monster wird noch gewählt');
+    touchRoom(room);
+    return;
+  }
   const desc = applyCombatPotionAction(room, player, spec, c);
   log(room, `${player.name} spielt "${c.name}" im Kampf: ${desc}.`, [cardId]);
   announceCardPlay(room, player, cardId, desc);
@@ -3707,6 +3818,12 @@ function applyCombatReaction(room, player, cardId, regel) {
     const erstes = c.monsterIds[0];
     if (!erstes) return;
     c.monsterIds.push(erstes);
+    // "... mit den gleichen Monsterverstaerker-Karten": Stufe und Schatzzahl
+    // verdoppeln sich ueber die zweite Karten-ID von selbst, die bereits
+    // gespielten Verstaerker zaehlen aber nur einmal in monsterModifier/
+    // treasureDelta - deshalb hier ein zweites Mal.
+    c.monsterModifier += (c.enhancerBonus || 0);
+    if (c.enhancerTreasure) c.treasureDelta = (c.treasureDelta || 0) + c.enhancerTreasure;
     removeFromHand(player, cardId);
     discardCard(room, cardId);
     zeigen();
@@ -4356,11 +4473,32 @@ function handleUseGuaranteedFlee(room, playerId, cardId) {
 // Ausrüstung, Verkauf, Rasse/Klasse, Ablegen
 // ---------------------------------------------------------------------------
 
+// Wann darf die Ausruestung geaendert werden? Gedruckte Regel: waehrend des
+// eigenen Zuges, aber nicht mitten im Kampf. Dazu die Vorbereitungsrunde vor
+// dem ersten Zug, in der alle gleichzeitig anlegen duerfen.
+function darfAusruesten(room, player) {
+  if (room.turnPhase === 'vorbereitung') return true;
+  if (room.combat) return false;
+  const dran = currentPlayer(room);
+  return !!dran && !!player && dran.id === player.id;
+}
+
 function handleEquipItem(room, playerId, cardId) {
   const player = findPlayer(room, playerId);
   if (!player || !player.hand.includes(cardId)) return;
   const c = card(cardId);
   if (!c) return;
+  if (!darfAusruesten(room, player)) {
+    log(room, `${player.name} kann "${c.name}" gerade nicht anlegen - Ausruestung aendert man im eigenen Zug und nicht im Kampf.`);
+    touchRoom(room);
+    return;
+  }
+  // WINZIGE HÄNDE: "Du kannst keine zweihaendigen Gegenstaende benutzen."
+  if (curseBlocksTwoHanded(player) && (c.handsCost || 0) >= 2) {
+    log(room, `${player.name} hat winzige Haende - "${c.name}" braucht zwei Haende und bleibt liegen.`);
+    touchRoom(room);
+    return;
+  }
   // SCHUMMELN!: "Diesen Gegenstand kannst du nun legal einsetzen, auch wenn
   // das normalerweise nicht erlaubt wäre" - hebt fuer GENAU DIESEN Gegenstand
   // die Anlege-Regeln auf (siehe handlePlayCheat). Bewusst nur fuer die
@@ -4512,6 +4650,11 @@ function handleUnequipItem(room, playerId, cardId) {
   const player = findPlayer(room, playerId);
   if (!player) return;
   if (!equippedItemIds(player).includes(cardId)) return;
+  if (!darfAusruesten(room, player)) {
+    log(room, `${player.name} kann gerade nichts ablegen - Ausruestung aendert man im eigenen Zug und nicht im Kampf.`);
+    touchRoom(room);
+    return;
+  }
   unequipSlotCard(player, cardId);
   player.hand.push(cardId);
   const c = card(cardId);
@@ -4522,6 +4665,13 @@ function handleUnequipItem(room, playerId, cardId) {
 function handleSellItems(room, playerId, cardIds) {
   const player = findPlayer(room, playerId);
   if (!player) return;
+  // "Verkaufen kannst du jederzeit in deinem Zug - aber nicht im Kampf."
+  const dran = currentPlayer(room);
+  if (room.combat || room.turnPhase === 'vorbereitung' || !dran || dran.id !== playerId) {
+    log(room, `${player.name} kann gerade nicht verkaufen - Verkaufen geht nur im eigenen Zug und nicht im Kampf.`);
+    touchRoom(room);
+    return;
+  }
   const ids = [...new Set(cardIds)];
   let total = 0;
   const removable = [];
@@ -5157,6 +5307,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'playRaceOrClass', ({ cardId }) => act(socket, (room, pid) => handlePlayRaceOrClass(room, pid, cardId)));
   onSafe(socket, 'discardFromHand', ({ cardId }) => act(socket, (room, pid) => handleDiscardFromHand(room, pid, cardId)));
   onSafe(socket, 'endTurn', () => act(socket, (room, pid) => handleEndTurnAction(room, pid)));
+  onSafe(socket, 'prepReady', ({ ready }) => act(socket, (room, pid) => handlePrepReady(room, pid, ready)));
 
   onSafe(socket, 'disconnect', () => {
     const room = rooms.get(socket.data.roomCode);
@@ -5170,6 +5321,7 @@ io.on('connection', (socket) => {
     // oeffnen gar kein Fenster) und advanceCardActionQueue (Getrennte werden
     // uebersprungen).
     loeseReaktionsfensterOhne(room, player.id);
+    pruefeVorbereitungFertig(room);
     broadcastState(room);
   });
 });
@@ -5214,6 +5366,7 @@ module.exports = {
   kartenSperreAktiv,
   ATTACHMENT_CARDS, equippedBonusSum,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
+  handlePrepReady, darfAusruesten,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, endTurn,
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee, handlePlayCurseFromHand,

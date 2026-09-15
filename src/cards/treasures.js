@@ -214,14 +214,14 @@ module.exports = (ctx) => {
     'FREUNDSCHAFTSTRANK': () => ({ type: 'endCombatNoLevel', thenLoot: true }),
     // "Verwandelt ein Monster in einen Papagei, der wegfliegt und seinen
     // Schatz zurücklässt." -> Schatz gehört der kämpfenden Person.
-    'POLLYVERWANDLUNGSTRANK': () => ({ type: 'endCombatNoLevel', leavesTreasure: true }),
+    'POLLYVERWANDLUNGSTRANK': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
     // "Bringt ein Monster dazu, verwirrt wegzulaufen und seinen Schatz
     // zurückzulassen." -> ebenfalls Schatz, aber keine Stufe.
-    'TRANK DER IRRELEVANZ': () => ({ type: 'endCombatNoLevel', leavesTreasure: true }),
+    'TRANK DER IRRELEVANZ': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
     // "Lege das Monster nach unten in den Türstapel zurück. Wenn es das
     // einzige Monster im Kampf war, ist der Kampf vorbei und der aktuelle
     // Spieler plündert den Raum." (kein Schatz - das Monster nimmt ihn mit)
-    'ENTLASSUNGSGLOCKE': () => ({ type: 'endCombatNoLevel', returnToDoorDeckBottom: true, thenLoot: true }),
+    'ENTLASSUNGSGLOCKE': () => ({ type: 'removeOneMonster', returnToDoorDeckBottom: true, thenLoot: true }),
     // "Der Helfer vergisst, dass er kämpft, geht und lässt den Hauptkämpfer
     // allein im Kampf zurück." (nur spielbar, wenn ein Helfer im Kampf ist)
     'CYTILLESH-TRANK': (player, room) => (room.combat.helperId ? { type: 'removeHelper' } : null),

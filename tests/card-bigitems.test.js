@@ -21,7 +21,10 @@ function makePlayer(overrides) {
 
 function makeRoom(players) {
   return {
-    code: 'TEST', players, doorDiscard: [], treasureDiscard: [], logs: [], combat: null, cleanupTimer: null,
+    // turnIndex/turnPhase: Ausruestung darf nur im eigenen Zug geaendert
+    // werden (siehe darfAusruesten in server.js).
+    code: 'TEST', players, turnIndex: 0, turnPhase: 'tuer',
+    doorDiscard: [], treasureDiscard: [], logs: [], combat: null, cleanupTimer: null,
   };
 }
 

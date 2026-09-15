@@ -16,6 +16,7 @@ const {
   UNDEAD_MONSTERS, handleSetCombatReady, combatReadyRequired, combatAllReady,
   refreshCombatReady, handleSetCombatModifier, handleFleeReroll, handleSellItems, endTurn,
   handleResolveCardChoice, handleFleeEscape, handlePlayCombatCard,
+  handleEquipItem, handleUnequipItem, handlePrepReady,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -719,6 +720,85 @@ function run() {
   // -------------------------------------------------------------------
   assert.strictEqual(handLimit(makePlayer({})), 5, 'Standard-Handkartenlimit bleibt 5');
   assert.strictEqual(handLimit(makePlayer({ races: [ZWERG] })), 6, 'Zwerge dürfen 6 Karten halten');
+
+  // -------------------------------------------------------------------
+  // AMAZONE: "Greift keine Spielerinnen oder geschlechtsumgewandelte Spieler
+  // an. Sie erhalten stattdessen 1 Schatz."
+  // -------------------------------------------------------------------
+  {
+    const amazone = findCard('AMAZONE', 'monster');
+    const mann = drawRoom(amazone.id, { gender: 'm' });
+    assert.ok(mann.combat, 'Maenner kaempfen ganz normal gegen die Amazone');
+    done(mann);
+
+    const frau = drawRoom(amazone.id, { gender: 'w' });
+    assert.strictEqual(frau.combat, null, 'gegen Spielerinnen greift sie nicht an');
+    assert.strictEqual(frau.turnPhase, 'aerger', 'der Zug laeuft mit Phase 2 weiter');
+    assert.strictEqual(frau.players[0].hand.length, 1, 'stattdessen gibt es 1 Schatz');
+    assert.ok(frau.doorDiscard.includes(amazone.id), 'die Amazone zieht weiter');
+    done(frau);
+  }
+
+  // -------------------------------------------------------------------
+  // Ausruestung nur im eigenen Zug und nie im Kampf (darfAusruesten),
+  // Verkaufen genauso.
+  // -------------------------------------------------------------------
+  {
+    const ruestung = findCard('LEDERRÜSTUNG', 'item');
+    const teuer = findCard('SCHUTZSANDALEN', 'item'); // 700 GS
+    const gold = findCard('1.000 GOLDSTÜCKE');
+
+    const eigenerZug = makeRoom();
+    eigenerZug.players[0].hand = [ruestung.id];
+    handleEquipItem(eigenerZug, 'p1', ruestung.id);
+    assert.strictEqual(eigenerZug.players[0].equipped.armor, ruestung.id, 'im eigenen Zug geht es');
+    handleUnequipItem(eigenerZug, 'p1', ruestung.id);
+    assert.strictEqual(eigenerZug.players[0].equipped.armor, null, 'ablegen auch');
+    done(eigenerZug);
+
+    const fremderZug = makeRoom({ turnIndex: 1 });
+    fremderZug.players[0].hand = [ruestung.id];
+    handleEquipItem(fremderZug, 'p1', ruestung.id);
+    assert.strictEqual(fremderZug.players[0].equipped.armor, null, 'im fremden Zug nicht');
+    done(fremderZug);
+
+    const imKampf = combatRoom('LAHMER GOBLIN', { hand: [ruestung.id] });
+    handleEquipItem(imKampf.room, 'p1', ruestung.id);
+    assert.strictEqual(imKampf.room.players[0].equipped.armor, null, 'im Kampf erst recht nicht');
+    handleSellItems(imKampf.room, 'p1', [gold.id]);
+    done(imKampf.room);
+
+    const verkauf = makeRoom({ turnIndex: 1 });
+    verkauf.players[0].hand = [gold.id, teuer.id];
+    handleSellItems(verkauf, 'p1', [gold.id]);
+    assert.strictEqual(verkauf.players[0].level, 5, 'im fremden Zug wird nicht verkauft');
+    verkauf.turnIndex = 0;
+    handleSellItems(verkauf, 'p1', [gold.id]);
+    assert.strictEqual(verkauf.players[0].level, 6, 'im eigenen Zug schon');
+    done(verkauf);
+  }
+
+  // -------------------------------------------------------------------
+  // Vorbereitungsrunde: alle duerfen anlegen, die erste Runde startet erst,
+  // wenn alle bereit sind.
+  // -------------------------------------------------------------------
+  {
+    const ruestung = findCard('LEDERRÜSTUNG', 'item');
+    const room = makeRoom({ turnPhase: 'vorbereitung', prepReady: {} });
+    // connected: getrennte Personen blockieren die Vorbereitung nicht
+    // (pruefeVorbereitungFertig) - hier sitzen beide am Geraet.
+    room.players.forEach((p) => { p.connected = true; });
+    room.players[1].hand = [ruestung.id];
+    handleEquipItem(room, 'p2', ruestung.id);
+    assert.strictEqual(room.players[1].equipped.armor, ruestung.id, 'in der Vorbereitung legt jede:r an');
+
+    handlePrepReady(room, 'p1', true);
+    assert.strictEqual(room.turnPhase, 'vorbereitung', 'eine fehlt noch');
+    handlePrepReady(room, 'p2', true);
+    assert.strictEqual(room.turnPhase, 'tuer', 'alle bereit -> erste Runde');
+    handleEquipItem(room, 'p2', ruestung.id);
+    done(room);
+  }
 
   console.log('OK - Dauerwirkungen des Basis-Sets: Fluchschutz, Monsterregeln, Weglaufen, Siegesboni, Klassenkräfte, Bereit-Check, Handlimit.');
 }
