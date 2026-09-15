@@ -259,5 +259,30 @@ const spec = (name, player, room) => {
   assert.strictEqual(p.equipped.head, null, `der Ork-Helm haette weg gemusst: ${desc}`);
 }
 
+// --- SIEBENJÄHRIGER LICH: Tod UND eine Stufe -------------------------------
+// "Wenn er dich erwischt, stirbst du nicht nur, sondern verlierst auch eine
+// Stufe." Der Tod selbst kostet keine Stufe mehr (gedruckte Regel), also
+// zaehlt dieser Zusatz wirklich.
+{
+  const opfer = makePlayer({ id: 'p1', level: 6, hand: [findCard('MONSTERFUTTER').id] });
+  const raeuber = makePlayer({ id: 'p2', name: 'B', level: 3 });
+  const room = makeRoom([opfer, raeuber]);
+  const futter = findCard('MONSTERFUTTER').id;
+  applyPrimitiveAction(room, opfer, resolveConsequenceSpec('SIEBENJÄHRIGER LICH', 'x', opfer, room));
+  assert.strictEqual(opfer.level, 5, 'Tod kostet keine Stufe, die Karte aber schon eine');
+  // Der Tod oeffnet das Pluendern der Leiche - danach ist die Hand leer.
+  assert.ok(room.pendingCardAction, 'die Leiche wird gepluendert');
+  handleResolveCardCardChoice(room, 'p2', futter);
+  assert.strictEqual(opfer.hand.length, 0, 'und alle Karten sind weg');
+  assert.ok(raeuber.hand.includes(futter), 'die Karte hat den Besitzer gewechselt');
+}
+{
+  // Unter Stufe 1 geht es nie.
+  const p = makePlayer({ id: 'p1', level: 1 });
+  const room = makeRoom([p]);
+  applyPrimitiveAction(room, p, resolveConsequenceSpec('SIEBENJÄHRIGER LICH', 'x', p, room));
+  assert.strictEqual(p.level, 1, 'Stufe 1 bleibt Stufe 1');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-clerical-badstuffs: ok');
