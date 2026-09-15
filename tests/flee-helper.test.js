@@ -12,7 +12,8 @@
 const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, handleAttemptFlee, handleAckConsequence,
-  handleUseGuaranteedFlee, fluechtenderId,
+  handleUseGuaranteedFlee, fluechtenderId, handleRequestHelp, handleRespondHelp,
+  resolveCombatWin,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -144,6 +145,46 @@ function fluchtRaum(monsterName, extra) {
   handleAttemptFlee(room, a.id, 0);
   assert.strictEqual(room.combat, null, 'auf jemanden, der nicht da ist, wird nicht gewartet');
   assert.strictEqual(room.pendingConsequence.playerId, a.id, 'nur A bekommt das Miese Zeug');
+}
+
+// --- Zusage beim Hilfe-Anfragen: die ersten N Schaetze gehen an die Hilfe ---
+// "Wer hilft, handelt seinen Anteil aus" ist am Tisch eine Absprache - hier
+// wird sie mit der Anfrage festgeschrieben und beim Sieg eingeloest.
+{
+  // KRAKZILLA: Stufe 18, 4 Schaetze - genug zum Aufteilen.
+  const { room, a, b } = fluchtRaum('KRAKZILLA');
+  Object.assign(room.combat, { helperId: null, mustFlee: false });
+
+  handleRequestHelp(room, a.id, b.id, 2);
+  assert.strictEqual(room.combat.helperPending.reward, 2, 'die Zusage haengt an der Anfrage');
+  handleRespondHelp(room, b.id, true);
+  assert.strictEqual(room.combat.helperReward, 2, 'und gilt, sobald angenommen wurde');
+
+  resolveCombatWin(room);
+  assert.strictEqual(b.hand.length, 2, 'die Helfer:in bekommt genau die zugesagten 2');
+  assert.strictEqual(a.hand.length, 2, 'der Rest bleibt bei der kaempfenden Person');
+  assert.strictEqual(b.lastReward.cardIds.length, 2, 'und sieht die Belohnung auch angezeigt');
+}
+{
+  // Mehr zusagen, als der Kampf hergibt, geht nicht: LAHMER GOBLIN hat 1.
+  const { room, a, b } = fluchtRaum('LAHMER GOBLIN');
+  Object.assign(room.combat, { helperId: null, mustFlee: false });
+  handleRequestHelp(room, a.id, b.id, 99);
+  assert.strictEqual(room.combat.helperPending.reward, 1, 'auf die Schatzzahl des Kampfes geklemmt');
+  handleRespondHelp(room, b.id, true);
+  resolveCombatWin(room);
+  assert.strictEqual(b.hand.length, 1);
+  assert.strictEqual(a.hand.length, 0, 'dann bleibt fuer die kaempfende Person nichts uebrig');
+}
+{
+  // Ohne Zusage bleibt alles beim Alten.
+  const { room, a, b } = fluchtRaum('KRAKZILLA');
+  Object.assign(room.combat, { helperId: null, mustFlee: false });
+  handleRequestHelp(room, a.id, b.id);
+  handleRespondHelp(room, b.id, true);
+  resolveCombatWin(room);
+  assert.strictEqual(a.hand.length, 4, 'alle Schaetze an die kaempfende Person');
+  assert.strictEqual(b.hand.length, 0);
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
