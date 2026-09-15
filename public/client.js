@@ -517,9 +517,9 @@
     const badges = document.createElement('div');
     badges.className = 'row gap wrap';
     badges.style.marginBottom = '12px';
-    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)')));
-    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
-    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
+    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
+    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
     if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
     body.appendChild(badges);
     if ((p.activeCurses || []).length) {
@@ -1225,13 +1225,13 @@
 
     const badges = $('myBadges');
     badges.innerHTML = '';
-    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)')));
-    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
-    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)')));
+    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
+    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+    (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
     if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
-    if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)'));
-    if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)'));
-    if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)'));
+    if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)', p.raceCapCard));
+    if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)', p.classCapCard));
+    if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)', p.powerGroupCapCard));
     curseTags(p, badges);
 
     const equip = $('myEquip');
@@ -1765,10 +1765,16 @@
     });
   }
 
-  function smallTag(text, color) {
+  // cardId optional: macht die Marke anklickbar und oeffnet die Grossansicht.
+  function smallTag(text, color, cardId) {
     const span = document.createElement('span');
     span.className = 'tag'; span.style.background = color; span.style.color = 'white';
     span.textContent = text;
+    if (cardId) {
+      span.style.cursor = 'pointer';
+      span.title = 'Karte ansehen';
+      span.onclick = () => openCardModal(cardId);
+    }
     return span;
   }
   function textNode(text) { const s = document.createElement('span'); s.className = 'hint'; s.textContent = text; return s; }
