@@ -174,6 +174,34 @@ function runUnit() {
     assert.deepStrictEqual(p1.hand, [tuch.id], 'die Gegenleistung wird trotzdem übergeben');
   }
 
+  // -------------------------------------------------------------------
+  // Im Kampf wird nicht gehandelt: weder anbieten noch einen laufenden
+  // Handel abschliessen (sonst liesse sich die Kampfrechnung mitten im
+  // Kampf ueber fremde Gegenstaende verschieben).
+  // -------------------------------------------------------------------
+  {
+    const p1 = makePlayer('p1', [helm.id]);
+    const p2 = makePlayer('p2', [tuch.id]);
+    const room = makeRoom(p1, p2);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [] };
+
+    handleProposeTrade(room, 'p1', 'p2', [helm.id]);
+    assert.strictEqual(room.trades.length, 0, 'im Kampf kommt kein Angebot zustande');
+
+    // Angebot von VOR dem Kampf darf mittendrin nicht abgeschlossen werden.
+    room.combat = null;
+    handleProposeTrade(room, 'p1', 'p2', [helm.id]);
+    const tradeId = room.trades[0].id;
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [] };
+    handleRespondTrade(room, 'p2', tradeId, true, [tuch.id]);
+    assert.strictEqual(room.trades[0].status, 'pending', 'die Antwort wird im Kampf abgewiesen');
+    assert.ok(p1.hand.includes(helm.id) && p2.hand.includes(tuch.id), 'es wechselt nichts');
+
+    // Zuruecknehmen bewegt keine Karten und bleibt deshalb erlaubt.
+    handleCancelTrade(room, 'p1', tradeId);
+    assert.strictEqual(room.trades.length, 0, 'zurueckziehen geht auch im Kampf');
+  }
+
   openRooms.forEach((r) => clearTimeout(r.cleanupTimer)); // touchRoom-Timer aufräumen
   console.log('OK - Zwei-Wege-Tausch, angelegte Gegenstände, Ablehnen/Zurückziehen und manipulierte Anfragen geprüft.');
 }

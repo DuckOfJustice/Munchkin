@@ -4884,8 +4884,10 @@ function handleEndTurnAction(room, playerId) {
 }
 
 // ---------------------------------------------------------------------------
-// Handel zwischen Spielenden - jederzeit möglich, nicht an Zug/Phase
-// gebunden, ganz wie am echten Tisch. Tauschbar sind Handkarten UND angelegte
+// Handel zwischen Spielenden - ausserhalb eines Kampfes jederzeit möglich und
+// nicht an die Zugreihenfolge gebunden, ganz wie am echten Tisch; im Kampf
+// dagegen gar nicht (siehe darfHandeln, gleiche Grenze wie beim Anlegen und
+// Verkaufen). Tauschbar sind Handkarten UND angelegte
 // Gegenstände; beim Empfänger landet alles auf der Hand (Anlegen bleibt eine
 // eigene Aktion, damit Größen-/Slot-Regeln weiter gelten).
 //
@@ -4923,10 +4925,21 @@ function tradeGoldSum(ids) {
   return ids.reduce((sum, id) => { const c = card(id); return sum + (c && typeof c.gold === 'number' ? c.gold : 0); }, 0);
 }
 
+// "Waehrend eines Kampfes wird nicht gehandelt." Sonst liesse sich die
+// Kampfrechnung mitten im Kampf ueber fremde Gegenstaende verschieben - genau
+// wie beim Anlegen (darfAusruesten) und Verkaufen.
+function darfHandeln(room, player) {
+  if (!room.combat) return true;
+  log(room, `${player.name} kann im Kampf nicht handeln.`);
+  touchRoom(room);
+  return false;
+}
+
 function handleProposeTrade(room, playerId, toId, offerCardIds) {
   const from = findPlayer(room, playerId);
   const to = findPlayer(room, toId);
   if (!from || !to || from.id === to.id || !to.connected) return;
+  if (!darfHandeln(room, from)) return;
   const ids = ownTradeIds(from, offerCardIds);
   if (!ids.length) return;
   if (!room.trades) room.trades = [];
@@ -4955,6 +4968,10 @@ function handleRespondTrade(room, playerId, tradeId, accept, counterCardIds) {
   const from = findPlayer(room, trade.fromId);
   const to = findPlayer(room, trade.toId);
   if (!from || !to) { room.trades = room.trades.filter((t) => t.id !== trade.id); return; }
+  // Auch Annehmen/Gegenangebot sind Handeln - ein vor dem Kampf gestelltes
+  // Angebot darf nicht mittendrin abgeschlossen werden. Zuruecknehmen
+  // (handleCancelTrade) bleibt erlaubt: es bewegt keine Karten.
+  if (!darfHandeln(room, findPlayer(room, playerId) || from)) return;
 
   // Schritt 2: die angefragte Seite antwortet auf das Angebot.
   if (trade.status === 'pending' && playerId === to.id) {

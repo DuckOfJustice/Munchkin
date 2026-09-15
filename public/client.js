@@ -570,7 +570,8 @@
       }
       row.appendChild(equipRow);
 
-      if (p.id !== myInfo.playerId && p.connected) {
+      // Im Kampf wird nicht gehandelt (siehe darfHandeln im Server).
+      if (p.id !== myInfo.playerId && p.connected && !state.combat) {
         const tradeBtn = document.createElement('button');
         tradeBtn.className = 'small'; tradeBtn.textContent = '🤝 Handeln';
         tradeBtn.style.marginTop = '6px';
@@ -707,6 +708,13 @@
     if (!box) return;
     box.innerHTML = '';
     if (!state || state.phase !== 'playing') return;
+    // Im Kampf wird nicht gehandelt (der Server weist es ohnehin ab) - dann
+    // auch keine Handelsflaeche zeigen, sondern nur den Grund.
+    if (state.combat) {
+      const offen = (myInfo.incomingTrades || []).length + (myInfo.outgoingTrades || []).length;
+      if (offen) box.appendChild(textNode('Im Kampf wird nicht gehandelt - offene Angebote warten bis danach.'));
+      return;
+    }
 
     // 1. Eigenes Angebot zusammenstellen
     if (tradeComposeTargetId) {
