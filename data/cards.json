@@ -4488,23 +4488,6 @@
     "treasureCount": null
   },
   {
-    "id": "302cc7e8-9af9-4414-ba89-d8fe0e228d4b",
-    "set": "clericalerrors",
-    "setLabel": "Clerical Errors",
-    "type": "door",
-    "category": "door_other",
-    "name": "DU STOLPERST ÜBER DEINE EIGENE TRUHE",
-    "text": "",
-    "badstuff": "",
-    "gold": null,
-    "bonus": null,
-    "slotLabel": null,
-    "slotKind": null,
-    "handsCost": 0,
-    "level": null,
-    "treasureCount": null
-  },
-  {
     "id": "67fbd689-3dc7-430e-b120-4cd4cd402364",
     "set": "clericalerrors",
     "setLabel": "Clerical Errors",

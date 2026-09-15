@@ -2,7 +2,7 @@
 
 Eine browserbasierte Online-Version des Kartenspiels **„Munchkin"** (Steve Jackson Games / Pegasus Spiele) zum Spielen mit Freunden – jede:r auf dem eigenen Handy/Tablet/PC, ein gemeinsamer Server übernimmt Tür-/Schatzstapel, Phasen, Kampf-Mathematik, Stufen und Ausrüstung.
 
-Die Kartendaten (504 Karten: Base, Clerical Errors, Pixels & Paper Promos, Unnatural Axe, Pathfinder) stammen aus den eigenen, bereits erworbenen Spieldateien und wurden für dieses Projekt aufbereitet (`data/cards.json`). Es werden **keine offiziellen Kartengrafiken** verwendet – die Karten werden als einfache, klar erkennbare Text-Kacheln dargestellt (siehe „Warum keine Kartenbilder?" unten).
+Die Kartendaten (501 Karten: Base, Clerical Errors, Pixels & Paper Promos, Unnatural Axe, Pathfinder) stammen aus den eigenen, bereits erworbenen Spieldateien und wurden für dieses Projekt aufbereitet (`data/cards.json`). Es werden **keine offiziellen Kartengrafiken** verwendet – die Karten werden als einfache, klar erkennbare Text-Kacheln dargestellt (siehe „Warum keine Kartenbilder?" unten).
 
 ## Wichtig: Was automatisiert ist / Was manuell bleibt
 
@@ -77,7 +77,7 @@ Munchkin/
 ├── server.js            Spiel-Server (Node.js, Express + Socket.IO)
 ├── src/cards/            Kartentabellen (Große Gegenstände, Konsequenzen, Schätze, Dauerwirkungen, Reaktionen)
 ├── tools/                coverage-scan.js (welche Karte hat keinen Ausspielweg? `node tools/coverage-scan.js <set>`), smoke-run.js (Partie gegen den laufenden Server)
-├── data/cards.json       504 Karten (Name, Text, Stufe, Bonus, Goldwert, Körperteil, ...)
+├── data/cards.json       501 Karten (Name, Text, Stufe, Bonus, Goldwert, Körperteil, ...)
 ├── package.json
 ├── Dockerfile
 ├── docker-compose.yml

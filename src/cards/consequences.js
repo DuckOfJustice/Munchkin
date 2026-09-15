@@ -330,7 +330,6 @@ module.exports = (ctx) => {
     'HUNGRIGER RUCKSACK': () => null,
     'KLEINER FEHLER': () => null,
     'TEMPORÄRE ANMNESIE': () => null,
-    'DU STOLPERST ÜBER DEINE EIGENE TRUHE': () => null,
   };
 
   // Karten aus dem Pathfinder-Set, die in den Rohdaten als "door_other"
@@ -355,7 +354,7 @@ module.exports = (ctx) => {
     'VERLIERE 1 KLEINEN GEGENSTAND', 'GESCHLECHTSUMWANDLUNG',
     'HUHN AUF DEINEM KOPF', 'NARRENGOLD', 'BLUTSCHLEIER', 'RAUSCHPOCKEN',
     'TOURISTENFALLE', 'EDELMUT', 'HUNGRIGER RUCKSACK', 'KLEINER FEHLER',
-    'TEMPORÄRE ANMNESIE', 'DU STOLPERST ÜBER DEINE EIGENE TRUHE',
+    'TEMPORÄRE ANMNESIE',
     'ENTE DES SCHRECKENS', 'MIESER SPIEGEL', 'STINKER', 'ZWERGENBIER',
   ]);
 

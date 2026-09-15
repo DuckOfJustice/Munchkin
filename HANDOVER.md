@@ -137,8 +137,7 @@ jetzt ergänzt:
   GROSSEN GEGENSTAND, VERLIERE 1 KLEINEN GEGENSTAND, GESCHLECHTSUMWANDLUNG,
   HUHN AUF DEINEM KOPF, NARRENGOLD, BLUTSCHLEIER, RAUSCHPOCKEN,
   TOURISTENFALLE, EDELMUT, HUNGRIGER RUCKSACK, KLEINER FEHLER, TEMPORÄRE
-  ANMNESIE, DU STOLPERST ÜBER DEINE EIGENE TRUHE, MIESER SPIEGEL, STINKER,
-  WINZIGE HÄNDE.
+  ANMNESIE, MIESER SPIEGEL, STINKER, WINZIGE HÄNDE.
 - ENTE DES SCHRECKENS braucht keinen Override (fällt sauber unter den
   generischen `parseAutoConsequence`-Fallback: "Verliere 2 Stufen").
 - Alle oben genannten wurden zusätzlich zu `DOOR_OTHER_AS_CURSE` hinzugefügt,
@@ -967,9 +966,9 @@ alle bewusst manuell, siehe 9.3.
 - **GUMMI-GOLEM** (Schlimme Dinge): „Du musst in jedem Kampf deine Hilfe
   anbieten, darfst keinen Schatz annehmen, bis du einen verlierst" - eine
   Dauerpflicht über viele Züge ohne Tracker.
-- **DU STOLPERST ÜBER DEINE EIGENE TRUHE**, **TEMPORÄRE ANMNESIE**,
-  **KLEINER FEHLER**, **HUNGRIGER RUCKSACK**, **TOURISTENFALLE** - dieselben
-  fünf, die schon im Basis-Set-Audit (§8.6) zurückgestellt wurden: freie
+- **TEMPORÄRE ANMNESIE**, **KLEINER FEHLER**, **HUNGRIGER RUCKSACK**,
+  **TOURISTENFALLE** - dieselben, die schon im Basis-Set-Audit (§8.6)
+  zurückgestellt wurden: freie
   Handelsreihenfolge, wiederkehrender Rundenend-Hook, ein neuer Kampf mitten
   in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-Status.
 
