@@ -1041,11 +1041,14 @@
         // Zusage: wie viele der erbeuteten Schatzkarten die Helfer:in bekommt.
         // Die Obergrenze ist die Schatzzahl des Kampfes - der Server klemmt
         // denselben Wert noch einmal (Fremdeingabe).
-        const maxSchaetze = (c.monsterIds || []).reduce((sum, id) => sum + (card(id).treasureCount || 0), 0)
-          + (c.treasureDelta || 0);
+        // Dieselbe Rechnung wie kampfSchatzZahl im Server, inklusive der
+        // Untergrenze 1 bei negativen Verstaerkern (BABY: "mindestens 1").
+        const basisSchaetze = (c.monsterIds || []).reduce((sum, id) => sum + ((card(id) || {}).treasureCount || 0), 0);
+        const maxSchaetze = Math.max(0, c.treasureDelta ? Math.max(1, basisSchaetze + c.treasureDelta) : basisSchaetze);
         const lohn = document.createElement('input');
-        lohn.type = 'number'; lohn.min = '0'; lohn.max = String(Math.max(0, maxSchaetze));
+        lohn.type = 'number'; lohn.min = '0';
         lohn.value = '0'; lohn.style.width = '4em'; lohn.title = 'Zugesagte Schatzkarten';
+        lohn.max = String(maxSchaetze);
         const helpSelect = document.createElement('select');
         helpSelect.innerHTML = '<option value="">Um Hilfe bitten...</option>' +
           state.players.filter((p) => p.id !== c.actorId && p.connected)
@@ -1056,7 +1059,7 @@
         actions.appendChild(helpSelect);
         actions.appendChild(textNode('Zusage:'));
         actions.appendChild(lohn);
-        actions.appendChild(textNode(`Schatzkarte(n) (max. ${Math.max(0, maxSchaetze)})`));
+        actions.appendChild(textNode(`Schatzkarte(n) (max. ${maxSchaetze})`));
       }
       if (c.helperPending) {
         actions.appendChild(textNode(`Warte auf Antwort von ${state.players.find((p) => p.id === c.helperPending.targetId).name}`

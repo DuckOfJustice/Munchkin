@@ -2169,6 +2169,9 @@ function applyTargetAction(room, actor, target, action) {
       c.actorId = target.id;
       c.helperId = null;
       c.helperPending = null;
+      // Die Zusage gehoerte zur alten Kampfpaarung - sie geht nicht auf die
+      // neue kaempfende Person ueber.
+      c.helperReward = 0;
       c.ready = {};
       refreshCombatReady(room);
       return `${target.name} kämpft jetzt anstelle von ${actor.name}`;
@@ -4981,7 +4984,10 @@ function handleRespondTrade(room, playerId, tradeId, accept, counterCardIds) {
   // Auch Annehmen/Gegenangebot sind Handeln - ein vor dem Kampf gestelltes
   // Angebot darf nicht mittendrin abgeschlossen werden. Zuruecknehmen
   // (handleCancelTrade) bleibt erlaubt: es bewegt keine Karten.
-  if (!darfHandeln(room, findPlayer(room, playerId) || from)) return;
+  // Nur die beiden Beteiligten pruefen - wer gar nicht zum Handel gehoert,
+  // faellt unten durch die Rollenpruefung und braucht keine Logzeile.
+  const antwortende = playerId === from.id ? from : (playerId === to.id ? to : null);
+  if (antwortende && !darfHandeln(room, antwortende)) return;
 
   // Schritt 2: die angefragte Seite antwortet auf das Angebot.
   if (trade.status === 'pending' && playerId === to.id) {
