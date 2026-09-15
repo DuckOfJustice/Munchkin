@@ -11,6 +11,7 @@ const {
   startCombat, hasenWurf, handlePlayCombatCard, handlePlayCurseFromHand,
   applyTargetAction, TREASURE_POWER_OVERRIDES, DOOR_COMBAT_CARDS,
   monsterPassOption, FLEE_ITEM_BONUS, applyPrimitiveAction, handleResolveCardChoice,
+  handleDrawDoor,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -92,6 +93,30 @@ function mitKampf(room, monsterIds, actorId) {
   handleResolveCardChoice(room, ohneZeug.id, wahl.id);
   assert.strictEqual(ohneZeug.hand.length, 1, 'genau eine Karte wird behalten');
   assert.strictEqual(room.treasureDiscard.length, 1, 'die andere geht auf den Ablagestapel');
+}
+
+// --- PACKRATTE ueber den echten Weg: Tuer ziehen -> "Geschenk annehmen" ----
+// Die Schatzwahl wird aus einer laufenden Wahl heraus geoeffnet. Frueher
+// raeumte die Abwicklung von handleResolveCardChoice sie sofort wieder weg -
+// der Zug lief ohne Auswahl weiter (siehe finishCardAction in server.js).
+{
+  const ratte = findCard('PACKRATTE', 'monster');
+  const p = makePlayer({});
+  const room = makeRoom([p], {
+    turnPhase: 'tuer',
+    doorDeck: [ratte.id],
+    treasureDeck: [findCard('WUNSCHRING').id, findCard('SCHLITTENGLOCKE').id],
+  });
+  handleDrawDoor(room, p.id);
+  assert.ok(room.pendingCardAction, 'kaempfen oder Geschenk annehmen');
+  const geschenk = room.pendingCardAction.options.find((o) => o.id === 'alt');
+  handleResolveCardChoice(room, p.id, geschenk.id);
+  assert.ok(room.pendingCardAction, 'die Wahl zwischen den zwei offenen Schaetzen steht an');
+  assert.strictEqual(room.pendingCardAction.options.length, 2);
+  handleResolveCardChoice(room, p.id, room.pendingCardAction.options[0].id);
+  assert.strictEqual(p.hand.length, 1, 'genau eine Karte wird behalten');
+  assert.strictEqual(room.treasureDiscard.length, 1, 'die andere geht auf den Ablagestapel');
+  assert.strictEqual(room.pendingCardAction, null, 'danach ist kein Dialog mehr offen');
 }
 
 // --- DER GANZ NORMALE HASE -------------------------------------------------

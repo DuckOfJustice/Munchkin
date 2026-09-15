@@ -516,6 +516,8 @@ function publicState(room) {
     // davon neu wuerfeln statt den Wert zu setzen, steht in rollRerollCards.
     rollReactionCards: [...ROLL_REACTION_CARDS],
     rollRerollCards: [...ROLL_REROLL_CARDS],
+    // Und welche nur auf den EIGENEN Wurf gespielt werden duerfen.
+    rollReactionOwnRollOnly: [...ROLL_REACTION_OWN_ROLL_ONLY],
     // ORK/GNOM/BARDE: Rassen- und Klassenkarten, die in den Rohdaten als
     // "door_other" gefuehrt werden - damit der Client den "Spielen"-Knopf
     // zeigt, ohne eine eigene Namensliste zu pflegen.
@@ -1847,7 +1849,8 @@ const {
 // siehe src/cards/reactions.js.
 const reactionsFactory = require('./src/cards/reactions.js');
 const {
-  ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
+  ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ROLL_REACTION_OWN_ROLL_ONLY,
+  ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
   LINGERING_CURSES, COMBAT_REACTION_CARDS,
 } = reactionsFactory();
 
@@ -2067,6 +2070,17 @@ function handleUseCardPower(room, playerId, cardId) {
   touchRoom(room);
 }
 
+// Wickelt einen aufgeloesten Kartendialog ab. Hat die Aktion dabei SELBST
+// einen neuen Dialog geoeffnet (PACKRATTE: "Ziehe zwei offene Schaetze und
+// waehle einen aus" oeffnet aus der Kampf/Geschenk-Wahl heraus eine zweite
+// Wahl), bleibt der stehen - sonst raeumte die Abwicklung ihn sofort wieder
+// weg und das Spiel lief ohne die Auswahl weiter.
+function finishCardAction(room, pa) {
+  if (room.pendingCardAction !== pa) return;
+  if (room._queuedCardAction) advanceCardActionQueue(room);
+  else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
+}
+
 function handleResolveCardChoice(room, playerId, optionId) {
   const pa = room.pendingCardAction;
   if (!pa || pa.playerId !== playerId || pa.kind !== 'choice') return;
@@ -2094,8 +2108,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     ? applyCombatPotionAction(room, player, action, sourceCard)
     : applyPrimitiveAction(room, player, action);
   log(room, `${player.name}: "${pa.cardName}" -> ${option ? option.label : optionId} (${desc}).`);
-  if (room._queuedCardAction) advanceCardActionQueue(room);
-  else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
+  finishCardAction(room, pa);
   touchRoom(room);
 }
 
@@ -2109,8 +2122,7 @@ function handleResolveCardTarget(room, playerId, targetId) {
   if (!stored || !player || !target) return;
   const desc = applyTargetAction(room, player, target, stored);
   log(room, `${player.name}: "${pa.cardName}" -> ${target.name} (${desc}).`);
-  if (room._queuedCardAction) advanceCardActionQueue(room);
-  else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
+  finishCardAction(room, pa);
   touchRoom(room);
 }
 
@@ -2149,8 +2161,7 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
     player.hand.push(chosenCardId);
     log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" aus dem Ablagestapel geholt.`, [chosenCardId]);
   }
-  if (room._queuedCardAction) advanceCardActionQueue(room);
-  else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
+  finishCardAction(room, pa);
   // ZUNGENDÄMON: "Gegenstand deiner Wahl VOR dem Kampf ablegen" - siehe
   // room._preCombatCost in handleDrawDoor. Der Kampf beginnt erst JETZT,
   // nachdem der Preis bezahlt ist.
@@ -2529,10 +2540,13 @@ function fleeModifierParts(room, player) {
 // Wer koennte auf dieses Ereignis reagieren? Bots spielen keine
 // Reaktionskarten, Getrennte koennen nicht - beide oeffnen deshalb kein
 // Fenster, sonst haengt die Partie an niemandem.
-function reactionHolders(room, cardSet) {
+function reactionHolders(room, cardSet, darf) {
   return room.players
     .filter((p) => p.connected && !p.isBot
-      && p.hand.some((id) => cardSet.has((card(id) || {}).name)))
+      && p.hand.some((id) => {
+        const name = (card(id) || {}).name;
+        return cardSet.has(name) && (!darf || darf(p.id, name));
+      }))
     .map((p) => p.id);
 }
 
@@ -2543,7 +2557,11 @@ function reactionHolders(room, cardSet) {
 // mehr dazu, lohnt sich ein echter Stack.
 function rollWithWindow(room, player, purpose, onResolve) {
   const roll = rollDie();
-  const holders = reactionHolders(room, ROLL_REACTION_CARDS);
+  // Der GEZINKTE WÜRFEL gilt nur fuer den eigenen Wurf - wer nur ihn haelt,
+  // bekommt bei fremden Wuerfen gar kein Fenster (siehe
+  // ROLL_REACTION_OWN_ROLL_ONLY).
+  const holders = reactionHolders(room, ROLL_REACTION_CARDS,
+    (pid, name) => !ROLL_REACTION_OWN_ROLL_ONLY.has(name) || pid === player.id);
   if (!holders.length) { onResolve(roll); return; }
   room.pendingRoll = { playerId: player.id, purpose, roll, holders, onResolve };
   log(room, `${player.name} würfelt ${roll} - es darf noch auf den Wurf reagiert werden.`);
@@ -2566,6 +2584,7 @@ function handlePlayReactionCard(room, playerId, cardId, value) {
     const p = findPlayer(room, playerId);
     const c = card(cardId);
     if (!p || !c || !p.hand.includes(cardId) || !ROLL_REACTION_CARDS.has(c.name)) return;
+    if (ROLL_REACTION_OWN_ROLL_ONLY.has(c.name) && playerId !== pr.playerId) return;
     // KATZENINTERVENTION wuerfelt neu, der GEZINKTE WÜRFEL setzt den Wert.
     const neu = ROLL_REROLL_CARDS.has(c.name)
       ? rollDie()
