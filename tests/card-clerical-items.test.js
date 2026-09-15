@@ -114,7 +114,9 @@ function makeRoom(players, monsterIds) {
   const p = makePlayer({ races: [gnom.id], level: 7, hand: [bremse.id] });
   const room = makeRoom([p]);
   handleEquipItem(room, p.id, bremse.id);
-  assert.strictEqual(p.level, 1, 'der Gnom stirbt (zurueck auf Stufe 1)');
+  // Tod kostet alle Karten, aber keine Stufe (gedruckte Regel).
+  assert.strictEqual(p.level, 7, 'der Gnom stirbt, behaelt aber seine Stufe');
+  assert.strictEqual(p.hand.length, 0, 'der Tod kostet alle Handkarten');
   assert.deepStrictEqual(p.equipped.hands, [null, null], 'angelegt wurde sie nicht');
 
   // Alle anderen legen sie ganz normal an.

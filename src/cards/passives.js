@@ -208,6 +208,20 @@ module.exports = (ctx) => {
   // sein 'in den Ruecken fallen' hinzu."
   const BACKSTAB_ITEMS = new Set(['STICH-O-MAT']);
 
+  // KALI: "es sei denn, du verteidigst dich mit (mindestens) 2 eigenen
+  // Waffen." Gezaehlt werden VERSCHIEDENE Handgegenstaende: eine Zweihand-
+  // waffe belegt zwar beide Plaetze, ist aber nur eine Waffe. Das
+  // ZWEIHÄNDIGE SCHWERT liegt in der Spezialausruestung (es kostet netto
+  // keine Hand, siehe FREE_HAND_ITEMS) und zaehlt trotzdem mit.
+  // ponytail: "Waffe" gegen "Schild" kennen die Kartendaten nicht - ein
+  // Schild in der Hand zaehlt hier mit. Kuratierte Ausnahmeliste waere der
+  // Aufruestweg.
+  const waffenAnzahl = (p) => {
+    const ids = new Set((p.equipped.hands || []).filter(Boolean));
+    (p.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
+    return ids.size;
+  };
+
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
   // die Rasse/Klasse hat (Angreifer:in oder Helfer:in) - nicht einmal pro
@@ -260,7 +274,7 @@ module.exports = (ctx) => {
     // es sei denn, du verteidigst dich mit (mindestens) 2 eigenen Waffen."
     'KALI': [
       { classes: ['PRIESTER'], bonus: 5 },
-      { wennErfuellt: (p) => p.equipped.hands.filter(Boolean).length < 2, bonus: 5, nurKaempfer: true },
+      { wennErfuellt: (p) => waffenAnzahl(p) < 2, bonus: 5, nurKaempfer: true },
     ],
     // "+3 gegen die, die keine Klasse haben."
     'RÜSSELKÄFER': { wennErfuellt: (p) => !p.classes.length, bonus: 3 },

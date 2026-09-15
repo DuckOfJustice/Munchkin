@@ -441,6 +441,7 @@
     renderDiscardPeek();
     renderReveal();
     renderCombat();
+    renderRollReaction();
     renderConsequence();
     renderCardAction();
     renderPhaseActions();
@@ -869,18 +870,9 @@
       div.appendChild(el);
     });
 
-    // Bedingtes Reaktionsfenster: GEZINKTER WÜRFEL (auf den Weglaufwurf) und
-    // KLEBERFLÄSCHCHEN (auf eine gelungene Flucht). Beide Felder kommen
-    // direkt vom Server - das eigentliche Ausspielen passiert an der
-    // jeweiligen Handkarte (siehe handActionsFor), hier nur Hinweis + Passen.
-    if (state.pendingRoll && state.pendingRoll.holders.includes(myInfo.playerId)) {
-      const row = document.createElement('div');
-      row.className = 'row gap wrap';
-      const werfer = state.players.find((p) => p.id === state.pendingRoll.playerId);
-      row.appendChild(textNode(`${werfer ? werfer.name : '?'} hat ${state.pendingRoll.roll} gewürfelt - du darfst noch mit einer Würfel-Reaktionskarte reagieren.`));
-      row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
-      div.appendChild(row);
-    }
+    // KLEBERFLÄSCHCHEN (auf eine gelungene Flucht) - das Wurf-Fenster steht
+    // in renderRollReaction, weil gewuerfelt auch ausserhalb eines Kampfes
+    // wird (Dungeon-Casino, Amulett, Schlimme Dinge).
     if (c.escapeReactionOffer && c.escapeReactionOffer.includes(myInfo.playerId)) {
       const row = document.createElement('div');
       row.className = 'row gap wrap';
@@ -1051,6 +1043,25 @@
     }
 
     div.appendChild(actions);
+    box.appendChild(div);
+  }
+
+  // Wurf-Reaktionsfenster (GEZINKTER WÜRFEL, KATZENINTERVENTION). Bewusst
+  // ausserhalb von renderCombat: gewuerfelt wird auch ohne Kampf, und ohne
+  // diesen Kasten gaebe es dann keinen "Passen"-Knopf - das Spiel haenge.
+  // Das Ausspielen selbst passiert an der Handkarte (siehe handActionsFor).
+  function renderRollReaction() {
+    const box = $('rollReactionArea');
+    box.innerHTML = '';
+    if (!state.pendingRoll || !state.pendingRoll.holders.includes(myInfo.playerId)) return;
+    const div = document.createElement('div');
+    div.className = 'consequencebox';
+    const werfer = state.players.find((p) => p.id === state.pendingRoll.playerId);
+    const row = document.createElement('div');
+    row.className = 'row gap wrap';
+    row.appendChild(textNode(`${werfer ? werfer.name : '?'} hat ${state.pendingRoll.roll} gewürfelt - du darfst noch mit einer Würfel-Reaktionskarte reagieren.`));
+    row.appendChild(mkBtn('Passen', () => socket.emit('passReaction', {})));
+    div.appendChild(row);
     box.appendChild(div);
   }
 

@@ -14,7 +14,8 @@ module.exports = (ctx) => {
     // --- Eindeutiger Tod in ungewöhnlicher Formulierung ---
     'BULLROG': () => ({ type: 'death' }), // "Du wirst zu Tode gepeitscht."
     'JUDGE FREDD': () => ({ type: 'death' }), // "Er prügelt dich zu Tode ..."
-    'KALI': () => ({ type: 'death' }), // "Stirb, stirb, stirb ..."
+    // "Stirb, stirb, stirb - und setze auch deinen naechsten Zug aus."
+    'KALI': () => ({ type: 'combo', actions: [{ type: 'death' }, { type: 'skipNextTurn' }] }),
     'TENTAKELDÄMON': () => ({ type: 'death' }), // "Wenn du gefangen wirst, stirbst du." (Kontext: Flucht ist bereits gescheitert)
     'SIEBENJÄHRIGER LICH': () => ({ type: 'death' }), // "Wenn er dich erwischt, stirbst du ..."
     // Enthält zwar "stirbst", bezieht sich aber auf einen ZUKÜNFTIGEN Tod

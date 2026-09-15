@@ -167,6 +167,8 @@ function newPlayer(name, socketId, isBot) {
     // "-5, wenn es nicht das Geschlecht ist, das du beim Ausspielen hattest"-
     // Klausel beim Verlust. null = keine Slipper im Spiel.
     genderBeiSlippern: null,
+    // KALI: "Stirb, stirb, stirb - und setze auch deinen naechsten Zug aus."
+    skipTurns: 0,
   };
 }
 
@@ -664,6 +666,14 @@ function endTurn(room) {
   if (room.pendingConsequence || room.combat) return;
   if (currentPlayer(room) && currentPlayer(room).hand.length > handLimit(currentPlayer(room))) return; // Milde Gabe erzwingen
   room.turnIndex = (room.turnIndex + 1) % room.players.length;
+  // KALI: "setze auch deinen naechsten Zug aus". Die Schleife hat eine harte
+  // Obergrenze, damit eine Runde, in der ALLE aussetzen, nicht haengt.
+  for (let i = 0; i < room.players.length && (currentPlayer(room).skipTurns || 0) > 0; i++) {
+    const aussetzer = currentPlayer(room);
+    aussetzer.skipTurns -= 1;
+    log(room, `${aussetzer.name} setzt diesen Zug aus.`);
+    room.turnIndex = (room.turnIndex + 1) % room.players.length;
+  }
   // Der HALBLING-Doppelverkauf gilt "pro Runde" - siehe handleSellItems.
   room.players.forEach((p) => { p.halblingSaleUsed = false; });
   room.turnPhase = 'tuer';
@@ -782,17 +792,20 @@ function handleDrawDoor(room, playerId) {
       room.turnPhase = 'aerger';
       log(room, `Fluch "${c.name}" - aber ${player.name} trägt "${card(shield).name}": keine Wirkung. Phase 2: Auf Ärger aus sein.`, [id, shield]);
     } else {
-      const opfer = fluchZiel(room, player, c);
-      if (!opfer) {
-        room.turnPhase = 'aerger';
-        log(room, `Fluch "${c.name}" verpufft. Phase 2: Auf Ärger aus sein.`, [id]);
-      } else {
+      fluchZiel(room, player, c, (opfer) => {
+        if (!opfer) {
+          room.turnPhase = 'aerger';
+          log(room, `Fluch "${c.name}" verpufft. Phase 2: Auf Ärger aus sein.`, [id]);
+          touchRoom(room);
+          return;
+        }
         room.pendingConsequence = { playerId: opfer.id, kind: 'curse', cardId: id, text: c.text || c.name, autoApplied: null, choice: null,
           keepPhase: opfer.id !== player.id };
         if (opfer.id !== player.id) room.turnPhase = 'aerger';
         log(room, `Fluch! ${opfer.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
         autoApplyLossConsequence(room, opfer, [{ name: c.name, text: c.text, cardId: id }]);
-      }
+        touchRoom(room);
+      });
     }
   } else {
     // Karte bleibt offen auf dem Tisch liegen (wie ein Monster), bis sie per
@@ -817,7 +830,14 @@ function handleDrawDoor(room, playerId) {
 // Rueckgabe: die Person, die der Fluch trifft, oder null, wenn er verpufft.
 // ponytail: der Hut wirft hoechstens einmal zurueck - traegt das neue Ziel
 // auch einen, bleibt der Fluch dort. Sonst koennte er im Kreis laufen.
-function fluchZiel(room, ziel, c) {
+// `weiter` bekommt die Person, die der Fluch trifft, oder null (verpufft).
+// Nur so herum, weil der Amulett-Wurf ein Reaktionsfenster oeffnen kann
+// (GEZINKTER WÜRFEL: "nachdem DU ... wuerfeln musstest") und dann erst spaeter
+// feststeht, wen es trifft.
+// ponytail: die Wuerfe des PRÄCHTIGEN HUTS bleiben ohne Fenster - das sind
+// mehrere Wuerfe mehrerer Personen gleichzeitig, und room.pendingRoll traegt
+// genau einen. Aufruestweg: eine Kette aus Einzelfenstern.
+function fluchZiel(room, ziel, c, weiter) {
   const traegt = (p, name) => equippedItemIds(p).find((id) => (card(id) || {}).name === name);
 
   const hut = traegt(ziel, 'PRÄCHTIGER HUT');
@@ -831,21 +851,22 @@ function fluchZiel(room, ziel, c) {
     }
   }
 
-  const amulett = traegt(ziel, 'DAS MANCHMAL VERLÄSSLICHE AMULETT');
-  if (amulett) {
-    const wurf = rollDie();
+  const opfer = ziel;
+  const amulett = traegt(opfer, 'DAS MANCHMAL VERLÄSSLICHE AMULETT');
+  if (!amulett) { weiter(opfer); return; }
+  rollWithWindow(room, opfer, 'amulett', (wurf) => {
     if (wurf <= 3) {
-      unequipSlotCard(ziel, amulett);
+      unequipSlotCard(opfer, amulett);
       discardCard(room, amulett);
-      log(room, `${ziel.name} würfelt ${wurf}: das Amulett hält nicht und wird abgeworfen.`, [amulett]);
-    } else {
-      let extra = '';
-      if (wurf === 6) { setLevel(ziel, ziel.level + 1); extra = ' und steigt dafür 1 Stufe auf'; }
-      log(room, `${ziel.name} würfelt ${wurf}: das Amulett blockt "${c.name}"${extra}.`, [amulett]);
-      return null;
+      log(room, `${opfer.name} würfelt ${wurf}: das Amulett hält nicht und wird abgeworfen.`, [amulett]);
+      weiter(opfer);
+      return;
     }
-  }
-  return ziel;
+    let extra = '';
+    if (wurf === 6) { setLevel(opfer, opfer.level + 1); extra = ' und steigt dafür 1 Stufe auf'; }
+    log(room, `${opfer.name} würfelt ${wurf}: das Amulett blockt "${c.name}"${extra}.`, [amulett]);
+    weiter(null);
+  });
 }
 
 // Die offen liegende (Nicht-Monster-, Nicht-Fluch-)Tuerkarte auf die Hand
@@ -891,21 +912,22 @@ function handlePlayCurseFromHand(room, playerId, cardId, targetId) {
   removeFromHand(player, cardId);
   discardCard(room, cardId);
   // PRÄCHTIGER HUT / AMULETT koennen den Fluch umlenken oder ganz abwehren.
-  const opfer = fluchZiel(room, target, c);
-  if (!opfer) {
-    log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${target.name} - er verpufft.`, [cardId]);
-    refreshCombatReady(room);
+  fluchZiel(room, target, c, (opfer) => {
+    if (!opfer) {
+      log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${target.name} - er verpufft.`, [cardId]);
+      refreshCombatReady(room);
+      touchRoom(room);
+      return;
+    }
+    room.pendingConsequence = {
+      playerId: opfer.id, kind: 'curse', cardId, text: c.text || c.name,
+      autoApplied: null, choice: null, keepPhase: true,
+    };
+    log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${opfer.name}!`, [cardId]);
+    autoApplyLossConsequence(room, opfer, [{ name: c.name, text: c.text, cardId }]);
+    refreshCombatReady(room); // ein Fluch kann Stufe/Ausruestung aendern
     touchRoom(room);
-    return;
-  }
-  room.pendingConsequence = {
-    playerId: opfer.id, kind: 'curse', cardId, text: c.text || c.name,
-    autoApplied: null, choice: null, keepPhase: true,
-  };
-  log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${opfer.name}!`, [cardId]);
-  autoApplyLossConsequence(room, opfer, [{ name: c.name, text: c.text, cardId }]);
-  refreshCombatReady(room); // ein Fluch kann Stufe/Ausruestung aendern
-  touchRoom(room);
+  });
 }
 
 function handleAckConsequence(room, playerId) {
@@ -1008,16 +1030,35 @@ function clearCheatIfLost(player, cardId) {
   if (player.attachments && player.attachments.cheatedItemId === cardId) player.attachments.cheatedItemId = null;
 }
 
+// Tod: "Du verlierst alle deine Karten - die anderen pluendern die Leiche.
+// Stufe, Rasse und Klasse behaeltst du." Die Stufe blieb hier frueher NICHT
+// erhalten (setLevel 1) und alles wanderte direkt auf die Ablagestapel -
+// beides gegen die gedruckte Regel.
+// Reihenfolge beim Pluendern: hoechste Stufe zuerst, dann der Reihe nach.
+// Wer nicht verbunden ist, wird von advanceCardActionQueue uebersprungen; was
+// danach uebrig bleibt, geht ueber restModus 'alles' auf die Ablagestapel.
 function applyDeathConsequence(room, player) {
-  // Über discardCard(), weil das nach Kartentyp auf den richtigen Stapel legt.
-  // Angelegte Gegenstände sind ausnahmslos Schatzkarten (handleEquipItem lässt
-  // nur category 'item' zu, und die gibt es nur als type 'treasure') - früher
-  // landeten sie hier pauschal auf dem Tür-Ablagestapel und wurden beim
-  // Neumischen zu Türkarten.
-  [...player.hand, ...equippedItemIds(player)].forEach((id) => discardCard(room, id));
-  player.hand = [];
-  player.equipped = { head: null, armor: null, feet: null, hands: [null, null] };
-  setLevel(player, 1);
+  const leiche = () => [...player.hand, ...equippedItemIds(player)];
+  const anzahl = leiche().length;
+  const alleAblegen = () => {
+    // Über discardCard(), weil das nach Kartentyp auf den richtigen Stapel
+    // legt: angelegte Gegenstände sind ausnahmslos Schatzkarten, auf dem
+    // Tür-Ablagestapel würden sie beim Neumischen zu Türkarten.
+    leiche().forEach((id) => discardCard(room, id));
+    player.hand = [];
+    player.equipped = newEquipped();
+  };
+  if (!anzahl) return;
+  const andere = room.players.filter((p) => p.id !== player.id).sort((a, b) => b.level - a.level);
+  if (!andere.length) { alleAblegen(); return; }
+  const queue = [];
+  while (queue.length < anzahl) andere.forEach((p) => queue.push(p.id));
+  openQueuedCardAction(room, 'Leiche plündern', queue.slice(0, anzahl), () => {
+    const ids = leiche();
+    if (!ids.length) return null;
+    return { kind: 'chooseCard', prompt: `Eine Karte von ${player.name} nehmen`, candidateIds: ids, takeFrom: player.id };
+  }, player.id, 'alles');
+  log(room, `${player.name} stirbt - die anderen plündern die Leiche (${anzahl} Karte(n)), Stufe ${player.level} bleibt.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1169,12 +1210,14 @@ function applyPrimitiveAction(room, player, action) {
     // 6 - Zieh 3 Schaetze."
     case 'dungeonCasino': {
       const einsatz = applyPrimitiveAction(room, player, { type: 'discardItemsWorthGold', gold: 500 });
-      const wurf = rollDie();
-      let folge;
-      if (wurf === 1) folge = applyPrimitiveAction(room, player, { type: 'levelDelta', amount: 1 });
-      else if (wurf === 2) folge = applyPrimitiveAction(room, player, { type: 'queuedDiscardOwn', count: 1, quelle: 'alles', cardName: 'DAS DUNGEON-CASINO', prompt: 'Eine Karte oder einen Gegenstand abwerfen' });
-      else folge = applyPrimitiveAction(room, player, { type: 'drawTreasureN', n: wurf <= 4 ? 1 : (wurf === 5 ? 2 : 3) });
-      return `Einsatz: ${einsatz}. Wuerfelwurf ${wurf} -> ${folge}`;
+      const ausgang = wurfMitFenster(room, player, 'casino', (wurf) => {
+        let folge;
+        if (wurf === 1) folge = applyPrimitiveAction(room, player, { type: 'levelDelta', amount: 1 });
+        else if (wurf === 2) folge = applyPrimitiveAction(room, player, { type: 'queuedDiscardOwn', count: 1, quelle: 'alles', cardName: 'DAS DUNGEON-CASINO', prompt: 'Eine Karte oder einen Gegenstand abwerfen' });
+        else folge = applyPrimitiveAction(room, player, { type: 'drawTreasureN', n: wurf <= 4 ? 1 : (wurf === 5 ? 2 : 3) });
+        return `Wuerfelwurf ${wurf} -> ${folge}`;
+      });
+      return `Einsatz: ${einsatz}. ${ausgang}`;
     }
     // LAUFENDE NASE: "bestich sie mit einem Gegenstand im Wert von
     // wenigstens 200 Goldstuecken und sie laesst dich gehen." Kein Schatz,
@@ -1238,6 +1281,32 @@ function applyPrimitiveAction(room, player, action) {
       drawn.forEach((id) => player.hand.push(id));
       return `${drawn.length} Schatzkarte(n) gezogen`;
     }
+    // EINHEITSGRÖSSE: "Durchsuche den Schatzabwurfstapel, fange dabei oben an,
+    // und tausche diese Karte gegen den ersten tragbaren Gegenstand, den du
+    // findest. Wenn du ihn jetzt anlegst, kannst du ihn behalten und seinen
+    // maximal moeglichen Bonus ausschoepfen, unabhaengig der normalen
+    // Beschraenkungen zu Rasse, Klasse, Geschlecht, Anzahl deiner Koepfe und
+    // so weiter." Es gibt also gar keine Wahl - der oberste tragbare
+    // Gegenstand ist gemeint (treasureDiscard ist alt -> neu sortiert, "oben"
+    // ist das Ende). Die Beschraenkungs-Ausnahme laeuft ueber denselben
+    // Marker wie SCHUMMELN! (attachments.cheatedItemId).
+    case 'skipNextTurn': {
+      player.skipTurns = (player.skipTurns || 0) + 1;
+      return 'naechster Zug faellt aus';
+    }
+    case 'takeFirstWearableFromTreasureDiscard': {
+      const idx = [...room.treasureDiscard].reverse().findIndex((id) => (card(id) || {}).category === 'item');
+      if (idx < 0) return 'kein tragbarer Gegenstand im Schatz-Ablagestapel';
+      const echterIdx = room.treasureDiscard.length - 1 - idx;
+      const [itemId] = room.treasureDiscard.splice(echterIdx, 1);
+      player.hand.push(itemId);
+      let zusatz = '';
+      if (player.attachments && !player.attachments.cheatedItemId) {
+        player.attachments.cheatedItemId = itemId;
+        zusatz = ' - die Anlege-Beschraenkungen gelten dafuer nicht';
+      }
+      return `"${card(itemId).name}" aus dem Schatz-Ablagestapel genommen${zusatz}`;
+    }
     case 'discardDoorCardsFromHand': {
       const ids = player.hand.filter((id) => { const c = card(id); return c && c.type === 'door'; });
       if (!ids.length) return 'keine Türkarten auf der Hand';
@@ -1261,24 +1330,22 @@ function applyPrimitiveAction(room, player, action) {
       setLevel(player, minLevel);
       return `auf Stufe ${player.level} gesetzt (niedrigste Stufe am Tisch)`;
     }
-    // ponytail: Konsequenz-Wuerfe bleiben synchron - applyPrimitiveAction
-    // liefert einen Text zurueck und kann nicht warten. GEZINKTER WUERFEL
-    // wirkt deshalb vorerst nur auf den Weglaufwurf. Aufruestweg:
-    // applyPrimitiveAction auf Callbacks umstellen.
-    case 'diceLevelLoss': {
-      const roll = rollDie();
-      setLevel(player, player.level - roll);
-      return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
-    }
-    case 'diceThresholdDeath': {
-      const roll = rollDie();
-      if (action.deathValues.includes(roll)) {
-        applyDeathConsequence(room, player);
-        return `Würfelwurf ${roll} -> Tod`;
-      }
-      setLevel(player, player.level - roll);
-      return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
-    }
+    // Konsequenz-Wuerfe laufen ueber wurfMitFenster: ohne Halter:in einer
+    // Reaktionskarte synchron wie bisher, sonst mit Wurf-Fenster.
+    case 'diceLevelLoss':
+      return wurfMitFenster(room, player, 'stufenverlust', (roll) => {
+        setLevel(player, player.level - roll);
+        return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
+      });
+    case 'diceThresholdDeath':
+      return wurfMitFenster(room, player, 'schlimmeDinge', (roll) => {
+        if (action.deathValues.includes(roll)) {
+          applyDeathConsequence(room, player);
+          return `Würfelwurf ${roll} -> Tod`;
+        }
+        setLevel(player, player.level - roll);
+        return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
+      });
     case 'discardSlot': {
       const id = player.equipped[action.slot];
       // Gekoppelte Spezialausruestung faellt mit (GNOMEX-ANZUG mit der
@@ -1548,14 +1615,15 @@ function applyPrimitiveAction(room, player, action) {
       // Gegenstaende oder Karten von deiner Hand - deine Wahl." Die Wahl
       // laeuft ueber die Warteschlange an die eigene Person (roll-mal
       // hintereinander), damit sie die Karten selbst aussucht.
-      const roll = rollDie();
-      openQueuedCardAction(room, 'SCHNECKEN AUF SPEED', Array(roll).fill(player.id), () => {
-        const ids = equippedItemIds(player).concat(player.hand);
-        if (!ids.length) return null;
-        return { kind: 'chooseCard', prompt: 'Eine Karte oder einen Gegenstand ablegen',
-          candidateIds: ids, discardOwn: true };
+      return wurfMitFenster(room, player, 'schlimmeDinge', (roll) => {
+        openQueuedCardAction(room, 'SCHNECKEN AUF SPEED', Array(roll).fill(player.id), () => {
+          const ids = equippedItemIds(player).concat(player.hand);
+          if (!ids.length) return null;
+          return { kind: 'chooseCard', prompt: 'Eine Karte oder einen Gegenstand ablegen',
+            candidateIds: ids, discardOwn: true };
+        });
+        return `Wuerfelwurf ${roll} -> ${roll} Karte(n)/Gegenstand/Gegenstaende ablegen`;
       });
-      return `Wuerfelwurf ${roll} -> ${roll} Karte(n)/Gegenstand/Gegenstaende ablegen`;
     }
     // Mehrere eigene Karten/Gegenstaende nacheinander SELBST aussuchen und
     // ablegen ("Lege zwei Karten deiner Wahl ab", "Verliere 2 kleine
@@ -1867,8 +1935,8 @@ const {
 // JEDE Quelle auf (siehe autoApplyLossConsequence) - ohne Backlog wuerde die
 // zweite Karte die erste Warteschlange kommentarlos verschlucken, noch bevor
 // irgendwer sie zu Gesicht bekommt.
-function openQueuedCardAction(room, cardName, queue, specFor, discardRestPlayerId) {
-  const entry = { cardName, queue: queue.slice(), specFor, discardRestPlayerId: discardRestPlayerId || null };
+function openQueuedCardAction(room, cardName, queue, specFor, discardRestPlayerId, restModus) {
+  const entry = { cardName, queue: queue.slice(), specFor, discardRestPlayerId: discardRestPlayerId || null, restModus: restModus || 'hand' };
   if (room._queuedCardAction) {
     room._queuedCardActionBacklog = room._queuedCardActionBacklog || [];
     room._queuedCardActionBacklog.push(entry);
@@ -1895,7 +1963,17 @@ function advanceCardActionQueue(room) {
     // queuedTakeFromHand/action.discardRest). Gebunden an q, nicht an room.
     if (q.discardRestPlayerId) {
       const opfer = findPlayer(room, q.discardRestPlayerId);
-      if (opfer && opfer.hand.length) {
+      // 'alles': Rest einer nicht komplett gepluenderten Leiche (Hand UND
+      // angelegte Gegenstaende), 'hand' (Standard): ANWALT.
+      if (opfer && q.restModus === 'alles') {
+        const rest = [...opfer.hand, ...equippedItemIds(opfer)];
+        if (rest.length) {
+          rest.forEach((id) => discardCard(room, id));
+          opfer.hand = [];
+          opfer.equipped = newEquipped();
+          log(room, `${opfer.name}: ${rest.length} nicht gepluenderte Karte(n) abgelegt.`);
+        }
+      } else if (opfer && opfer.hand.length) {
         const desc = applyPrimitiveAction(room, opfer, { type: 'discardWholeHand' });
         log(room, `${opfer.name}: uebrige Handkarten abgelegt (${desc}).`);
       }
@@ -1945,8 +2023,14 @@ function openCardTarget(room, player, cardName, prompt, action) {
   room._pendingCardActionResolvers = action;
 }
 
-function openCardCardChoice(room, player, cardName, prompt) {
-  const candidates = [...room.doorDiscard, ...room.treasureDiscard].map((id) => card(id)).filter(Boolean);
+// `ausser` ist die Karte, die den Wähler ausgelöst hat: sie liegt zu diesem
+// Zeitpunkt selbst schon auf dem Ablagestapel (handleUseCardPower legt zuerst
+// ab) und waere sonst waehlbar - WÜNSCHELSTAB/GEDENKTAFEL/EINHEITSGRÖSSE
+// koennten sich dadurch beliebig oft selbst zurueckholen.
+function openCardCardChoice(room, player, cardName, prompt, ausser) {
+  const candidates = [...room.doorDiscard, ...room.treasureDiscard]
+    .filter((id) => id !== ausser)
+    .map((id) => card(id)).filter(Boolean);
   room.pendingCardAction = {
     playerId: player.id,
     cardName,
@@ -2060,7 +2144,7 @@ function handleUseCardPower(room, playerId, cardId) {
     return;
   }
   if (spec.type === 'chooseDiscardedCard') {
-    openCardCardChoice(room, player, c.name);
+    openCardCardChoice(room, player, c.name, undefined, cardId);
     log(room, `${player.name} spielt "${c.name}" - Kartenwahl aus dem Ablagestapel nötig.`, [cardId]);
     touchRoom(room);
     return;
@@ -2565,6 +2649,25 @@ function rollWithWindow(room, player, purpose, onResolve) {
   if (!holders.length) { onResolve(roll); return; }
   room.pendingRoll = { playerId: player.id, purpose, roll, holders, onResolve };
   log(room, `${player.name} würfelt ${roll} - es darf noch auf den Wurf reagiert werden.`);
+}
+
+// Wuerfelwurf fuer Stellen, die ihr Ergebnis als Text zurueckgeben muessen
+// (applyPrimitiveAction/applyCombatPotionAction). Haelt niemand eine
+// Reaktionskarte, laeuft alles wie vorher synchron und der Text geht an die
+// aufrufende Stelle zurueck; sonst wird der Effekt erst nach dem Fenster
+// angewendet und bekommt eine eigene Logzeile.
+// GEZINKTER WÜRFEL/KATZENINTERVENTION gelten laut Karte fuer JEDEN Wurf
+// ("aus einem beliebigen Grund"), nicht nur fuer den Weglaufwurf.
+function wurfMitFenster(room, player, purpose, anwenden) {
+  let sofort = null;
+  let synchron = true;
+  rollWithWindow(room, player, purpose, (roll) => {
+    const desc = anwenden(roll);
+    if (synchron) sofort = desc == null ? '' : desc;
+    else if (desc) log(room, `${player.name}: ${desc}.`);
+  });
+  synchron = false;
+  return sofort !== null ? sofort : 'Wurf läuft - es darf noch auf den Wurf reagiert werden';
 }
 
 function resolvePendingRoll(room, finalRoll) {
@@ -3256,14 +3359,17 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const bonus = ziel.bonus || 0;
       // Der Gegenstand selbst zaehlt schon einmal ueber equippedBonusSum mit.
       c.actorModifier += bonus * 2;
-      const wurf = rollDie();
-      if (wurf === 6) return `"${ziel.name}" zaehlt dreifach (+${bonus * 3}); Wuerfelwurf 6 - Gegenstand bleibt`;
-      // Verloren, aber der dreifache Bonus gilt "fuer einen einzigen Kampf":
-      // der wegfallende Grundbonus wird ausgeglichen.
-      unequipSlotCard(player, action.itemId);
-      discardCard(room, action.itemId);
-      c.actorModifier += bonus;
-      return `"${ziel.name}" zaehlt dreifach (+${bonus * 3}); Wuerfelwurf ${wurf} - Gegenstand wird abgeworfen`;
+      // Der Bonus gilt sofort; nur ueber Behalten/Abwerfen entscheidet der
+      // Wurf - deshalb darf hier ein Reaktionsfenster aufgehen.
+      return wurfMitFenster(room, player, 'halbfinalschlag', (wurf) => {
+        if (wurf === 6) return `"${ziel.name}" zaehlt dreifach (+${bonus * 3}); Wuerfelwurf 6 - Gegenstand bleibt`;
+        // Verloren, aber der dreifache Bonus gilt "fuer einen einzigen Kampf":
+        // der wegfallende Grundbonus wird ausgeglichen.
+        unequipSlotCard(player, action.itemId);
+        discardCard(room, action.itemId);
+        c.actorModifier += bonus;
+        return `"${ziel.name}" zaehlt dreifach (+${bonus * 3}); Wuerfelwurf ${wurf} - Gegenstand wird abgeworfen`;
+      });
     }
     // NIMM MICH! NIMM MICH!: "Wenn ein Spieler befugt ist, im Kampf um Hilfe
     // zu bitten, spiele diese Karte, um ihn dazu zu zwingen, DEINE Hilfe zu
@@ -3663,13 +3769,24 @@ function findTieBreaker(room) {
 // spaeteste Moment, zu dem die Helferfrage sicher geklaert ist. Der zweite
 // Satz (die Helfer:in kann nicht mehr entkommen) bleibt offen: dieser Server
 // wuerfelt die Flucht ohnehin nur fuer die kaempfende Person.
-function hasenWurf(room) {
+// Rueckgabe: true, wenn auf den Wurf noch reagiert werden darf - dann wartet
+// die Kampfauswertung und wird ueber `nachWurf` erneut angestossen.
+function hasenWurf(room, nachWurf) {
   const c = room.combat;
-  if (!c || c.haseGewuerfelt) return;
+  if (!c || c.haseGewuerfelt) return false;
   const hase = c.monsterIds.find((id) => (card(id) || {}).name === 'DER GANZ NORMALE HASE');
-  if (!hase) return;
+  if (!hase) return false;
   c.haseGewuerfelt = true;
-  const wurf = rollDie();
+  let synchron = true;
+  rollWithWindow(room, findPlayer(room, c.actorId) || room.players[0], 'hase', (wurf) => {
+    haseAnwenden(room, c, hase, wurf);
+    if (!synchron && nachWurf) nachWurf();
+  });
+  synchron = false;
+  return !!room.pendingRoll;
+}
+
+function haseAnwenden(room, c, hase, wurf) {
   if (wurf !== 6) { log(room, `Der ganz normale Hase: Wuerfelwurf ${wurf} - er bleibt ganz normal.`); return; }
   c.levelOverrides = c.levelOverrides || {};
   c.levelOverrides[hase] = 15;
@@ -3683,7 +3800,10 @@ function handleEvaluateCombat(room, playerId) {
   if (c.actorId !== playerId) return;
   // Erst auswerten, wenn niemand mehr eingreifen will.
   if (!combatAllReady(room)) return;
-  hasenWurf(room);
+  // DER GANZ NORMALE HASE wuerfelt "nachdem du entschieden hast, wer hilft" -
+  // darf also selbst noch mit einem gezinkten Wuerfel geaendert werden. Dann
+  // wartet die Auswertung auf das Fenster.
+  if (hasenWurf(room, () => handleEvaluateCombat(room, playerId))) return;
   const { playerStrength, monsterStrength } = combatTotals(room);
   // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Greift vor der
   // ALUFOLIE-Notlösung, damit die Karte nicht unnötig verbraucht wird.

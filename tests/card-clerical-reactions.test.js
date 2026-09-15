@@ -77,7 +77,7 @@ function makeRoom(players, extra) {
     const p = makePlayer({ level: 5 });
     p.equipped.special = [amulett.id];
     const room = makeRoom([p]);
-    const ziel = fluchZiel(room, p, fluch);
+    let ziel; fluchZiel(room, p, fluch, (o) => { ziel = o; });
     if (ziel === null) {
       geblockt++;
       assert.ok(p.equipped.special.includes(amulett.id), 'beim Blocken bleibt das Amulett');
@@ -101,12 +101,13 @@ function makeRoom(players, extra) {
   const c = makePlayer({ id: 'p3', name: 'C' });
   const room = makeRoom([a, b, c]);
   for (let i = 0; i < 50; i++) {
-    const ziel = fluchZiel(room, a, fluch);
+    let ziel; fluchZiel(room, a, fluch, (o) => { ziel = o; });
     assert.ok(ziel && ziel.id !== a.id, 'der Hut traegt den Fluch immer weiter');
   }
   // Allein am Tisch gibt es niemanden, auf den zurueckgeworfen werden koennte.
   const allein = makeRoom([a]);
-  assert.strictEqual(fluchZiel(allein, a, fluch).id, a.id);
+  let alleinZiel; fluchZiel(allein, a, fluch, (o) => { alleinZiel = o; });
+  assert.strictEqual(alleinZiel.id, a.id);
 }
 
 // --- HEIMSE DIE LORBEEREN EIN: nur nach einem FREMDEN Sieg -----------------

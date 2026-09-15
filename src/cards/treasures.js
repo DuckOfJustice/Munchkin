@@ -91,7 +91,7 @@ module.exports = (ctx) => {
     // und filtert nicht auf "tragbar" - wer die Regel streng nimmt, nimmt den
     // obersten Gegenstand des Schatzstapels. Ein eigener gefilterter Waehler
     // waere der Aufruestweg.
-    'EINHEITSGRÖSSE': (player, room) => (room.combat ? { type: 'chooseDiscardedCard' } : null),
+    'EINHEITSGRÖSSE': (player, room) => (room.combat ? { type: 'takeFirstWearableFromTreasureDiscard' } : null),
     // "Du kannst ihn auch als Wunschring einsetzen (z.B. um einen Fluch zu
     // beenden) und hinterher abwerfen." Die Flucht-Seite der Karte laeuft
     // ueber GUARANTEED_FLEE_CARDS weiter unten.

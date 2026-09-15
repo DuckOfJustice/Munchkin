@@ -11,7 +11,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, reactionHolders, rollWithWindow, ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS,
   newEquipped, handleAttemptFlee, handlePlayReactionCard, handlePassReaction, handleUseLamp,
-  handlePlayCombatCard, handleFleeReroll, botFleeRerollCard,
+  handlePlayCombatCard, handleFleeReroll, botFleeRerollCard, applyPrimitiveAction,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -170,6 +170,48 @@ function run() {
     assert.ok(!room.pendingRoll, 'nachdem alle Halter:innen gepasst haben, loest sich das Fenster auf');
     assert.strictEqual(room.dieRoll.roll, urspruenglich, 'ohne Kartenspiel bleibt der urspruengliche Wurf stehen');
     assert.strictEqual(room.dieRoll.success, false, 'vor Filzlaeusen gibt es kein Entkommen, egal welcher Wurf');
+    done(room);
+  }
+
+  // -------------------------------------------------------------------
+  // Der Wuerfel gilt fuer JEDEN Wurf ("aus einem beliebigen Grund"), nicht
+  // nur fuer den Weglaufwurf: Konsequenz-Wuerfe laufen ueber wurfMitFenster.
+  // -------------------------------------------------------------------
+  {
+    // Ohne Karte am Tisch: synchron und sofort angewendet (bitgleich zu
+    // frueher - das schuetzt alle bestehenden Wuerfelpfade).
+    const p = makePlayer({ id: 'p1', level: 10 });
+    const room = makeRoom({ players: [p, makePlayer({ id: 'p2', name: 'B' })] });
+    const desc = applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    assert.ok(/Würfelwurf \d/.test(desc), desc);
+    assert.ok(p.level < 10 && p.level >= 4, 'Stufen sofort verloren');
+    assert.ok(!room.pendingRoll);
+    done(room);
+  }
+  {
+    // Mit eigenem GEZINKTEN WÜRFEL: erst Fenster, dann wirkt der GEAENDERTE
+    // Wurf.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const p = makePlayer({ id: 'p1', level: 10, hand: [wuerfel.id] });
+    const room = makeRoom({ players: [p, makePlayer({ id: 'p2', name: 'B' })] });
+    const desc = applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    assert.ok(room.pendingRoll, 'auf den Stufenverlust-Wurf darf reagiert werden');
+    assert.strictEqual(p.level, 10, 'vor der Aufloesung passiert nichts');
+    assert.ok(/reagiert/.test(desc), desc);
+    handlePlayReactionCard(room, 'p1', wuerfel.id, 1);
+    assert.strictEqual(p.level, 9, 'der geaenderte Wurf (1) kostet genau 1 Stufe');
+    assert.ok(!room.pendingRoll);
+    done(room);
+  }
+  {
+    // Passen laesst den urspruenglichen Wurf gelten.
+    const wuerfel = findCard('GEZINKTER WÜRFEL');
+    const p = makePlayer({ id: 'p1', level: 10, hand: [wuerfel.id] });
+    const room = makeRoom({ players: [p, makePlayer({ id: 'p2', name: 'B' })] });
+    applyPrimitiveAction(room, p, { type: 'diceLevelLoss' });
+    const wurf = room.pendingRoll.roll;
+    handlePassReaction(room, 'p1');
+    assert.strictEqual(p.level, 10 - wurf, 'ohne Kartenspiel gilt der urspruengliche Wurf');
     done(room);
   }
 

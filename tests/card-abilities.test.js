@@ -629,7 +629,9 @@ function run() {
   assert.ok(deathRoom.treasureDiscard.includes(deathTreasureCard.id), 'Schatzkarte aus der Hand gehört auf den Schatz-Ablagestapel');
   deathRoom.doorDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'door', 'auf dem Tür-Ablagestapel darf nur type=door liegen'));
   deathRoom.treasureDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'treasure', 'auf dem Schatz-Ablagestapel darf nur type=treasure liegen'));
-  assert.strictEqual(deathRoom.players[0].level, 1, 'Tod setzt auf Stufe 1 zurück');
+  // Gedruckte Regel: "Du behaeltst deine Stufe, Rasse und Klasse." Frueher
+  // setzte der Tod hier auf Stufe 1 zurueck.
+  assert.strictEqual(deathRoom.players[0].level, 7, 'Tod laesst die Stufe unveraendert');
   assert.strictEqual(deathRoom.players[0].hand.length, 0, 'Tod leert die Hand');
 
   // -------------------------------------------------------------------
