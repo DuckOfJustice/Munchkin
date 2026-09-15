@@ -408,4 +408,44 @@ const CARD_C = idByName('KLASSE WECHSELN');
   done(room);
 }
 
+// KLASSE WECHSELN / RASSE WECHSELN: "Durchsuche den Ablegestapel, beginnend
+// mit der obersten Karte. Die erste Klassenkarte ersetzt deine momentane(n)
+// Klasse(n)." Frueher wurde die eigene Karte ZUERST abgelegt - sie lag damit
+// obenauf und man wechselte direkt wieder zu sich selbst.
+{
+  const krieger = idByName('KRIEGER');
+  const zauberer = idByName('ZAUBERER');
+  const p = makePlayer('a', { classes: [krieger] });
+  const room = makeRoom([p], 0);
+  room.doorDiscard = [zauberer];
+
+  const desc = applyPrimitiveAction(room, p, resolveConsequenceSpec('KLASSE WECHSELN', 'x', p, room));
+  assert.deepStrictEqual(p.classes, [zauberer], `die Klasse aus dem Ablagestapel ersetzt die eigene (${desc})`);
+  assert.ok(room.doorDiscard.includes(krieger), 'die alte Klasse liegt jetzt im Ablagestapel');
+  assert.ok(!room.doorDiscard.includes(zauberer), 'und die genommene nicht mehr');
+  done(room);
+}
+{
+  // Keine passende Karte im Stapel: "Findest du keine Klassenkarte, verlierst
+  // du einfach nur deine Klasse(n)."
+  const krieger = idByName('KRIEGER');
+  const p = makePlayer('a', { classes: [krieger] });
+  const room = makeRoom([p], 0);
+  applyPrimitiveAction(room, p, resolveConsequenceSpec('KLASSE WECHSELN', 'x', p, room));
+  assert.deepStrictEqual(p.classes, [], 'ohne Ersatz ist die Klasse einfach weg');
+  assert.ok(room.doorDiscard.includes(krieger));
+  done(room);
+}
+{
+  // Dasselbe fuer die Rasse - selbe Aktion, anderes Feld.
+  const elf = idByName('ELF');
+  const zwerg = idByName('ZWERG');
+  const p = makePlayer('a', { races: [elf] });
+  const room = makeRoom([p], 0);
+  room.doorDiscard = [zwerg];
+  applyPrimitiveAction(room, p, resolveConsequenceSpec('RASSE WECHSELN', 'x', p, room));
+  assert.deepStrictEqual(p.races, [zwerg], 'die Rasse aus dem Ablagestapel ersetzt die eigene');
+  done(room);
+}
+
 console.log('OK - Schlimme Dinge mit Fremdbeteiligung: HIPPOGREIF/ANWALT/LEPRACHAUN/NETZ-TROLL/VERSICHERUNGSVERTRETER/SCHNECKEN AUF SPEED/FLUCH! EINKOMMENSSTEUER ueber die Aktions-Warteschlange, plus VERLIERE-1-GROSSEN-GEGENSTAND-Zwergwahl, plus Backlog-Regression bei mehreren Warteschlangen-Monstern in einem Kampf.');

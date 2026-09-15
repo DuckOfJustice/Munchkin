@@ -1537,22 +1537,28 @@ function applyPrimitiveAction(room, player, action) {
       const capField = action.capField; // 'classCapCard' | 'powerGroupCapCard'
       const currentIds = [...player[arrField]];
       if (!currentIds.length) return `${action.label} war bereits leer - Fluch wirkungslos`;
-      currentIds.forEach((id) => discardCard(room, id));
-      player[arrField] = [];
-      if (player[capField]) { discardCard(room, player[capField]); player[capField] = null; }
       const matches = (action.category === 'class' || action.category === 'race')
         // TRAIT_DOOR_CARDS: ORK/GNOM/BARDE stehen als "door_other" in den
         // Rohdaten, zaehlen hier aber als Rassen- bzw. Klassenkarte.
         ? (cc) => cc.category === action.category
           || TRAIT_DOOR_CARDS[(cc.name || '').toUpperCase()] === action.category
         : (cc) => cc.category === 'door_other' && POWER_GROUP_NAMES.has((cc.name || '').toUpperCase());
+      // ERST suchen, DANN die eigene Karte ablegen: "Durchsuche den
+      // Ablegestapel, beginnend mit der obersten Karte." Am Tisch liegt die
+      // eigene Klasse zu diesem Zeitpunkt noch vor einem - wer zuerst ablegt,
+      // findet sie als oberste Karte sofort wieder und wechselt zu sich
+      // selbst.
+      let ersatz = null;
       for (let i = room.doorDiscard.length - 1; i >= 0; i--) {
         const cc = card(room.doorDiscard[i]);
-        if (cc && matches(cc)) {
-          room.doorDiscard.splice(i, 1);
-          player[arrField].push(cc.id);
-          return `${action.label} ersetzt durch "${cc.name}" (aus dem Ablagestapel)`;
-        }
+        if (cc && matches(cc)) { room.doorDiscard.splice(i, 1); ersatz = cc; break; }
+      }
+      currentIds.forEach((id) => discardCard(room, id));
+      player[arrField] = [];
+      if (player[capField]) { discardCard(room, player[capField]); player[capField] = null; }
+      if (ersatz) {
+        player[arrField].push(ersatz.id);
+        return `${action.label} ersetzt durch "${ersatz.name}" (aus dem Ablagestapel)`;
       }
       return `${action.label} verloren - keine passende Ersatzkarte im Ablagestapel gefunden`;
     }
