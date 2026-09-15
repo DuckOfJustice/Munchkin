@@ -12,7 +12,7 @@ const {
   handleDrawDoor, resolveCombatWin, applyPrimitiveAction, TREASURE_POWER_OVERRIDES,
   CONSEQUENCE_OVERRIDES, LINGERING_CURSES, refreshCombatReady, combatAllReady,
   handleSetCombatReady, handlePlayCurseFromHand, handleAckConsequence,
-  rollWithWindow, equippedItemIds,
+  rollWithWindow, equippedItemIds, applyCombatPotionAction,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -359,6 +359,34 @@ function run() {
     assert.ok(!equippedItemIds(p).includes(zweihand.id), 'zweihaendig geht mit winzigen Haenden nicht');
     handleEquipItem(room, 'p1', einhand.id);
     assert.ok(equippedItemIds(p).includes(einhand.id), 'einhaendig schon');
+    done(room);
+  }
+
+  // -------------------------------------------------------------------
+  // MIESER SPIEGEL gilt "(Nur) in deinem naechsten Kampf" - ein Kampf, der
+  // per Karte endet (MAHLZEIT!, FREUNDSCHAFTSTRANK, Verzauberung, ...), hat
+  // ihn frueher nicht verbraucht: er hielt dann einen Kampf zu lange.
+  // -------------------------------------------------------------------
+  {
+    const { room } = combatRoom('LAHMER GOBLIN', {});
+    const p = room.players[0];
+    addActiveCurse(room, p, 'MIESER SPIEGEL', findCard('MIESER SPIEGEL').id);
+    assert.ok(curseSuppressesItemBonuses(p), 'im Kampf wirkt er');
+    applyCombatPotionAction(room, p, { type: 'endCombatNoLevel', leavesTreasure: true, fixedTreasures: 2 }, findCard('MAHLZEIT!'));
+    assert.strictEqual(room.combat, null, 'der Kampf ist vorbei');
+    assert.ok(!curseSuppressesItemBonuses(p), 'und der Fluch damit auch');
+    done(room);
+  }
+  {
+    // Dasselbe, wenn nur das letzte Monster verschwindet
+    // (POLLYVERWANDLUNGSTRANK -> removeOneMonster).
+    const { room } = combatRoom('LAHMER GOBLIN', {});
+    const p = room.players[0];
+    addActiveCurse(room, p, 'ZWERGENBIER', findCard('ZWERGENBIER').id);
+    assert.strictEqual(curseCombatModifier(p), -4, 'Testvoraussetzung: der Malus steht');
+    applyCombatPotionAction(room, p, { type: 'removeOneMonster', leavesTreasure: true }, findCard('POLLYVERWANDLUNGSTRANK'));
+    assert.strictEqual(room.combat, null);
+    assert.strictEqual(curseCombatModifier(p), 0, 'auch hier ist der Kampf verbraucht');
     done(room);
   }
 

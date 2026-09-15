@@ -3418,6 +3418,18 @@ const COMBAT_POTION_CARD_NAMES = [...new Set(ALL_CARDS.filter(isCombatPotionCard
 // ausdruecklich JEDEN Kampfausgang ab, nicht nur Sieg/Niederlage). EINE
 // Stelle statt an jeder Kampfende-Stelle einzeln dieselbe Bedingung zu
 // wiederholen, damit ein siebter Beendigungspfad sie nicht vergisst.
+// Ein Kampf endet nicht nur durch Sieg oder Flucht, sondern auch durch Karten,
+// die alle Monster entfernen (MAHLZEIT!, FREUNDSCHAFTSTRANK, DEUS EX
+// MASCHINENGEWEHR, MONSTER SIND BESCHÄFTIGT, Verzauberung, ...). Diese Wege
+// liefen frueher an clearNextCombatCurses vorbei - "(Nur) in deinem naechsten
+// Kampf"-Flueche (MIESER SPIEGEL, GESCHLECHTSUMWANDLUNG, ZWERGENBIER) hielten
+// dann einen Kampf zu lange. Deshalb enden ALLE diese Wege hier.
+function beendeKampfOhneSieg(room, c, thenLoot) {
+  clearNextCombatCurses(combatParticipants(room));
+  room.combat = null;
+  room.turnPhase = combatEndPhase(c, thenLoot);
+}
+
 function combatEndPhase(c, thenLoot) {
   return (thenLoot || (c && c.originalActorId)) ? 'pluendern' : 'gabe';
 }
@@ -3464,8 +3476,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
           monsterNames: monsters.map((m) => m.name),
         };
       }
-      room.combat = null;
-      room.turnPhase = combatEndPhase(c, action.thenLoot);
+      beendeKampfOhneSieg(room, c, action.thenLoot);
       return action.leavesTreasure
         ? `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`
         : `Kampf gegen ${names} beendet, kein Schatz`;
@@ -3576,8 +3587,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       // Monster lag - genau wie bei ILLUSION. Aufruestweg waere ein
       // monsterModifier pro Monster-ID.
       if (!c.monsterIds.length) {
-        room.combat = null;
-        room.turnPhase = combatEndPhase(c, action.thenLoot);
+        beendeKampfOhneSieg(room, c, action.thenLoot);
         return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : ''}`;
       }
       refreshCombatReady(room);
@@ -3588,7 +3598,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       if (idx < 0) return 'Monster nicht im Kampf gefunden';
       const [dead] = c.monsterIds.splice(idx, 1);
       room.doorDiscard.push(dead);
-      if (c.monsterIds.length === 0) { room.combat = null; room.turnPhase = combatEndPhase(c, false); }
+      if (c.monsterIds.length === 0) beendeKampfOhneSieg(room, c, false);
       return `${action.name} sofort besiegt (kein Schatz)`;
     }
     // WANDERNDES MONSTER: "Dein Monster schliesst sich dem schon kaempfenden
