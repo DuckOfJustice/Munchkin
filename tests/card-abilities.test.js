@@ -1,7 +1,8 @@
 // Verifiziert die neuen Karten-Sonderkraft-Mechanismen aus der "lies alle
 // Karten durch"-Runde: Sofort-Stufenaufstieg-Karten, Kampf-Tränke, die
-// fehlkategorisierten Flüche aus dem Pathfinder-Set (DOOR_OTHER_AS_CURSE),
-// Machtgruppen sowie die bedingten Item-Kampfboni. Nach demselben Muster wie
+// fehlkategorisierten Flüche (DOOR_OTHER_AS_CURSE), Machtgruppen (seit dem
+// Entfernen des Pathfinder-Sets ohne Karten) sowie die bedingten
+// Item-Kampfboni. Nach demselben Muster wie
 // auto-consequence.test.js: gezielte Verhaltens-Checks plus ein
 // Abdeckungs-Regressionscheck gegen den vollen Kartensatz.
 const assert = require('assert');
@@ -41,9 +42,9 @@ function run() {
   // -------------------------------------------------------------------
   // Sofort-Stufenaufstieg-Karten
   // -------------------------------------------------------------------
-  assert.ok(isInstantLevelUpCard(findCard('FEUER MARSCH')), 'einfache "Steige 1 Stufe auf"-Karte muss erkannt werden');
+  assert.ok(isInstantLevelUpCard(findCard('AMEISENHÜGEL AUFKOCHEN')), 'einfache "Steige 1 Stufe auf"-Karte muss erkannt werden');
   assert.ok(isInstantLevelUpCard(findCard('1.000 GOLDSTÜCKE')), '"Steige eine Stufe Auf" (Großschreibung) muss erkannt werden');
-  assert.ok(!isInstantLevelUpCard(findCard('KISTE VOLLER LUFT')), 'Karten ohne "Steige...auf"-Text und ohne Level-Up-Override dürfen nicht als Level-Up erkannt werden');
+  assert.ok(!isInstantLevelUpCard(findCard('STEAM-CODE')), 'Karten ohne "Steige...auf"-Text und ohne Level-Up-Override dürfen nicht als Level-Up erkannt werden');
 
   const room5v5 = { players: [makePlayer({ id: 'p1', level: 5 }), makePlayer({ id: 'p2', level: 5 })] };
   const room5v3 = { players: [makePlayer({ id: 'p1', level: 5 }), makePlayer({ id: 'p2', level: 3 })] };
@@ -55,7 +56,8 @@ function run() {
   const sinnierenLong = TREASURE_POWER_OVERRIDES['SINNIEREN'](makePlayer({ hand: ['a', 'b', 'c'] }));
   assert.strictEqual(sinnierenLong.options.length, 2, 'SINNIEREN bietet bei >=3 Handkarten beide Optionen an');
 
-  assert.strictEqual(TREASURE_POWER_OVERRIDES['ENTE DER VIELEN SACHEN'](), null, 'ENTE DER VIELEN SACHEN bleibt bewusst manuell ("nach einem beliebigen Kampf" ist keine gepruefte Zeitbedingung)');
+  assert.deepStrictEqual(TREASURE_POWER_OVERRIDES['ENTE DER VIELEN SACHEN'](), { type: 'enteDerVielenSachen' },
+    'ENTE DER VIELEN SACHEN startet ihre Schrittkette (Durchlauf: card-clerical-rest.test.js)');
 
   // -------------------------------------------------------------------
   // Kampf-Tränke
@@ -66,11 +68,6 @@ function run() {
   assert.ok(isCombatPotionCard(findCard('SCHLAFTRANK')));
   assert.ok(isCombatPotionCard(findCard('KÖNIGLICHES ÖL')), 'KÖNIGLICHES ÖL ("+3 für beide Seiten") muss ebenfalls erkannt werden');
 
-  const combatRoom = (extra) => Object.assign({ combat: { actorId: 'p1', helperId: null, monsterIds: [] } }, extra);
-  assert.strictEqual(COMBAT_POTION_OVERRIDES['CYTILLESH-TRANK'](makePlayer(), combatRoom()), null, 'ohne Helfer nicht einsetzbar');
-  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['CYTILLESH-TRANK'](makePlayer(), combatRoom({ combat: { actorId: 'p1', helperId: 'p2', monsterIds: [] } })), { type: 'removeHelper' });
-  assert.strictEqual(COMBAT_POTION_OVERRIDES['FLÜSSIGKLINGE'](makePlayer({ equipped: { head: null, armor: null, feet: null, hands: ['x', 'y'] } })), null, 'ohne freie Hand nicht einsetzbar');
-  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['FLÜSSIGKLINGE'](makePlayer()), { type: 'modifier', side: 'actor', amount: 4 });
 
   const elfId = findCard('ELF', 'race').id;
   // LECKERER KUCHEN: +2 fuer beide Seiten, +4 vom Ork geworfen, Halblinge
@@ -100,10 +97,9 @@ function run() {
   );
 
   // -------------------------------------------------------------------
-  // Fehlkategorisierte Flüche (Pathfinder) - DOOR_OTHER_AS_CURSE
+  // Fehlkategorisierte Flüche - DOOR_OTHER_AS_CURSE
   // -------------------------------------------------------------------
-  assert.ok(DOOR_OTHER_AS_CURSE.has('SCHUHSUPPE'));
-  assert.ok(DOOR_OTHER_AS_CURSE.has('VERLIERE DEINE MACHTGRUPPE!'));
+  assert.ok(DOOR_OTHER_AS_CURSE.has('EXPLODIERENDE KNIESCHÜTZER'));
   const curseRoom = { players: [makePlayer(), makePlayer({ id: 'p2' })], doorDiscard: [] };
   [...DOOR_OTHER_AS_CURSE].forEach((name) => {
     const c = findCard(name, 'door_other');
@@ -112,10 +108,9 @@ function run() {
   });
 
   // -------------------------------------------------------------------
-  // Fehlkategorisierte Flüche (Basis-Set + Erweiterungen), neu entdeckter
-  // Nachtrag zur obigen Pathfinder-Runde
+  // Fehlkategorisierte Flüche (Basis-Set + Erweiterungen)
   // -------------------------------------------------------------------
-  assert.ok(DOOR_OTHER_AS_CURSE.size >= 43, 'Basis-Set-Fluch-Nachtrag darf nicht verschwinden');
+  assert.ok(DOOR_OTHER_AS_CURSE.size >= 28, 'Basis-Set-Fluch-Nachtrag darf nicht verschwinden');
   ['Rüstung verlieren', 'VERLIERE DEINE RASSE', 'KLASSE WECHSELN', 'RASSE WECHSELN', 'MIESER SPIEGEL', 'STINKER'].forEach((n) => {
     assert.ok(DOOR_OTHER_AS_CURSE.has(n), `${n} muss als Fluch geroutet werden`);
   });
@@ -217,14 +212,13 @@ function run() {
   });
 
   // -------------------------------------------------------------------
-  // Kampf-Gleichstand: ohne ALUFOLIE gewinnt das Monster, mit ALUFOLIE
-  // die Spielerseite (und die Karte wird verbraucht).
+  // Kampf-Gleichstand: das Monster gewinnt. (Die Gegenprobe mit der
+  // Gleichstand-Karte ALUFOLIE ist mit dem Pathfinder-Set entfallen - sie war
+  // die einzige Karte dieser Art, TIE_BREAKER_CARD zeigt weiterhin auf sie.)
   // -------------------------------------------------------------------
-  const alufolie = findCard('ALUFOLIE', 'treasure_other');
   const monster = ALL_CARDS.find((c) => c.category === 'monster' && c.level === 4);
-  // Gefüllter Schatzstapel: sonst mischt drawTreasure den Ablagestapel neu und
-  // die gerade verbrauchte ALUFOLIE käme als Kampfschatz direkt zurück.
-  const filler = ALL_CARDS.filter((c) => c.type === 'treasure' && c.name !== 'ALUFOLIE').slice(0, 10).map((c) => c.id);
+  // Gefüllter Schatzstapel: sonst mischt drawTreasure den Ablagestapel neu.
+  const filler = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 10).map((c) => c.id);
   function combatRoomTie(hand) {
     const actor = makePlayer({ id: 'p1', name: 'A', level: monster.level, hand: hand.slice() });
     return {
@@ -241,15 +235,15 @@ function run() {
   const tieNoCard = combatRoomTie([]);
   handleEvaluateCombat(tieNoCard, 'p1');
   if (tieNoCard.cleanupTimer) clearTimeout(tieNoCard.cleanupTimer);
-  assert.ok(tieNoCard.combat && tieNoCard.combat.mustFlee, 'Gleichstand ohne ALUFOLIE: Monster gewinnt, Flucht nötig');
+  assert.ok(tieNoCard.combat && tieNoCard.combat.mustFlee, 'Gleichstand: Monster gewinnt, Flucht nötig');
 
-  const tieWithCard = combatRoomTie([alufolie.id]);
+  // Ein Punkt mehr als das Monster: der Kampf ist gewonnen und beendet.
+  const tieWithCard = combatRoomTie([]);
+  tieWithCard.players[0].level = monster.level + 1;
   handleEvaluateCombat(tieWithCard, 'p1');
   if (tieWithCard.cleanupTimer) clearTimeout(tieWithCard.cleanupTimer);
-  assert.strictEqual(tieWithCard.combat, null, 'Gleichstand mit ALUFOLIE: Kampf ist gewonnen und beendet');
-  assert.strictEqual(tieWithCard.players[0].level, monster.level + 1, 'Sieg per ALUFOLIE bringt die Stufe fürs Monster');
-  assert.ok(!tieWithCard.players[0].hand.includes(alufolie.id), 'ALUFOLIE wird beim Einsatz verbraucht');
-  assert.ok(tieWithCard.treasureDiscard.includes(alufolie.id), 'verbrauchte ALUFOLIE landet auf dem Schatzablagestapel');
+  assert.strictEqual(tieWithCard.combat, null, 'Übermacht: Kampf ist gewonnen und beendet');
+  assert.strictEqual(tieWithCard.players[0].level, monster.level + 2, 'der Sieg bringt die Stufe fürs Monster');
 
   // Beute-Animation: der Sieg muss die gezogenen Schaetze fuer die Anzeige
   // festhalten - und zwar am Spieler (privat), nicht am Raum, denn gezogene
@@ -263,7 +257,7 @@ function run() {
 
   // -------------------------------------------------------------------
   // Kampf-Tränke, die den Kampf beenden: "lässt seinen Schatz zurück"
-  // (POLLYVERWANDLUNGSTRANK, TRANK DER IRRELEVANZ) muss die Schätze des
+  // (POLLYVERWANDLUNGSTRANK) muss die Schätze des
   // Monsters bringen - aber keine Stufe, das Monster wird nicht besiegt.
   // Gegenprobe FREUNDSCHAFTSTRANK: "Du erhältst keinen Schatz".
   // -------------------------------------------------------------------
@@ -310,12 +304,6 @@ function run() {
   polly.room.doorDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'door', 'auf dem Tür-Ablagestapel darf nur type=door liegen'));
   polly.room.treasureDiscard.forEach((id) => assert.strictEqual(ALL_CARDS.find((c) => c.id === id).type, 'treasure', 'auf dem Schatz-Ablagestapel darf nur type=treasure liegen'));
 
-  const irrelevanz = potionRoom('TRANK DER IRRELEVANZ');
-  handlePlayCombatCard(irrelevanz.room, 'p1', irrelevanz.potionId);
-  if (irrelevanz.room.cleanupTimer) clearTimeout(irrelevanz.room.cleanupTimer);
-  assert.strictEqual(irrelevanz.room.players[0].hand.length, lootMonster.treasureCount, 'TRANK DER IRRELEVANZ lässt den Schatz ebenfalls zurück');
-  assert.strictEqual(irrelevanz.room.players[0].level, 3, 'TRANK DER IRRELEVANZ bringt keine Stufe');
-
   const freundschaft = potionRoom('FREUNDSCHAFTSTRANK');
   handlePlayCombatCard(freundschaft.room, 'p1', freundschaft.potionId);
   if (freundschaft.room.cleanupTimer) clearTimeout(freundschaft.room.cleanupTimer);
@@ -325,38 +313,10 @@ function run() {
   assert.ok(!freundschaft.room.players[0].lastReward, 'ohne Schatz keine Beute-Animation');
   assert.strictEqual(freundschaft.room.turnPhase, 'pluendern', 'FREUNDSCHAFTSTRANK erlaubt danach das Plündern');
 
-  // VERZAUBERARMBAND: "ein Monster aus dem Kampf entfernen, indem du 3 Karten
-  // ablegst und seinen Schatz zurücklässt. Verzauberte Monster gewähren keine
-  // Stufen!" - Schatz ja, Stufe nein. Die 3 Karten werden nur als Bedingung
-  // geprüft (bewusst manuell abgelegt), bleiben hier also auf der Hand.
-  const armbandPay = ALL_CARDS.filter((c) => c.type === 'door').slice(0, 3).map((c) => c.id);
-  const armband = potionRoom('VERZAUBERARMBAND');
-  armband.room.players[0].hand.push(...armbandPay);
-  handlePlayCombatCard(armband.room, 'p1', armband.potionId);
-  if (armband.room.cleanupTimer) clearTimeout(armband.room.cleanupTimer);
-  const armbandActor = armband.room.players[0];
-  assert.strictEqual(armband.room.combat, null, 'VERZAUBERARMBAND beendet den Kampf gegen das verzauberte Monster');
-  assert.ok(armband.room.doorDiscard.includes(lootMonster.id), 'das verzauberte Monster liegt im Tür-Ablagestapel');
-  assert.ok(!armbandActor.hand.includes(armband.potionId), 'das Armband wird hier immer verbraucht (Würfelwurf bewusst manuell)');
-  assert.strictEqual(armbandActor.hand.length, armbandPay.length + lootMonster.treasureCount, 'zurückgelassener Schatz auf der Hand (Anzahl = treasureCount), Kostenkarten bleiben liegen');
-  assert.strictEqual(armbandActor.level, 3, 'verzauberte Monster gewähren keine Stufen');
-  assert.strictEqual(armbandActor.lastReward.levelsGained, 0, 'Beute-Animation zeigt 0 Stufen');
-  assert.strictEqual(armbandActor.lastReward.cardIds.length, lootMonster.treasureCount, 'Beute-Animation zeigt genau die zurückgelassenen Schätze');
-
-  // Bedingungen des Armbands: nur im eigenen Zug, nur bei genau einem Monster
-  // im Kampf, und nur mit 3 weiteren Karten auf der Hand.
-  const armbandCheck = potionRoom('VERZAUBERARMBAND');
-  armbandCheck.room.players[0].hand.push(...armbandPay);
-  const armbandSpec = () => COMBAT_POTION_OVERRIDES['VERZAUBERARMBAND'](armbandCheck.room.players[0], armbandCheck.room);
-  assert.deepStrictEqual(armbandSpec(), { type: 'endCombatNoLevel', leavesTreasure: true }, 'im eigenen Zug mit einem Monster und 3 Kostenkarten einsetzbar');
-  armbandCheck.room.turnIndex = 1;
-  assert.strictEqual(armbandSpec(), null, 'nicht im Zug eines anderen Spielers einsetzbar');
-  armbandCheck.room.turnIndex = 0;
-  armbandCheck.room.combat.monsterIds = [lootMonster.id, monster.id];
-  assert.strictEqual(armbandSpec(), null, 'bei mehreren Monstern bewusst nicht einsetzbar (Schatz wäre nicht zuordenbar)');
-  armbandCheck.room.combat.monsterIds = [lootMonster.id];
-  armbandCheck.room.players[0].hand = [armbandCheck.potionId, armbandPay[0]];
-  assert.strictEqual(armbandSpec(), null, 'ohne 3 ablegbare Karten nicht einsetzbar');
+  // Das VERZAUBERARMBAND (Monster gegen 3 Karten entfernen, Schatz bleibt,
+  // keine Stufe) kam aus dem Pathfinder-Set - mit ihm sind seine Tests
+  // entfallen. Die ZAUBERER-"Verzauberung" weiter unten prüft dieselbe
+  // Mechanik (endCombatNoLevel + leavesTreasure) weiterhin.
 
   // Kartennamen in den Sonderfall-Tabellen muessen es wirklich geben - ein
   // Tippfehler (die Karte heisst "UNSICHTSBARKEITSTRANK", mit S) macht den
@@ -595,13 +555,12 @@ function run() {
   assert.strictEqual(geschoss.room.pendingCardAction.options.length, 2,
     'genau zwei Seiten zur Wahl: Munchkins oder Monster');
 
-  // Gegenprobe: ALUFOLIE darf einen echten Rückstand nicht in einen Sieg drehen.
-  const behind = combatRoomTie([alufolie.id]);
+  // Gegenprobe: ein echter Rückstand bleibt ein Rückstand.
+  const behind = combatRoomTie([]);
   behind.players[0].level = monster.level - 1;
   handleEvaluateCombat(behind, 'p1');
   if (behind.cleanupTimer) clearTimeout(behind.cleanupTimer);
-  assert.ok(behind.combat && behind.combat.mustFlee, 'ALUFOLIE wirkt nur bei echtem Gleichstand');
-  assert.ok(behind.players[0].hand.includes(alufolie.id), 'bei Rückstand bleibt ALUFOLIE auf der Hand');
+  assert.ok(behind.combat && behind.combat.mustFlee, 'schwächer als das Monster: Flucht nötig');
 
   // -------------------------------------------------------------------
   // Tod: jede abgelegte Karte muss auf dem Stapel ihres eigenen Typs landen.
@@ -637,20 +596,13 @@ function run() {
   // -------------------------------------------------------------------
   // Machtgruppen
   // -------------------------------------------------------------------
-  // Höllenritterrüstung: +5, aber nur mit freiem Rüstungs- und Kopf-Slot.
-  const hellknightId = findCard('HÖLLENRITTER', 'door_other').id;
-  const someArmor = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'armor' && c.bonus);
+  // Alle acht Machtgruppen-Karten kamen aus dem Pathfinder-Set und sind mit
+  // ihm entfallen; POWER_GROUP_NAMES ist deshalb leer und die Bonus-Tests
+  // (Höllenritterrüstung +5, Assassinen-Heimlichkeit +1) haben keine Karte
+  // mehr. Die Maschinerie bleibt stehen - der Weglauf-Test darunter prüft sie
+  // weiterhin mit einer leeren Machtgruppenliste.
   assert.strictEqual(baseStrength(makePlayer({ level: 5 })), 5, 'ohne Machtgruppe kein Zusatzbonus');
-  assert.strictEqual(baseStrength(makePlayer({ level: 5, powerGroups: [hellknightId] })), 10, 'Höllenritter: +5 bei freien Slots');
-  assert.strictEqual(
-    baseStrength(makePlayer({ level: 5, powerGroups: [hellknightId], equipped: { head: null, armor: someArmor.id, feet: null, hands: [null, null] } })),
-    5 + someArmor.bonus,
-    'mit eigener Rüstung zählt nur diese, nicht zusätzlich die Höllenritterrüstung'
-  );
 
-  // Heimlichkeit: +1 auf Weglaufen. Der Würfelwurf ist zufällig, der
-  // protokollierte Modifikator nicht - der wird geprüft.
-  const assassinId = findCard('ASSASSINE DER ROTEN MANTIS', 'door_other').id;
   function fleeMod(powerGroups) {
     const actor = makePlayer({ id: 'p1', name: 'A', level: 1, powerGroups });
     const room = {
@@ -674,13 +626,8 @@ function run() {
     return entry.text.match(/\(([+-]\d+) =/)[1];
   }
   assert.strictEqual(fleeMod([]), '+0', 'ohne Machtgruppe kein Weglaufen-Bonus');
-  assert.strictEqual(fleeMod([assassinId]), '+1', 'Assassine der Roten Mantis: +1 auf Weglaufen');
 
-  assert.strictEqual(POWER_GROUP_NAMES.size, 8);
-  ['KUNDSCHAFTER', 'NEKROMANT', 'HEXE', 'HÖLLENRITTER', 'ADLERRITTER', 'PAKTMAGIER', 'ALCHEMIST', 'ASSASSINE DER ROTEN MANTIS'].forEach((n) => {
-    assert.ok(POWER_GROUP_NAMES.has(n), `${n} muss als Machtgruppe erkannt werden`);
-    assert.ok(findCard(n, 'door_other'), `${n} muss als door_other-Karte existieren`);
-  });
+  assert.strictEqual(POWER_GROUP_NAMES.size, 0, 'seit dem Entfernen von Pathfinder gibt es keine Machtgruppen-Karten mehr');
 
   // -------------------------------------------------------------------
   // Garantierte Flucht

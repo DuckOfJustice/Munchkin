@@ -14,7 +14,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, resolveConsequenceSpec, applyPrimitiveAction,
   handleResolveCardCardChoice, istGeschlecht, pruefeSlipperVerlust,
-  handleEquipItem, combatTotals,
+  handleEquipItem, combatTotals, DOOR_OTHER_AS_CURSE,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -282,6 +282,37 @@ const spec = (name, player, room) => {
   const room = makeRoom([p]);
   applyPrimitiveAction(room, p, resolveConsequenceSpec('SIEBENJÄHRIGER LICH', 'x', p, room));
   assert.strictEqual(p.level, 1, 'Stufe 1 bleibt Stufe 1');
+}
+
+// --- DU STOLPERST ÜBER DEINE EIGENE TRUHE ----------------------------------
+// "Du verlierst deinen wertvollsten Gegenstand, den du im Spiel ausliegen
+// hast" - wertvoll = Goldwert, wie bei PACKRATTE.
+{
+  const truhe = findCard('DU STOLPERST ÜBER DEINE EIGENE TRUHE');
+  assert.ok(DOOR_OTHER_AS_CURSE.has(truhe.name), 'sie gilt als Fluch');
+
+  const nachGold = (k) => ALL_CARDS.filter((c) => c.slotKind === k && c.gold)
+    .sort((a, b) => a.gold - b.gold);
+  const billig = nachGold('armor')[0];
+  const teuer = nachGold('head').slice(-1)[0];
+  assert.ok(billig && teuer && teuer.gold > billig.gold, 'Testkarten mit klarem Goldunterschied');
+
+  const p = makePlayer({ equipped: Object.assign(newEquipped(), { armor: billig.id, head: teuer.id }) });
+  const room = makeRoom([p]);
+  applyPrimitiveAction(room, p, resolveConsequenceSpec(truhe.name, truhe.text, p, room));
+  assert.ok(room.doorDiscard.concat(room.treasureDiscard).includes(teuer.id),
+    'der teuerste Gegenstand ist weg');
+  assert.strictEqual(p.equipped.armor, billig.id, 'der billigere bleibt angelegt');
+  assert.strictEqual(p.equipped.head, null, 'und der teure nicht mehr');
+}
+{
+  // Wer nichts traegt, verliert nichts - und die Auflösung bleibt nicht haengen.
+  const truhe = findCard('DU STOLPERST ÜBER DEINE EIGENE TRUHE');
+  const p = makePlayer({ hand: ['egal'] });
+  const room = makeRoom([p]);
+  const desc = applyPrimitiveAction(room, p, resolveConsequenceSpec(truhe.name, truhe.text, p, room));
+  assert.ok(/keinen Gegenstand/.test(desc), desc);
+  assert.deepStrictEqual(p.hand, ['egal'], 'Handkarten bleiben unangetastet');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

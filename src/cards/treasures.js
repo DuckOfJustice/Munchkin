@@ -69,11 +69,14 @@ module.exports = (ctx) => {
       room.lastCombatWinnerId && room.lastCombatWinnerId !== player.id
         ? { type: 'levelUp', amount: 1 } : null),
 
-    // --- Bewusst manuell: hängt von Karten/Zustand ab, den dieser Server
-    // nicht separat verfolgt (Mietling "im Spiel" ist keine eigene Zone;
-    // "nach einem beliebigen Kampf" ist keine geprüfte Zeitbedingung; die
-    // Mehrfach-Effekt-Kette betrifft mehrere Spieler in fester Reihenfolge). ---
-    'ENTE DER VIELEN SACHEN': () => null,
+    // "Tue folgendes, in dieser Reihenfolge: Nimm zufaellig eine Karte aus der
+    // Hand des naechsten Spielers ... Gib dem naechsten Spieler eine Karte
+    // deiner Wahl. Nimm die oberste Karte vom Ablagestapel eines der Decks.
+    // Singe ein Staendchen. Steige eine Stufe auf. Lege zwei Karten ab. Lege
+    // diese Karte ab." Die Kette laeuft als Warteschlange auf dieselbe Person,
+    // damit die Reihenfolge auch ueber die Dialoge hinweg steht - siehe
+    // 'enteDerVielenSachen' in server.js.
+    'ENTE DER VIELEN SACHEN': () => ({ type: 'enteDerVielenSachen' }),
 
     // --- Sonstige Einzelfälle ---
     // "Ziehe sofort 3 weitere Schatzkarten."
@@ -82,7 +85,6 @@ module.exports = (ctx) => {
     // willst. Nimm die neue Karte und lege diese ab." (Original-Karte wird
     // beim Ausspielen ohnehin abgelegt.)
     'WÜNSCHELSTAB': () => ({ type: 'chooseDiscardedCard' }),
-    'GEDENKTAFEL': (player, room) => (room.combat ? null : { type: 'chooseDiscardedCard' }),
 
     // "Zu einem beliebigen Zeitpunkt waehrend des Kampfes spielen. Durchsuche
     // den Schatzabwurfstapel ... und tausche diese Karte gegen den ersten
@@ -215,16 +217,6 @@ module.exports = (ctx) => {
     // "Verwandelt ein Monster in einen Papagei, der wegfliegt und seinen
     // Schatz zurücklässt." -> Schatz gehört der kämpfenden Person.
     'POLLYVERWANDLUNGSTRANK': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
-    // "Bringt ein Monster dazu, verwirrt wegzulaufen und seinen Schatz
-    // zurückzulassen." -> ebenfalls Schatz, aber keine Stufe.
-    'TRANK DER IRRELEVANZ': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
-    // "Lege das Monster nach unten in den Türstapel zurück. Wenn es das
-    // einzige Monster im Kampf war, ist der Kampf vorbei und der aktuelle
-    // Spieler plündert den Raum." (kein Schatz - das Monster nimmt ihn mit)
-    'ENTLASSUNGSGLOCKE': () => ({ type: 'removeOneMonster', returnToDoorDeckBottom: true, thenLoot: true }),
-    // "Der Helfer vergisst, dass er kämpft, geht und lässt den Hauptkämpfer
-    // allein im Kampf zurück." (nur spielbar, wenn ein Helfer im Kampf ist)
-    'CYTILLESH-TRANK': (player, room) => (room.combat.helperId ? { type: 'removeHelper' } : null),
     // "+2 egal für welche Seite, oder tötet sofort die Laufende Nase."
     'TRANK DES MUNDGERUCHS': (player, room) => {
       const hasLaufendeNase = room.combat.monsterIds.some((id) => { const m = card(id); return m && m.name === 'LAUFENDE NASE'; });
@@ -250,29 +242,6 @@ module.exports = (ctx) => {
     // Kampf bist."
     'DOPPELGÄNGER': (player, room) => (room.combat.actorId === player.id && !room.combat.helperId
       ? { type: 'doubleStrength' } : null),
-    'FLÜSSIGKLINGE': (player) => (player.equipped.hands.includes(null) ? { type: 'modifier', side: 'actor', amount: 4 } : null),
-    // "Einmal pro Zug kannst du in deinem Zug ein Monster aus dem Kampf
-    // entfernen, indem du 3 Karten ablegst und seinen Schatz zurücklässt.
-    // Verzauberte Monster gewähren keine Stufen! Nachdem du ein Monster
-    // verzaubert hast, würfelst du. Bei einer 1 legst du das Verzauberarmband
-    // ab." -> "seinen Schatz zurücklässt" + "keine Stufen" ist genau
-    // endCombatNoLevel/leavesTreasure. Nur im eigenen Zug und nur bei genau
-    // EINEM Monster im Kampf einsetzbar: endCombatNoLevel legt immer alle
-    // Monster ab und würde bei mehreren auch den Schatz der nicht verzauberten
-    // ausschütten - ein einzelnes Monster samt seinem Schatz herauszulösen
-    // bräuchte eine Monster-Auswahl, die es hier nicht gibt (dann bewusst
-    // manuell abwickeln). Die 3 abzulegenden Karten bleiben ebenfalls manuell
-    // (es gibt keinen Mehrfach-Kartenwähler; 'discardFromHand' macht das von
-    // Hand) - geprüft wird nur, dass sie überhaupt auf der Hand liegen. Der
-    // Würfelwurf danach entfällt, weil die Karte hier wie jeder Kampf-Trank
-    // immer verbraucht wird: strenger als die Regel, dafür braucht "einmal pro
-    // Zug" keinen eigenen Zähler.
-    'VERZAUBERARMBAND': (player, room) => {
-      const onTurn = currentPlayer(room);
-      return onTurn && onTurn.id === player.id && room.combat.monsterIds.length === 1 && player.hand.length >= 4
-        ? { type: 'endCombatNoLevel', leavesTreasure: true }
-        : null;
-    },
   };
 
   // Tuerkarten mit eigener Kampfwirkung, die keine Monster-Verstaerker sind

@@ -12,6 +12,7 @@ const {
   applyTargetAction, TREASURE_POWER_OVERRIDES, DOOR_COMBAT_CARDS,
   monsterPassOption, FLEE_ITEM_BONUS, applyPrimitiveAction, handleResolveCardChoice,
   handleDrawDoor, handleResolveCardCardChoice, endTurn, CONSEQUENCE_OVERRIDES,
+  buildDecks, DEAKTIVIERTE_KARTEN, SET_KEYS, handleUseCardPower,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -203,6 +204,108 @@ function mitKampf(room, monsterIds, actorId) {
   room.players.push(c);
   handlePlayCurseFromHand(room, b.id, fluch.id, c.id);
   assert.ok(!b.hand.includes(fluch.id), 'gegen C geht es');
+}
+{
+  // ... aber ins Spiel kommt die Karte vorerst gar nicht mehr: solange die
+  // Rueckgabe bereits gespielter Karten fehlt, liegt sie in
+  // DEAKTIVIERTE_KARTEN und wird beim Deckbau uebersprungen.
+  assert.ok(DEAKTIVIERTE_KARTEN.has('EINSTWEILIGE VERFÜGUNG'), 'sie steht auf der Sperrliste');
+  const verfuegung = findCard('EINSTWEILIGE VERFÜGUNG');
+  const room = makeRoom([makePlayer({ id: 'p1' })], {});
+  room.settings = { sets: {} };
+  SET_KEYS.forEach((k) => { room.settings.sets[k] = true; });
+  buildDecks(room);
+  assert.ok(!room.doorDeck.concat(room.treasureDeck).includes(verfuegung.id),
+    'in keinem Stapel');
+  // Die Sperrliste trifft nur sie - der Rest des Sets liegt weiterhin drin.
+  const rest = findCard('UNFASSBAR REICH');
+  assert.ok(room.doorDeck.concat(room.treasureDeck).includes(rest.id), 'der Rest bleibt');
+}
+
+// --- ENTE DER VIELEN SACHEN ------------------------------------------------
+// "Tue folgendes, IN DIESER REIHENFOLGE": sieben Schritte am Stueck, davon
+// vier mit Dialog. Der Test laeuft die ganze Kette einmal durch.
+{
+  const ente = findCard('ENTE DER VIELEN SACHEN');
+  const [k1, k2, k3, k4, k5] = ALL_CARDS.filter((c) => c.category === 'treasure_other'
+    && c.name !== 'ENTE DER VIELEN SACHEN').slice(0, 5);
+  const tuerkarte = findCard('VERLIERE 1 STUFE', 'door_other');
+
+  const a = makePlayer({ id: 'p1', name: 'A', level: 3, hand: [ente.id, k1.id, k2.id, k3.id] });
+  const b = makePlayer({ id: 'p2', name: 'B', hand: [k4.id] });
+  const c = makePlayer({ id: 'p3', name: 'C', hand: [] });
+  const room = makeRoom([a, b, c], { turnIndex: 0, turnPhase: 'tuer' });
+  room.doorDiscard = [tuerkarte.id];
+  room.treasureDiscard = [k5.id];
+
+  handleUseCardPower(room, a.id, ente.id);
+
+  // Schritt 1 (ohne Dialog): eine zufaellige Karte vom naechsten Spieler.
+  assert.ok(a.hand.includes(k4.id), 'die Karte von B liegt bei A');
+  assert.strictEqual(b.hand.length, 0, 'und nicht mehr bei B');
+  // Schritt 7 laeuft schon beim Ausspielen: die Ente selbst ist abgelegt.
+  assert.ok(!a.hand.includes(ente.id), 'die Ente ist abgelegt');
+
+  // Schritt 2: eine Karte eigener Wahl an denselben Nachbarn geben.
+  assert.strictEqual(room.pendingCardAction.kind, 'chooseCard');
+  assert.ok(room.pendingCardAction.candidateIds.includes(k1.id), 'aus der eigenen Hand');
+  handleResolveCardCardChoice(room, a.id, k1.id);
+  assert.ok(b.hand.includes(k1.id), 'B hat die geschenkte Karte');
+  assert.ok(!a.hand.includes(k1.id), 'A nicht mehr');
+
+  // Schritt 3: die oberste Karte eines der beiden Ablagestapel - die Ente
+  // liegt selbst obenauf und darf sich nicht zurueckholen.
+  assert.strictEqual(room.pendingCardAction.kind, 'chooseCard');
+  assert.deepStrictEqual(room.pendingCardAction.candidateIds.slice().sort(),
+    [tuerkarte.id, k5.id].sort(), 'die Oberste je Stapel, ohne die Ente');
+  const vorherStufe = a.level;
+  handleResolveCardCardChoice(room, a.id, tuerkarte.id);
+  assert.ok(a.hand.includes(tuerkarte.id), 'die gewaehlte Karte liegt auf der Hand');
+
+  // Schritt 4 (Staendchen, nur Text) und 5 (Stufe) laufen ohne Dialog durch.
+  assert.strictEqual(a.level, vorherStufe + 1, 'eine Stufe hoeher');
+  assert.ok(room.logs.some((l) => /Ständchen/.test(l.text)), 'das Staendchen steht im Verlauf');
+
+  // Schritt 6: zwei Karten ablegen, jede einzeln gewaehlt.
+  assert.strictEqual(room.pendingCardAction.kind, 'chooseCard');
+  const handVorAblegen = a.hand.length;
+  handleResolveCardCardChoice(room, a.id, a.hand[0]);
+  assert.strictEqual(room.pendingCardAction.kind, 'chooseCard', 'und gleich die zweite');
+  handleResolveCardCardChoice(room, a.id, a.hand[0]);
+  assert.strictEqual(a.hand.length, handVorAblegen - 2, 'genau zwei abgelegt');
+  assert.strictEqual(room.pendingCardAction, null, 'danach ist die Kette durch');
+}
+{
+  // Leerer Nachbar, leere Ablagestapel: die Kette ueberspringt, was nicht
+  // geht, und bleibt nicht haengen.
+  const ente = findCard('ENTE DER VIELEN SACHEN');
+  const a = makePlayer({ id: 'p1', name: 'A', level: 3, hand: [ente.id] });
+  const b = makePlayer({ id: 'p2', name: 'B', hand: [] });
+  const room = makeRoom([a, b], { turnIndex: 0, turnPhase: 'tuer' });
+
+  handleUseCardPower(room, a.id, ente.id);
+  assert.strictEqual(a.level, 4, 'die Stufe kommt trotzdem');
+  assert.strictEqual(room.pendingCardAction, null, 'kein haengender Dialog');
+}
+
+{
+  // Trennung mitten in der Kette: die Warteschlange besteht nur aus EINER
+  // Person, "ueberspringen" beendet also die ganze Karte. Das darf nicht
+  // lautlos passieren.
+  const ente = findCard('ENTE DER VIELEN SACHEN');
+  const [k1, k2] = ALL_CARDS.filter((c) => c.category === 'treasure_other'
+    && c.name !== 'ENTE DER VIELEN SACHEN').slice(0, 2);
+  const a = makePlayer({ id: 'p1', name: 'A', hand: [ente.id, k1.id] });
+  const b = makePlayer({ id: 'p2', name: 'B', hand: [k2.id] });
+  const room = makeRoom([a, b], { turnIndex: 0, turnPhase: 'tuer' });
+
+  handleUseCardPower(room, a.id, ente.id);
+  assert.strictEqual(room.pendingCardAction.kind, 'chooseCard', 'Schritt 2 wartet');
+  a.connected = false;
+  handleResolveCardCardChoice(room, a.id, room.pendingCardAction.candidateIds[0]);
+  assert.ok(room.logs.some((l) => /ist nicht da/.test(l.text)),
+    'der Abbruch steht im Verlauf');
+  assert.strictEqual(room.pendingCardAction, null, 'und nichts haengt');
 }
 
 // --- UNFASSBAR REICH / MONSTER SIND BESCHÄFTIGT ----------------------------
