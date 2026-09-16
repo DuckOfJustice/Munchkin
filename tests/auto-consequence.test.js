@@ -131,7 +131,11 @@ function run() {
   // Runde vom 2026-09-16 (Unnatural Axe, Task 3): zwei weitere Karten
   // sind kuratiert dazugekommen - GEWALTIGER BAZILLUS und MONDJUNGFERN.
   // Tatsaechlich stehen damit noch 9 Karten manuell; die Schranke geht auf 8.
-  assert.ok(manual >= 8, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
+  // Runde vom 2026-09-16 (Unnatural Axe, Tasks 7-10): drei weitere Karten
+  // sind kuratiert dazugekommen - PSYCHO-EICHHÖRNCHEN, PTERODAKTYL und die
+  // Schlimmen Dinge des SL-Monsters. Tatsaechlich stehen damit noch 6 Karten
+  // manuell; die Schranke geht auf 5.
+  assert.ok(manual >= 5, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
 }
 
 run();

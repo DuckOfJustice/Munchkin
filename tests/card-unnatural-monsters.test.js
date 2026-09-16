@@ -264,5 +264,29 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(p.hand.length, 0, 'die Hand ist weg');
 }
 
+// --- SL-Monster, Schlimme Dinge ---------------------------------------------
+// "Halblinge verlieren eine Stufe. Elfen verlieren zwei Stufen. Maenner
+// verlieren eine zusaetzliche Stufe und muessen eine Karte ablegen.
+// Diejenigen, die nicht unter die Kriterien oben fallen, muessen zwei Karten
+// ablegen."
+{
+  const NAME = 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT';
+  const sl = findCard(NAME, 'monster');
+  const HALBLING = findCard('HALBLING', 'race');
+  const stufenVerlust = (spieler) => {
+    const p = makePlayer(spieler);
+    const room = makeRoom([p]);
+    const vorher = p.level;
+    const spec = resolveConsequenceSpec(NAME, sl.badstuff, p, room);
+    assert.ok(spec, 'das SL-Monster braucht eine Automatik');
+    applyPrimitiveAction(room, p, spec);
+    return vorher - p.level;
+  };
+  assert.strictEqual(stufenVerlust({ races: [HALBLING.id], gender: 'w' }), 1, 'Halbling-Frau: 1 Stufe');
+  assert.strictEqual(stufenVerlust({ races: [ELF.id], gender: 'w' }), 2, 'Elfen-Frau: 2 Stufen');
+  assert.strictEqual(stufenVerlust({ races: [ELF.id], gender: 'm' }), 3, 'Elfen-Mann: 2 + 1 zusaetzlich');
+  assert.strictEqual(stufenVerlust({ gender: 'w' }), 0, 'Frau ohne Rasse: keine Stufe, dafuer Karten');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

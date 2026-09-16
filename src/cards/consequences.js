@@ -212,6 +212,22 @@ module.exports = (ctx) => {
         { id: 'items', label: 'Alle Gegenstände verlieren', action: { type: 'discardAllEquipped' } },
       ],
     }),
+    // "Halblinge verlieren eine Stufe. Elfen verlieren zwei Stufen. Maenner
+    // verlieren eine zusaetzliche Stufe und muessen eine Karte ablegen.
+    // Diejenigen, die nicht unter die Kriterien oben fallen, muessen zwei
+    // Karten ablegen."
+    'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT': (player) => {
+      const stufen = (hasRace(player, 'ELF') ? 2 : 0) + (hasRace(player, 'HALBLING') ? 1 : 0)
+        + (istGeschlecht(player, 'm') ? 1 : 0);
+      // "nicht unter die Kriterien oben" = weder Halbling noch Elf noch Mann.
+      const karten = stufen === 0 ? 2 : (istGeschlecht(player, 'm') ? 1 : 0);
+      const actions = [];
+      if (stufen) actions.push({ type: 'levelDelta', amount: stufen });
+      if (karten) actions.push({ type: 'queuedDiscardOwn', count: karten, quelle: 'hand',
+        cardName: 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT', prompt: 'Eine Handkarte ablegen' });
+      if (!actions.length) return { type: 'noEffect' };
+      return actions.length === 1 ? actions[0] : { type: 'combo', actions };
+    },
 
     // "Verliere 1 Stufe" + Sonderklausel bei "ausdrücklich an den Knien
     // getragenem" Gegenstand - dafür gibt es kein Datenfeld, nur die
