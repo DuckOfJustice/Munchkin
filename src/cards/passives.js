@@ -337,8 +337,13 @@ module.exports = (ctx) => {
     'DING MIT EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST': { classes: ['KRIEGER'], bonus: 5 }, // "+5 gegen Krieger."
     'TENTAKELDÄMON': { classes: ['PRIESTER'], bonus: 5 },                          // "Eine Hoellenkreatur. +5 gegen Priester."
     // "+4 gegen Elfen (uuuaaaah). In Kombination mit der Laufenden Nase (oder
-    // dem Schatten), erhaelt jeder einen Bonus von +10." Die zweite Klausel
-    // haengt am Kampf, nicht an der Person - siehe wennErfuellt mit Raum.
+    // dem Schatten), erhaelt JEDER einen Bonus von +10." Regelentscheidung
+    // (Review I2): "jeder" heisst jedes beteiligte Monster, nicht "einmal pro
+    // Kampf" - deshalb steht dieselbe Klausel an allen drei Karten (hier,
+    // sowie bei LAUFENDE NASE und DIE SCHATTENNASE weiter unten). Jede Karte
+    // traegt ihren eigenen +10, monsterTraitBonusSum addiert sie: Rotz + eine
+    // Nase macht +20, Rotz + beide Nasen +30 - konsistent mit der Regel, dass
+    // JEDE beteiligte Karte den Bonus fuer sich bekommt.
     'ROTZ-ELEMENTAR': [
       { races: ['ELF'], bonus: 4 },
       { wennErfuellt: (p, room) => !!room.combat && room.combat.monsterIds.some((id) => {
@@ -346,6 +351,20 @@ module.exports = (ctx) => {
         return !!m && (m.name === 'LAUFENDE NASE' || m.name === 'DIE SCHATTENNASE');
       }), bonus: 10 },
     ],
+    // Gegenstueck zur ROTZ-ELEMENTAR-Klausel oben: dieselbe Regelentscheidung
+    // ("jeder" = jedes beteiligte Monster) verlangt denselben +10 auch hier,
+    // sobald der Rotz-Elementar mit im Kampf steht.
+    'LAUFENDE NASE': {
+      wennErfuellt: (p, room) => !!room.combat
+        && room.combat.monsterIds.some((id) => (card(id) || {}).name === 'ROTZ-ELEMENTAR'),
+      bonus: 10,
+    },
+    // Gegenstueck zur ROTZ-ELEMENTAR-Klausel oben, siehe dort.
+    'DIE SCHATTENNASE': {
+      wennErfuellt: (p, room) => !!room.combat
+        && room.combat.monsterIds.some((id) => (card(id) || {}).name === 'ROTZ-ELEMENTAR'),
+      bonus: 10,
+    },
     // "+5 gegen Elfen oder Menschen." - eine Regel, nicht zwei: ein Elf ist
     // kein Mensch, die Faelle schliessen sich aus.
     'RIESENKAKERLAKE': { wennErfuellt: (p) => monsterSeesRace(p, 'ELF') || istMensch(p), bonus: 5 },

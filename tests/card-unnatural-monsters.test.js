@@ -526,14 +526,20 @@ const PRIESTER = findCard('PRIESTER', 'class');
 }
 
 // --- ROTZ-ELEMENTAR mit Laufender Nase / Schattennase -----------------------
-// "In Kombination mit der Laufenden Nase (oder dem Schatten), erhaelt jeder
-// einen Bonus von +10."
+// "In Kombination mit der Laufenden Nase (oder dem Schatten), erhaelt JEDER
+// einen Bonus von +10." Regelentscheidung (Review I2): "jeder" heisst jedes
+// beteiligte Monster - mit einer Nase-Karte macht das +20 (Rotz und die Nase
+// bekommen je +10), mit beiden Nase-Karten +30.
 {
   const nase = findCard('LAUFENDE NASE', 'monster');
+  const schatten = findCard('DIE SCHATTENNASE', 'monster');
   const allein = monsterStaerke('ROTZ-ELEMENTAR', makePlayer({}));
   const mitNase = monsterStaerke('ROTZ-ELEMENTAR', makePlayer({}), [nase.id]);
-  assert.strictEqual(mitNase - allein - nase.level, 10,
-    'ueber die Stufe der Nase hinaus kommen +10 dazu');
+  const mitBeiden = monsterStaerke('ROTZ-ELEMENTAR', makePlayer({}), [nase.id, schatten.id]);
+  assert.strictEqual(mitNase - allein - nase.level, 20,
+    'mit einer Nase-Karte bekommen Rotz UND die Nase je +10, macht +20');
+  assert.strictEqual(mitBeiden - allein - nase.level - schatten.level, 30,
+    'mit beiden Nase-Karten bekommt jede beteiligte Karte ihre +10, macht +30');
 }
 
 // --- DIE SCHATTENNASE: "Du kannst nicht fluechten" --------------------------
