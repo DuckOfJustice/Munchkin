@@ -149,6 +149,42 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(summe, erwartet, `${monster}: Weglauf-Modifikator ${erwartet}`);
 });
 
+// --- MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT -------------------------
+// "+4 gegen Zwerge, +2 gegen Frauen, -3 gegen Zauberer, -2 am Samstag."
+{
+  const NAME = 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT';
+  const basis = monsterStaerke(NAME, makePlayer({}));
+  assert.strictEqual(monsterStaerke(NAME, makePlayer({ races: [ZWERG.id] })) - basis, 4, 'Zwerge +4');
+  assert.strictEqual(monsterStaerke(NAME, makePlayer({ gender: 'w' })) - basis, 2, 'Frauen +2');
+  assert.strictEqual(monsterStaerke(NAME, makePlayer({ classes: [ZAUBERER.id] })) - basis, -3, 'Zauberer -3');
+  // Alle vier Klauseln greifen unabhaengig voneinander.
+  assert.strictEqual(
+    monsterStaerke(NAME, makePlayer({ races: [ZWERG.id], gender: 'w', classes: [ZAUBERER.id] })) - basis,
+    3, 'Zwergin mit Zaubererklasse: +4 +2 -3');
+}
+{
+  // Der Samstags-Malus haengt am echten Wochentag - geprueft mit gestelltem
+  // Date, damit der Test nicht vom Kalender abhaengt.
+  const NAME = 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT';
+  const echtesDate = global.Date;
+  const stelle = (wochentag) => {
+    class FakeDate extends echtesDate {
+      constructor(...args) { super(...(args.length ? args : [2026, 8, 12 + wochentag])); }
+      getDay() { return wochentag; }
+    }
+    global.Date = FakeDate;
+  };
+  try {
+    stelle(3); // Mittwoch
+    const mittwoch = monsterStaerke(NAME, makePlayer({}));
+    stelle(6); // Samstag
+    const samstag = monsterStaerke(NAME, makePlayer({}));
+    assert.strictEqual(samstag - mittwoch, -2, 'am Samstag ist es 2 schwaecher');
+  } finally {
+    global.Date = echtesDate;
+  }
+}
+
 // --- Schlimme Dinge: GEWALTIGER BAZILLUS ------------------------------------
 // "Du niest unaufhoerlich ... Lege zwei Karten (deiner Wahl) aus deiner Hand ab."
 {

@@ -330,6 +330,17 @@ module.exports = (ctx) => {
     // "Greift mit zahlreichen Koepfen an. Erhaelt +5, wenn dir niemand hilft."
     // Haengt am Kampf, nicht an der Person - deshalb ueber den Raum.
     'FEUERLÖSCHER': { wennErfuellt: (p, room) => !(room.combat && room.combat.helperId), bonus: 5 },
+    // "+4 gegen Zwerge, +2 gegen Frauen, -3 gegen Zauberer, -2 am Samstag."
+    // Vier unabhaengige Klauseln, also vier Regeln. Der Samstag ist der echte
+    // Wochentag - das ist der Gag der Karte.
+    // ponytail: dadurch aendert sich die Monsterstaerke ueber Mitternacht
+    // hinweg. Wer das nicht will, streicht die letzte Regel.
+    'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT': [
+      { races: ['ZWERG'], bonus: 4 },
+      { wennErfuellt: (p) => istGeschlecht(p, 'w'), bonus: 2 },
+      { classes: ['ZAUBERER'], bonus: -3 },
+      { wennErfuellt: () => new Date().getDay() === 6, bonus: -2 },
+    ],
     // "+3 gegen Zwerge oder Zauberer. Ja, das macht +6 gegen Zwergenzauberer."
     // Die Karte sagt die Addition ausdruecklich - deshalb zwei Regeln.
     'JABBERWOCK': [{ races: ['ZWERG'], bonus: 3 }, { classes: ['ZAUBERER'], bonus: 3 }],
