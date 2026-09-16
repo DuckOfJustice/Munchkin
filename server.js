@@ -3907,7 +3907,12 @@ function handlePlayCombatCard(room, playerId, cardId) {
     // ihm +10." ponytail: verdoppelt wird der Kampfbonus, den die Karte
     // ausdruecklich nennt - der Schatzbonus bleibt wie gedruckt.
     const trottel = room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'RAPIER-TROTTEL');
-    const zuschlag = trottel ? c.bonus * 2 : c.bonus;
+    // FUNGUS: "Wenn der Fungus Gigantisch wird, erhaelt er einen Bonus von
+    // +25, statt +10!" Gleiche Bauform wie der RAPIER-TROTTEL, nur ein fester
+    // Wert statt einer Verdopplung.
+    const fungusGigantisch = c.name === 'GIGANTISCH'
+      && room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'FUNGUS');
+    const zuschlag = fungusGigantisch ? 25 : (trottel ? c.bonus * 2 : c.bonus);
     room.combat.monsterModifier += zuschlag;
     // Getrennt mitgezaehlt, weil KUMPEL ("ein weiteres Monster mit den
     // gleichen Monsterverstaerker-Karten") genau diesen Anteil ein zweites
@@ -3925,7 +3930,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
       room.combat.enhancerTreasure = (room.combat.enhancerTreasure || 0) + delta;
     }
     room.doorDiscard.push(cardId);
-    log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${trottel ? c.bonus * 2 : c.bonus} für das Monster${trottel ? ' - der Rapier-Trottel verdoppelt' : ''}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
+    log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${zuschlag} für das Monster${trottel ? ' - der Rapier-Trottel verdoppelt' : ''}${fungusGigantisch ? ' - der Fungus erhält 25 statt 10' : ''}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
     announceCardPlay(room, player, cardId, `${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster`);
     touchRoom(room);
     return;

@@ -327,6 +327,25 @@ const PRIESTER = findCard('PRIESTER', 'class');
     'gegen den Eisriesen zaehlt die Flammende Ruestung doppelt');
 }
 
+// --- FUNGUS: "Wenn der Fungus Gigantisch wird, erhaelt er +25 statt +10!" ---
+{
+  const fungus = findCard('FUNGUS', 'monster');
+  const gigantisch = findCard('GIGANTISCH');
+  const anderes = findCard('PESTRATTEN', 'monster');
+  const zuschlag = (monsterKarte) => {
+    const p = makePlayer({ hand: [gigantisch.id] });
+    const room = makeRoom([p]);
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [monsterKarte.id],
+      actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
+      treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+    const vorher = combatTotals(room).monsterStrength;
+    handlePlayCombatCard(room, p.id, gigantisch.id);
+    return combatTotals(room).monsterStrength - vorher;
+  };
+  assert.strictEqual(zuschlag(anderes), gigantisch.bonus, 'normal gibt GIGANTISCH seinen gedruckten Bonus');
+  assert.strictEqual(zuschlag(fungus), 25, 'auf dem Fungus sind es 25');
+}
+
 // --- SL-Monster, Schlimme Dinge ---------------------------------------------
 // "Halblinge verlieren eine Stufe. Elfen verlieren zwei Stufen. Maenner
 // verlieren eine zusaetzliche Stufe und muessen eine Karte ablegen.
