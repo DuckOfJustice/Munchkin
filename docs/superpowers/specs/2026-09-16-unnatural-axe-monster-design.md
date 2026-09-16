@@ -45,7 +45,8 @@ Menschen") und GRASGNOLL („+5 gegen Menschen") brauchen den Begriff. Umgesetzt
 als `wennErfuellt`, nach dem Vorbild von RÜSSELKÄFER („+3 gegen die, die keine
 Klasse haben"). Geprüft wird durch dieselbe Brille wie alle anderen
 Monsterboni, also über `monsterSeesRace` — wer FALSCHE OHREN trägt, gilt für
-Monster als Zwerg und damit nicht als Mensch.
+Monster als Elf (und wer später den FALSCHEN BART trägt, als Zwerg) und damit
+nicht als Mensch.
 
 **„-2 am Samstag" wird echt ausgewertet.** Die vierte Klausel des MONSTERS,
 DAS DER SL SICH SELBST AUSGEDACHT HAT prüft den realen Wochentag. Das ist der

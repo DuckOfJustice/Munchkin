@@ -414,8 +414,9 @@ In `src/cards/passives.js` die Signatur der Fabrik entsprechend erweitern und ob
 ```js
   // "Mensch" ist in Munchkin keine Karte, sondern ihr Fehlen: wer keine
   // Rassenkarte hat, ist Mensch. Geprueft wird durch dieselbe Brille wie alle
-  // anderen Monsterboni - wer FALSCHE OHREN traegt, gilt fuer Monster als
-  // Zwerg und damit nicht als Mensch.
+  // anderen Monsterboni - wer FALSCHE OHREN traegt, gilt fuer Monster als Elf
+  // (und wer spaeter den FALSCHEN BART traegt, als Zwerg) und damit nicht als
+  // Mensch.
   const istMensch = (p) => !['ELF', 'ZWERG', 'HALBLING', 'ORK', 'GNOM']
     .some((r) => monsterSeesRace(p, r));
 ```
