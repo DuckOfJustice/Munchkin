@@ -343,6 +343,9 @@ module.exports = (ctx) => {
     // hast" - wertvoll = Goldwert (dasselbe Primitiv wie bei der PACKRATTE),
     // "ausliegen" = angelegt; Handkarten bleiben unangetastet.
     'DU STOLPERST ÜBER DEINE EIGENE TRUHE': () => ({ type: 'discardMaxGoldItem' }),
+    // "Der Spieler, der nach dem Opfer an der Reihe ist, waehlt einen der
+    // Gegenstaende des Opfers, die im Spiel sind. Leg es ab."
+    'PIÑATA': () => ({ type: 'queuedDiscardItemOfVictim', cardName: 'PIÑATA' }),
   };
 
   // Karten, die in den Rohdaten als "door_other" geführt werden, aber - anders

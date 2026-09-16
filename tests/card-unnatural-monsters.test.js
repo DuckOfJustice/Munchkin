@@ -453,5 +453,46 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.ok(FLEE_IMPOSSIBLE.has('DIE SCHATTENNASE'), 'vor dem Schatten gibt es kein Entkommen');
 }
 
+// --- PIÑATA, Niederlage -----------------------------------------------------
+// "Der Spieler, der nach dem Opfer an der Reihe ist, waehlt einen der
+// Gegenstaende des Opfers, die im Spiel sind. Leg es ab."
+{
+  const pinata = findCard('PIÑATA', 'monster');
+  const ruestung = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'armor' && c.bonus > 0);
+  const opfer = makePlayer({ equipped: Object.assign(newEquipped(), { armor: ruestung.id }) });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c3 = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([opfer, b, c3]);
+  const spec = resolveConsequenceSpec(pinata.name, pinata.badstuff, opfer, room);
+  assert.ok(spec, 'die PIÑATA braucht eine Automatik');
+  applyPrimitiveAction(room, opfer, spec);
+  assert.ok(room.pendingCardAction, 'jemand muss waehlen');
+  assert.strictEqual(room.pendingCardAction.playerId, 'p2', 'und zwar die naechste Person');
+  handleResolveCardCardChoice(room, 'p2', room.pendingCardAction.candidateIds[0]);
+  assert.strictEqual(opfer.equipped.armor, null, 'der Gegenstand ist weg');
+  assert.ok(room.treasureDiscard.includes(ruestung.id), 'und liegt im Ablagestapel, nicht bei p2');
+  assert.strictEqual(b.hand.length, 0, 'p2 bekommt ihn nicht');
+}
+
+// --- PIÑATA, Sieg -----------------------------------------------------------
+// "Wenn Pinata besiegt wird, zieht jedes Gruppenmitglied einen Schatz
+// aufgedeckt. Es spielt keine Rolle, wer am Kampf teilgenommen hat."
+{
+  const { resolveCombatWin } = require('../server.js');
+  const pinata = findCard('PIÑATA', 'monster');
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 10).map((c) => c.id);
+  const a = makePlayer({});
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c4 = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([a, b, c4]);
+  room.treasureDeck = schaetze.slice();
+  room.combat = { actorId: a.id, helperId: null, monsterIds: [pinata.id], actorModifier: 0,
+    monsterModifier: 0, treasureDelta: 0, helperReward: 0, backstabs: {} };
+  resolveCombatWin(room);
+  assert.strictEqual(b.hand.length, 1, 'auch wer nicht mitgekaempft hat, bekommt einen Schatz');
+  assert.strictEqual(c4.hand.length, 1, 'und zwar alle');
+  assert.strictEqual(a.hand.length, 1, 'die kaempfende Person ebenfalls genau einen');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

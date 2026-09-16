@@ -1698,6 +1698,23 @@ function applyPrimitiveAction(room, player, action) {
       });
       return `${queue.length} Mitspieler nehmen je 1 Gegenstand`;
     }
+    // PIÑATA: "Der Spieler, der nach dem Opfer an der Reihe ist, waehlt einen
+    // der Gegenstaende des Opfers, die im Spiel sind. Leg es ab."
+    // Spiegelbild zu queuedTakeItem: dieselbe Fremdauswahl, aber die Karte
+    // geht auf den Ablagestapel statt in die Hand der waehlenden Person.
+    case 'queuedDiscardItemOfVictim': {
+      const opfer = player;
+      const naechste = playerQueueFrom(room, opfer, 'after')[0];
+      if (!naechste) return 'niemand sonst am Tisch';
+      if (!equippedItemIds(opfer).length) return 'kein Gegenstand im Spiel';
+      openQueuedCardAction(room, action.cardName || 'Schlimme Dinge', [naechste], () => {
+        const ids = equippedItemIds(opfer);
+        if (!ids.length) return null;
+        return { kind: 'chooseCard', prompt: `Einen Gegenstand von ${opfer.name} ablegen`,
+          candidateIds: ids, discardVictim: opfer.id };
+      });
+      return `${findPlayer(room, naechste).name} waehlt einen Gegenstand zum Ablegen`;
+    }
     case 'discardItemsWorthGold': {
       // VERSICHERUNGSVERTRETER: "Verliere Gegenstaende im Wert von 1.000
       // Goldstuecken. Hast du nicht genug, verlierst du alles, was du hast."
@@ -2430,6 +2447,20 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
     clearCheatIfLost(player, chosenCardId);
     empfaenger.hand.push(chosenCardId);
     log(room, `${player.name}: "${pa.cardName}" -> 1 Karte an ${empfaenger.name} gegeben.`);
+  } else if (pa.discardVictim) {
+    // PIÑATA: die waehlende Person nimmt nichts - der Gegenstand geht weg.
+    const opfer = findPlayer(room, pa.discardVictim);
+    if (!opfer || !gehoert(opfer, chosenCardId)) {
+      log(room, `"${chosen ? chosen.name : chosenCardId}" gehoert ${opfer ? opfer.name : '?'} nicht mehr - nichts abgelegt.`);
+      finishCardAction(room, pa);
+      touchRoom(room);
+      return;
+    }
+    if (opfer.hand.includes(chosenCardId)) removeFromHand(opfer, chosenCardId);
+    else unequipSlotCard(opfer, chosenCardId);
+    clearCheatIfLost(opfer, chosenCardId);
+    discardCard(room, chosenCardId);
+    log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" von ${opfer.name} abgelegt.`, [chosenCardId]);
   } else if (pa.discardOwn) {
     // SCHNECKEN AUF SPEED: die eigene Wahl geht direkt auf den Ablagestapel.
     if (!gehoert(player, chosenCardId)) {
@@ -4280,6 +4311,23 @@ function resolveCombatWin(room) {
   const levelsGained = monsters.length + extras.levels;
   setLevel(actor, actor.level + levelsGained);
   const baseTreasures = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0) + extras.treasures;
+  // PIÑATA: "Wenn Pinata besiegt wird, zieht jedes Gruppenmitglied einen
+  // Schatz aufgedeckt. Es spielt keine Rolle, wer am Kampf teilgenommen hat."
+  // Ersetzt die normale Beute - die Karte nennt selbst 0 Schaetze.
+  const pinata = monsters.some((m) => m && m.name === 'PIÑATA');
+  if (pinata) {
+    room.players.forEach((p) => {
+      const t = drawTreasure(room);
+      if (!t) return;
+      p.hand.push(t);
+      p.lastReward = {
+        seq: (p.lastReward ? p.lastReward.seq : 0) + 1,
+        cardIds: [t], levelsGained: p.id === actor.id ? levelsGained : 0,
+        monsterNames: monsters.map((m) => m.name),
+      };
+    });
+    log(room, `Die Piñata platzt - jede:r am Tisch zieht 1 Schatzkarte.`);
+  }
   // Monster-Verstärker aus dem Kampf zählen mit; BABY sagt ausdrücklich
   // "mindestens 1", deshalb die Untergrenze - aber nur, wenn überhaupt ein
   // Verstärker im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
