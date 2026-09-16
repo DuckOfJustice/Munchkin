@@ -436,5 +436,22 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(room.pendingCardAction, null, 'bei leerer Hand oeffnet sich kein Dialog');
 }
 
+// --- ROTZ-ELEMENTAR mit Laufender Nase / Schattennase -----------------------
+// "In Kombination mit der Laufenden Nase (oder dem Schatten), erhaelt jeder
+// einen Bonus von +10."
+{
+  const nase = findCard('LAUFENDE NASE', 'monster');
+  const allein = monsterStaerke('ROTZ-ELEMENTAR', makePlayer({}));
+  const mitNase = monsterStaerke('ROTZ-ELEMENTAR', makePlayer({}), [nase.id]);
+  assert.strictEqual(mitNase - allein - nase.level, 10,
+    'ueber die Stufe der Nase hinaus kommen +10 dazu');
+}
+
+// --- DIE SCHATTENNASE: "Du kannst nicht fluechten" --------------------------
+{
+  const { FLEE_IMPOSSIBLE } = require('../server.js');
+  assert.ok(FLEE_IMPOSSIBLE.has('DIE SCHATTENNASE'), 'vor dem Schatten gibt es kein Entkommen');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

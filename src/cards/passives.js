@@ -332,7 +332,16 @@ module.exports = (ctx) => {
     'M.T.-ANZUG': { classes: ['ZAUBERER', 'DIEB'], bonus: 5 },                     // "+5 gegen Zauberer oder Diebe." - "oder", also einmal.
     'DING MIT EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST': { classes: ['KRIEGER'], bonus: 5 }, // "+5 gegen Krieger."
     'TENTAKELDÄMON': { classes: ['PRIESTER'], bonus: 5 },                          // "Eine Hoellenkreatur. +5 gegen Priester."
-    'ROTZ-ELEMENTAR': { races: ['ELF'], bonus: 4 },                                // "+4 gegen Elfen (uuuaaaah)."
+    // "+4 gegen Elfen (uuuaaaah). In Kombination mit der Laufenden Nase (oder
+    // dem Schatten), erhaelt jeder einen Bonus von +10." Die zweite Klausel
+    // haengt am Kampf, nicht an der Person - siehe wennErfuellt mit Raum.
+    'ROTZ-ELEMENTAR': [
+      { races: ['ELF'], bonus: 4 },
+      { wennErfuellt: (p, room) => !!room.combat && room.combat.monsterIds.some((id) => {
+        const m = card(id);
+        return !!m && (m.name === 'LAUFENDE NASE' || m.name === 'DIE SCHATTENNASE');
+      }), bonus: 10 },
+    ],
     // "+5 gegen Elfen oder Menschen." - eine Regel, nicht zwei: ein Elf ist
     // kein Mensch, die Faelle schliessen sich aus.
     'RIESENKAKERLAKE': { wennErfuellt: (p) => monsterSeesRace(p, 'ELF') || istMensch(p), bonus: 5 },
@@ -400,7 +409,9 @@ module.exports = (ctx) => {
   };
   // FILZLAUSE: "Denen kannst du nicht entkommen!"
   // LAUFENDE NASE: "Verlierst du den Kampf, kannst du nicht fliehen."
-  const FLEE_IMPOSSIBLE = new Set(['FILZLAUSE', 'LAUFENDE NASE']);
+  const FLEE_IMPOSSIBLE = new Set(['FILZLAUSE', 'LAUFENDE NASE',
+    'DIE SCHATTENNASE',  // "Du kannst nicht fluechten und wirst automatisch gefangen."
+  ]);
   // TOPFPFLANZE, Schlimme Dinge: "Keine. Automatische Flucht."
   // GOLDFISCH: "Greift nicht an und du fliehst automatisch, aber ..."
   const FLEE_AUTOMATIC = new Set(['TOPFPFLANZE', 'GOLDFISCH']);
