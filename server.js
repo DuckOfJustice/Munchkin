@@ -3961,8 +3961,8 @@ function handlePlayCombatCard(room, playerId, cardId) {
       room.combat.enhancerTreasure = (room.combat.enhancerTreasure || 0) + delta;
     }
     room.doorDiscard.push(cardId);
-    log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${zuschlag} für das Monster${trottel ? ' - der Rapier-Trottel verdoppelt' : ''}${fungusGigantisch ? ' - der Fungus erhält 25 statt 10' : ''}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
-    announceCardPlay(room, player, cardId, `${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster`);
+    log(room, `${player.name} spielt "${c.name}" im Kampf (${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster${trottel ? ' - der Rapier-Trottel verdoppelt' : ''}${fungusGigantisch ? ' - der Fungus erhält 25 statt 10' : ''}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
+    announceCardPlay(room, player, cardId, `${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster`);
     touchRoom(room);
     return;
   }

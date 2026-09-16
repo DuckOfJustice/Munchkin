@@ -346,6 +346,27 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(zuschlag(fungus), 25, 'auf dem Fungus sind es 25');
 }
 
+// --- Verlauf und Einblendung muessen denselben Bonus nennen -----------------
+// Regressionstest: die Einblendung (room.cardPlay.hinweis) benutzte bisher
+// c.bonus statt des tatsaechlich angewandten zuschlag - beim GIGANTISCHEN
+// FUNGUS stand im Verlauf "+25", in der Einblendung "+10".
+{
+  const fungus = findCard('FUNGUS', 'monster');
+  const gigantisch = findCard('GIGANTISCH');
+  const p = makePlayer({ hand: [gigantisch.id] });
+  const room = makeRoom([p]);
+  room.combat = { actorId: p.id, helperId: null, monsterIds: [fungus.id],
+    actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
+    treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+  handlePlayCombatCard(room, p.id, gigantisch.id);
+  const letzterLogEintrag = room.logs[room.logs.length - 1].text;
+  const zahlImLog = letzterLogEintrag.match(/([+-]\d+) für das Monster/)[1];
+  const zahlInEinblendung = room.cardPlay.hinweis.match(/([+-]\d+) für das Monster/)[1];
+  assert.strictEqual(zahlInEinblendung, zahlImLog,
+    `Einblendung (${room.cardPlay.hinweis}) muss denselben Bonus nennen wie der Verlauf (${letzterLogEintrag})`);
+  assert.strictEqual(zahlInEinblendung, '+25', 'auf dem Fungus muss auch die Einblendung +25 zeigen');
+}
+
 // --- SL-Monster, Schlimme Dinge ---------------------------------------------
 // "Halblinge verlieren eine Stufe. Elfen verlieren zwei Stufen. Maenner
 // verlieren eine zusaetzliche Stufe und muessen eine Karte ablegen.
