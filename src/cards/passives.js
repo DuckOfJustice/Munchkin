@@ -2,7 +2,7 @@
 // im Spiel ist. Kuratiert statt per Regex - die Formulierungen auf den Karten
 // sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6 gegen Elfen").
 module.exports = (ctx) => {
-  const { hasRace, hasClass, card, equippedItemIds, istGeschlecht } = ctx;
+  const { hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
   // SCHUTZSANDALEN: "Flüche, die du ziehst, nachdem du eine Tür
@@ -237,6 +237,13 @@ module.exports = (ctx) => {
     return ids.size;
   };
 
+  // "Mensch" ist in Munchkin keine Karte, sondern ihr Fehlen: wer keine
+  // Rassenkarte hat, ist Mensch. Geprueft wird durch dieselbe Brille wie alle
+  // anderen Monsterboni - wer FALSCHE OHREN traegt, gilt fuer Monster als
+  // Zwerg und damit nicht als Mensch.
+  const istMensch = (p) => !['ELF', 'ZWERG', 'HALBLING', 'ORK', 'GNOM']
+    .some((r) => monsterSeesRace(p, r));
+
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
   // die Rasse/Klasse hat (Angreifer:in oder Helfer:in) - nicht einmal pro
@@ -316,6 +323,10 @@ module.exports = (ctx) => {
     'DING MIT EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST': { classes: ['KRIEGER'], bonus: 5 }, // "+5 gegen Krieger."
     'TENTAKELDÄMON': { classes: ['PRIESTER'], bonus: 5 },                          // "Eine Hoellenkreatur. +5 gegen Priester."
     'ROTZ-ELEMENTAR': { races: ['ELF'], bonus: 4 },                                // "+4 gegen Elfen (uuuaaaah)."
+    // "+5 gegen Elfen oder Menschen." - eine Regel, nicht zwei: ein Elf ist
+    // kein Mensch, die Faelle schliessen sich aus.
+    'RIESENKAKERLAKE': { wennErfuellt: (p) => monsterSeesRace(p, 'ELF') || istMensch(p), bonus: 5 },
+    'GRASGNOLL': { wennErfuellt: (p) => istMensch(p), bonus: 5 },   // "+5 gegen Menschen."
     // "+3 gegen Zwerge oder Zauberer. Ja, das macht +6 gegen Zwergenzauberer."
     // Die Karte sagt die Addition ausdruecklich - deshalb zwei Regeln.
     'JABBERWOCK': [{ races: ['ZWERG'], bonus: 3 }, { classes: ['ZAUBERER'], bonus: 3 }],

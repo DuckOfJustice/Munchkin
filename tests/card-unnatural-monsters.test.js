@@ -92,6 +92,24 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(beides - ohne, 5, 'der Anzug addiert nicht');
 }
 
+// --- "Mensch" = keine Rassenkarte -------------------------------------------
+[
+  ['RIESENKAKERLAKE', 5],  // "+5 gegen Elfen oder Menschen."
+  ['GRASGNOLL', 5],        // "+5 gegen Menschen."
+].forEach(([monster, erwartet]) => {
+  const mitRasse = monsterStaerke(monster, makePlayer({ races: [ZWERG.id] }));
+  const ohneRasse = monsterStaerke(monster, makePlayer({}));
+  assert.strictEqual(ohneRasse - mitRasse, erwartet,
+    `${monster}: Menschen bekommen ${erwartet}`);
+});
+
+// Die Kakerlake trifft Elfen ebenso - aber nur einmal, nicht zusaetzlich.
+{
+  const zwerg = monsterStaerke('RIESENKAKERLAKE', makePlayer({ races: [ZWERG.id] }));
+  const elf = monsterStaerke('RIESENKAKERLAKE', makePlayer({ races: [ELF.id] }));
+  assert.strictEqual(elf - zwerg, 5, 'Elfen bekommen denselben Bonus');
+}
+
 // --- "Greift niemanden mit Stufe N oder niedriger an" -----------------------
 [
   ['FEUERLÖSCHER', 2],

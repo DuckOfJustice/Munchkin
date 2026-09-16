@@ -2561,7 +2561,7 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT,
-} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht });
+} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
 // Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
