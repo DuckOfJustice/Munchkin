@@ -399,6 +399,14 @@ function equippedBonusSum(player, room) {
   }, 0);
 }
 
+// MONDJUNGFERN: Summe der Boni, die an Hand-Gegenstaenden haengen - genau der
+// Teil, der gegen sie nicht zaehlt. Gleiche Brille wie waffenAnzahl.
+function waffenBonusSum(player) {
+  const ids = new Set((player.equipped.hands || []).filter(Boolean));
+  (player.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
+  return [...ids].reduce((sum, id) => { const c = card(id); return sum + ((c && c.bonus) || 0); }, 0);
+}
+
 // Machtgruppe Höllenritter, "Höllenritterrüstung": eine im Kampf +5 werte
 // Rüstung, die zugleich als Rüstung UND Kopfbedeckung zählt - laut Karte darf
 // daneben keine andere Rüstung/Kopfbedeckung getragen werden. Statt das
@@ -2563,7 +2571,7 @@ const passivesFactory = require('./src/cards/passives.js');
 const {
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
   MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
-  MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
+  MONSTER_IGNORES_WEAPONS, MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
   FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,
   FLEE_TREASURE_ITEMS, MONSTER_EXTRA_LEVEL, FIRE_ITEMS,
   CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
@@ -3424,6 +3432,7 @@ function combatTotals(room) {
     return sum + stufe;
   }, 0);
   const ignoreLevel = combatHasMonster(room, MONSTER_IGNORES_LEVEL);
+  const ignoreWeapons = combatHasMonster(room, MONSTER_IGNORES_WEAPONS);
   const ignoreBonuses = combatHasMonster(room, MONSTER_IGNORES_BONUSES);
   let playerStrength;
   if (ignoreBonuses) {
@@ -3438,7 +3447,8 @@ function combatTotals(room) {
       // (kein regulaerer Gegenstands-Slot, siehe Kommentar dort).
       const items = curseSuppressesItemBonuses(p)
         ? ((card(p.equipped.armor) || {}).bonus || 0)
-        : equippedBonusSum(p, room) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters, combatHasUndead(room));
+        : equippedBonusSum(p, room) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters, combatHasUndead(room))
+          - (ignoreWeapons ? waffenBonusSum(p) : 0);
       return sum + p.level + items + hellknightArmorBonus(p)
         + curseCombatModifier(p) - (ignoreLevel ? p.level : 0);
     }, 0) + c.actorModifier + backstabMalus(room);

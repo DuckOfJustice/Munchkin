@@ -7,6 +7,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, combatTotals, monsterRefusesTarget, fleeModifierParts,
   resolveConsequenceSpec, applyPrimitiveAction, handleResolveCardCardChoice, isBigItem,
+  handlePlayCombatCard,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -271,10 +272,10 @@ const PRIESTER = findCard('PRIESTER', 'class');
   // Mit vertauschtem Filter-Vorzeichen würde count = 1 sein (nur der große).
   // Damit wird sichergestellt dass isBigItem korrekt filtert.
   const ptero = findCard('PTERODAKTYL', 'monster');
-  // Find one big item via isBigItem
+  // Finde einen großen Gegenstand über isBigItem
   const bigCard = ALL_CARDS.find((c) => c.type === 'treasure' && isBigItem(c));
   assert.ok(bigCard, 'es gibt mindestens einen großen Gegenstand');
-  // Find small items explicitly via isBigItem filter
+  // Finde kleine Gegenstände explizit über isBigItem-Filter
   const smallCards = ALL_CARDS.filter((c) => c.type === 'treasure' && !isBigItem(c)).slice(0, 2);
   assert.ok(smallCards.length >= 2, 'es gibt mindestens zwei kleine Gegenstände zum Testen');
   const e = newEquipped();
@@ -290,6 +291,25 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.ok(kleinOption, 'kleine Gegenstände-Option existiert');
   assert.strictEqual(kleinOption.action.count, expectedSmallCount,
     `count ist ${expectedSmallCount}: nur die kleinen zählen, der große nicht`);
+}
+
+// --- MONDJUNGFERN: "In diesem Kampf erhaeltst du keine Vorteile durch Waffen" ---
+{
+  const waffe = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'hand' && c.bonus > 0);
+  const ruestung = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'armor' && c.bonus > 0);
+  assert.ok(waffe && ruestung, 'Testgegenstaende gefunden');
+  const staerke = (monsterName) => {
+    const m = findCard(monsterName, 'monster');
+    const p = makePlayer({ equipped: Object.assign(newEquipped(), { hands: [waffe.id, null], armor: ruestung.id }) });
+    const room = makeRoom([p]);
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [m.id], actorModifier: 0, monsterModifier: 0, backstabs: {} };
+    return combatTotals(room).playerStrength;
+  };
+  const gegenJungfern = staerke('MONDJUNGFERN');
+  const gegenAnderes = staerke('PESTRATTEN');
+  assert.strictEqual(gegenAnderes - gegenJungfern, waffe.bonus,
+    'gegen die Mondjungfern faellt genau der Waffenbonus weg');
+  assert.ok(gegenJungfern > 0, 'Ruestung und Stufe zaehlen weiter');
 }
 
 // --- SL-Monster, Schlimme Dinge ---------------------------------------------

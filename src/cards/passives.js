@@ -365,6 +365,13 @@ module.exports = (ctx) => {
   // GUMMI-GOLEM: "Er klebt an deinen Waffen ... du kannst nur auf deiner
   // Stufe kaempfen, ohne weitere Boni."
   const MONSTER_IGNORES_BONUSES = new Set(['GEMEINE GHOULE', 'GUMMI-GOLEM']);
+  // --- Monster, gegen die Waffen nichts bringen ----------------------------
+  // MONDJUNGFERN: "Du musst sie mit leeren Haenden bestrafen. In diesem Kampf
+  // erhaeltst du keine Vorteile durch Waffen." Kleiner Bruder von
+  // MONSTER_IGNORES_BONUSES, das ALLE Boni streicht.
+  // ponytail: "Waffe" heisst hier wie in waffenAnzahl "belegt eine Hand" -
+  // ein Schild zaehlt also mit. Kuratierte Ausnahmeliste waere der Aufruestweg.
+  const MONSTER_IGNORES_WEAPONS = new Set(['MONDJUNGFERN']);
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
   const MONSTER_FORBIDS_HELP = new Set(['PAVILLON']);
   // Die ersten beiden Regeln gelten für die ganze Munchkin-Seite: sobald
@@ -527,7 +534,7 @@ module.exports = (ctx) => {
   return {
     CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
     MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
-    MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
+    MONSTER_IGNORES_WEAPONS, MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
     FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,
     FLEE_TREASURE_ITEMS, MONSTER_EXTRA_LEVEL, FIRE_ITEMS,
     CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
