@@ -304,6 +304,18 @@ module.exports = (ctx) => {
       { wennErfuellt: (p) => !!p.raceCapCard, bonus: 5 },
     ],
     'KAMIKAZE-KOBOLDE': { classes: ['ZAUBERER'], bonus: 3 },                        // "+3 gegen Zauberer."
+    // --- Unnatural Axe ------------------------------------------------------
+    'KATZENMÄDCHEN': { races: ['ORK'], bonus: 5 },                                 // "Toedlich niedlich. +5 gegen Orks."
+    'TEDDYBÄR': { races: ['ORK'], bonus: 5 },                                      // "Schrecklich niedlich. +5 gegen Orks."
+    'JUDGE FREDD': { classes: ['DIEB'], bonus: 5 },                                // "+5 gegen Diebe."
+    'M.T.-ANZUG': { classes: ['ZAUBERER', 'DIEB'], bonus: 5 },                     // "+5 gegen Zauberer oder Diebe." - "oder", also einmal.
+    'DING MIT EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST': { classes: ['KRIEGER'], bonus: 5 }, // "+5 gegen Krieger."
+    'TENTAKELDÄMON': { classes: ['PRIESTER'], bonus: 5 },                          // "Eine Hoellenkreatur. +5 gegen Priester."
+    'ROTZ-ELEMENTAR': { races: ['ELF'], bonus: 4 },                                // "+4 gegen Elfen (uuuaaaah)."
+    // "+3 gegen Zwerge oder Zauberer. Ja, das macht +6 gegen Zwergenzauberer."
+    // Die Karte sagt die Addition ausdruecklich - deshalb zwei Regeln.
+    'JABBERWOCK': [{ races: ['ZWERG'], bonus: 3 }, { classes: ['ZAUBERER'], bonus: 3 }],
+    'WEIHNACHTSMANN': { races: ['ELF'], bonus: -5 },                               // "-5 gegen Elfen. Der Narr vertraut den Elfen."
   };
 
   // --- Monster, die die Kampfrechnung selbst verändern ---------------------
