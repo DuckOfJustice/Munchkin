@@ -6,7 +6,7 @@
 const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, combatTotals, monsterRefusesTarget, fleeModifierParts,
-  resolveConsequenceSpec, applyPrimitiveAction, handleResolveCardCardChoice,
+  resolveConsequenceSpec, applyPrimitiveAction, handleResolveCardCardChoice, isBigItem,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -266,27 +266,30 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(p.hand.length, 0, 'die Hand ist weg');
 }
 {
-  // Der kleine Gegenstände-Zweig wird geprüft - ein großer und zwei kleine
-  // Gegenstände. Der count muss exakt 2 sein (nur die kleinen zählen).
+  // Der kleine Gegenstände-Zweig wird geprüft - ein großer und mehrere kleine
+  // Gegenstände. Der count muss die Anzahl der kleinen sein.
   // Mit vertauschtem Filter-Vorzeichen würde count = 1 sein (nur der große).
-  // Damit wird sichergestellt dass istGrosserGegenstand korrekt filtert.
+  // Damit wird sichergestellt dass isBigItem korrekt filtert.
   const ptero = findCard('PTERODAKTYL', 'monster');
-  const bigCard = findCard('STANGE, 11-FUSS');  // bekanntermaßen groß
-  const smallCards = ALL_CARDS.filter((c) => c.type === 'treasure' && c.name !== 'STANGE, 11-FUSS').slice(0, 2);
-  assert.ok(bigCard, 'STANGE, 11-FUSS existiert');
-  assert.strictEqual(smallCards.length, 2, 'es gibt zwei kleine Gegenstände zum Testen');
+  // Find one big item via isBigItem
+  const bigCard = ALL_CARDS.find((c) => c.type === 'treasure' && isBigItem(c));
+  assert.ok(bigCard, 'es gibt mindestens einen großen Gegenstand');
+  // Find small items explicitly via isBigItem filter
+  const smallCards = ALL_CARDS.filter((c) => c.type === 'treasure' && !isBigItem(c)).slice(0, 2);
+  assert.ok(smallCards.length >= 2, 'es gibt mindestens zwei kleine Gegenstände zum Testen');
   const e = newEquipped();
   e.head = bigCard.id;        // großer Gegenstand
   e.armor = smallCards[0].id; // erster kleiner Gegenstand
   e.feet = smallCards[1].id;  // zweiter kleiner Gegenstand
   const p = makePlayer({ equipped: e });
-  const room = makeRoom([p]);
-  const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  const testRoom = makeRoom([p]);
+  const expectedSmallCount = 2; // wir wählen genau 2 kleine
+  const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, testRoom);
   assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
   const kleinOption = spec.options.find((o) => o.action.type === 'queuedDiscardOwn');
   assert.ok(kleinOption, 'kleine Gegenstände-Option existiert');
-  assert.strictEqual(kleinOption.action.count, 2,
-    'count ist 2: nur die zwei kleinen zählen, der große nicht');
+  assert.strictEqual(kleinOption.action.count, expectedSmallCount,
+    `count ist ${expectedSmallCount}: nur die kleinen zählen, der große nicht`);
 }
 
 // --- SL-Monster, Schlimme Dinge ---------------------------------------------
@@ -335,6 +338,48 @@ const PRIESTER = findCard('PRIESTER', 'class');
   }
   assert.strictEqual(gewaehlt, 4, 'bei einer 4 werden vier Karten abgelegt');
   assert.strictEqual(p.hand.length, 2, 'von sechs bleiben zwei');
+}
+
+// --- KATZENMÄDCHEN Randfall: Wurf groesser als Handkartenzahl -----------
+{
+  const katze = findCard('KATZENMÄDCHEN', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 2).map((c) => c.id);
+  const p = makePlayer({ hand: fueller.slice() });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  const echtesRandom = Math.random;
+  Math.random = () => 0.99; // 6 * 0.99 = 5.94 -> Wurf 6
+  try {
+    const spec = resolveConsequenceSpec(katze.name, katze.badstuff, p, room);
+    assert.ok(spec, 'das KATZENMÄDCHEN braucht eine Automatik');
+    applyPrimitiveAction(room, p, spec);
+  } finally {
+    Math.random = echtesRandom;
+  }
+  let gewaehlt = 0;
+  while (room.pendingCardAction && gewaehlt < 10) {
+    handleResolveCardCardChoice(room, p.id, room.pendingCardAction.candidateIds[0]);
+    gewaehlt++;
+  }
+  assert.strictEqual(gewaehlt, 2, 'bei Wurf 6 aber nur 2 Karten in Hand werden 2 abgelegt');
+  assert.strictEqual(p.hand.length, 0, 'Hand ist leer');
+  assert.strictEqual(room.pendingCardAction, null, 'danach haengt nichts offen');
+}
+
+// --- KATZENMÄDCHEN Randfall: leere Hand ---------------------------------
+{
+  const katze = findCard('KATZENMÄDCHEN', 'monster');
+  const p = makePlayer({ hand: [] });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  const echtesRandom = Math.random;
+  Math.random = () => 0.5; // beliebiger Wurf, Hand ist leer
+  try {
+    const spec = resolveConsequenceSpec(katze.name, katze.badstuff, p, room);
+    assert.ok(spec, 'das KATZENMÄDCHEN braucht eine Automatik');
+    applyPrimitiveAction(room, p, spec);
+  } finally {
+    Math.random = echtesRandom;
+  }
+  assert.strictEqual(room.pendingCardAction, null, 'bei leerer Hand oeffnet sich kein Dialog');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
