@@ -2,7 +2,7 @@
 
 Eine browserbasierte Online-Version des Kartenspiels **„Munchkin"** (Steve Jackson Games / Pegasus Spiele) zum Spielen mit Freunden – jede:r auf dem eigenen Handy/Tablet/PC, ein gemeinsamer Server übernimmt Tür-/Schatzstapel, Phasen, Kampf-Mathematik, Stufen und Ausrüstung.
 
-Die Kartendaten (501 Karten: Base, Clerical Errors, Pixels & Paper Promos, Unnatural Axe, Pathfinder) stammen aus den eigenen, bereits erworbenen Spieldateien und wurden für dieses Projekt aufbereitet (`data/cards.json`). Es werden **keine offiziellen Kartengrafiken** verwendet – die Karten werden als einfache, klar erkennbare Text-Kacheln dargestellt (siehe „Warum keine Kartenbilder?" unten).
+Die Kartendaten (355 Karten: Base, Clerical Errors, Unnatural Axe) stammen aus den eigenen, bereits erworbenen Spieldateien und wurden für dieses Projekt aufbereitet (`data/cards.json`). Es werden **keine offiziellen Kartengrafiken** verwendet – die Karten werden als einfache, klar erkennbare Text-Kacheln dargestellt (siehe „Warum keine Kartenbilder?" unten).
 
 ## Wichtig: Was automatisiert ist / Was manuell bleibt
 
@@ -77,7 +77,7 @@ Munchkin/
 ├── server.js            Spiel-Server (Node.js, Express + Socket.IO)
 ├── src/cards/            Kartentabellen (Große Gegenstände, Konsequenzen, Schätze, Dauerwirkungen, Reaktionen)
 ├── tools/                coverage-scan.js (welche Karte hat keinen Ausspielweg? `node tools/coverage-scan.js <set>`), smoke-run.js (Partie gegen den laufenden Server)
-├── data/cards.json       501 Karten (Name, Text, Stufe, Bonus, Goldwert, Körperteil, ...)
+├── data/cards.json       355 Karten (Name, Text, Stufe, Bonus, Goldwert, Körperteil, ...)
 ├── package.json
 ├── Dockerfile
 ├── docker-compose.yml
@@ -110,9 +110,10 @@ Bei jedem Push nach GitHub läuft das automatisch über eine GitHub Action (`.gi
 
 ## Bekannte Einschränkungen
 
-- Einzelne Karten bleiben absichtlich manuell (Schatzhort!-Ziehen, Anwalt-Tauschoption, sechs Karten aus Clerical Errors) - siehe oben, `HANDOVER.md` §8 und §9.3.
+- Einzelne Karten bleiben absichtlich manuell (Schatzhort!-Ziehen, Anwalt-Tauschoption, fünf Karten aus Clerical Errors) - siehe oben, `HANDOVER.md` §8 und §9.3.
 - Bots sind bewusst simpel gehalten (kein Ausrüsten, kein Kämpfen aus der Hand, keine Hilfe) – gedacht zum Testen des Ablaufs, nicht als vollwertige Mitspieler.
-- Pathfinder-Set: 145 Karten ohne numerische Werte (Stufe/Bonus/Goldwert) in den Original-Spieldaten gefunden – falls das im Spiel auffällt, gerne Bescheid geben, dann schaue ich nach einer anderen Datenquelle für dieses Set.
+- Das **Pixels-&-Paper-Promo-Set wurde entfernt** (5 Karten): zwei davon sind ins Basis-Set übernommen worden (STEAM-CODE und MECHA-DIRE-WOLF), die übrigen drei (REDI-FLOW, KISTE VOLLER LUFT, EXKLUSIV) sind samt Bildern raus.
+- Das **Pathfinder-Set wurde entfernt** (144 Karten samt Bildern): in den Original-Spieldaten fehlten durchgängig die numerischen Werte (Stufe/Bonus/Goldwert), die Karten waren im Spiel deshalb wirkungslos. Taucht eine bessere Datenquelle auf, lässt es sich über die Git-Historie zurückholen.
 
 ## Sicherheitshinweis
 

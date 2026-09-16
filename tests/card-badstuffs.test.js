@@ -448,4 +448,40 @@ const CARD_C = idByName('KLASSE WECHSELN');
   done(room);
 }
 
+// MECHA-DIRE-WOLF (aus den Promos ins Basis-Set uebernommen): "Beisst die
+// Hand, die ihn fuettert. Lege drei Karten aus deiner Hand ab." Der generische
+// Parser erkennt den Satz nicht - ohne Override bliebe ein verlorener Kampf
+// gegen den Wolf folgenlos.
+{
+  const wolf = ALL_CARDS.find((c) => c.name === 'MECHA-DIRE-WOLF');
+  assert.ok(wolf, 'MECHA-DIRE-WOLF muss es geben');
+  assert.strictEqual(wolf.set, 'base', 'er gehoert jetzt zum Basis-Set');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 5).map((c) => c.id);
+  const p = makePlayer('a', { hand: fueller.slice(0, 5) });
+  const room = makeRoom([p, makePlayer('b')]);
+  const spec = resolveConsequenceSpec(wolf.name, wolf.badstuff, p, room);
+  assert.ok(spec, 'die Schlimmen Dinge brauchen eine Automatik');
+  applyPrimitiveAction(room, p, spec);
+  // Drei Einzelwahlen nacheinander - jede legt genau eine Handkarte ab.
+  for (let i = 0; i < 3; i++) {
+    assert.ok(room.pendingCardAction, `Wahl ${i + 1} von 3 muss offen sein`);
+    handleResolveCardCardChoice(room, 'a', room.pendingCardAction.candidateIds[0]);
+  }
+  assert.strictEqual(p.hand.length, 2, 'genau drei Karten abgelegt');
+  assert.strictEqual(room.pendingCardAction, null, 'danach ist nichts mehr offen');
+  done(room);
+}
+{
+  // Weniger als drei Karten: es geht ab, was da ist, und nichts bleibt haengen.
+  const wolf = ALL_CARDS.find((c) => c.name === 'MECHA-DIRE-WOLF');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 1).map((c) => c.id);
+  const p = makePlayer('a', { hand: fueller });
+  const room = makeRoom([p, makePlayer('b')]);
+  applyPrimitiveAction(room, p, resolveConsequenceSpec(wolf.name, wolf.badstuff, p, room));
+  handleResolveCardCardChoice(room, 'a', room.pendingCardAction.candidateIds[0]);
+  assert.strictEqual(p.hand.length, 0, 'die eine Karte ist weg');
+  assert.strictEqual(room.pendingCardAction, null, 'kein haengender Dialog bei leerer Hand');
+  done(room);
+}
+
 console.log('OK - Schlimme Dinge mit Fremdbeteiligung: HIPPOGREIF/ANWALT/LEPRACHAUN/NETZ-TROLL/VERSICHERUNGSVERTRETER/SCHNECKEN AUF SPEED/FLUCH! EINKOMMENSSTEUER ueber die Aktions-Warteschlange, plus VERLIERE-1-GROSSEN-GEGENSTAND-Zwergwahl, plus Backlog-Regression bei mehreren Warteschlangen-Monstern in einem Kampf.');

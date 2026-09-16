@@ -253,6 +253,13 @@ async function runSockets() {
       'Bert hat getauscht');
     assert.strictEqual(infos.get('a').outgoingTrades.length, 0, 'abgeschlossener Handel verschwindet');
 
+    // HALBLING-Doppelverkauf: der Client misst den Verkaufen-Knopf am echten
+    // Erlös und braucht dafür halblingSaleOpen aus dem privaten yourInfo.
+    // Fällt das Feld weg, verschwindet der Bonus im Browser lautlos - deshalb
+    // hier an der echten Nutzlast geprüft, nicht an der Funktion dahinter.
+    assert.strictEqual(typeof infos.get('a').halblingSaleOpen, 'boolean',
+      'yourInfo muss halblingSaleOpen mitschicken - sonst rechnet die Verkaufsleiste ohne den Halbling-Bonus');
+
     a.close(); b.close(); c.close();
     console.log('OK - Handel über Sockets abgeschlossen, Angebote blieben privat.');
   } finally {

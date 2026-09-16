@@ -9,7 +9,7 @@ const {
   ALL_CARDS, combatTotals, handlePlayCombatCard, handleResolveCardChoice,
   handleResolveCardTarget, handleAttemptFlee, handleAckConsequence, resolveCombatWin,
   newEquipped, equippedItemIds, COMBAT_REACTION_CARDS,
-  handleSetCombatReady, scheduleBotActionsIfNeeded,
+  handleSetCombatReady, scheduleBotActionsIfNeeded, fleeModifierParts,
 } = require('../server.js');
 
 function byName(name) {
@@ -142,23 +142,38 @@ function run() {
     done(room);
   }
 
-  // ENTLASSUNGSGLOCKE auf eine KUMPEL-Kopie: die Karte darf NICHT in den
-  // Tuerstapel zurueck, solange die zweite Kopie noch kaempft - sonst laege
-  // dieselbe ID gleichzeitig im Stapel und im Kampf.
+  // Der Regressionstest zur ENTLASSUNGSGLOCKE (Monster darf nicht gleichzeitig
+  // im Tuerstapel und im Kampf liegen) ist mit dem Pathfinder-Set entfallen -
+  // die Karte war die einzige mit 'returnToDoorDeckBottom'. Kommt so eine Karte
+  // wieder, gehoert der Test zurueck (siehe git 96495e5-Nachfolger).
+
+  // STEAM-CODE (aus den Promos ins Basis-Set uebernommen): "+3 fuer eine der
+  // Parteien, egal fuer welche Seite ... Wenn der Kampf verloren wird, erhalten
+  // die Munchkins +1 auf Weglaufen." Der +3-Teil laeuft ueber den generischen
+  // Trank-Parser; der Weglauf-Zuschlag braucht eine eigene Zeile - und gilt
+  // laut Karte unabhaengig davon, fuer welche Seite gespielt wurde.
   {
     const goblin = byName('LAHMER GOBLIN');
-    const kumpel = byName('KUMPEL');
-    const glocke = byName('ENTLASSUNGSGLOCKE');
-    const a = makePlayer('a', { hand: [kumpel.id, glocke.id] });
+    const steam = byName('STEAM-CODE');
+    assert.strictEqual(steam.set, 'base', 'STEAM-CODE gehoert jetzt zum Basis-Set');
+    const a = makePlayer('a', { hand: [steam.id] });
     const room = combatRoom([a, makePlayer('b')], [goblin.id]);
-    handlePlayCombatCard(room, 'a', kumpel.id);
-    assert.strictEqual(room.combat.monsterIds.length, 2, 'Testvoraussetzung: zwei Kopien');
-    handlePlayCombatCard(room, 'a', glocke.id);
-    assert.ok(room.pendingCardAction, 'zwei Monster -> Wahl');
-    handleResolveCardChoice(room, 'a', room.pendingCardAction.options[0].id);
-    assert.deepStrictEqual(room.combat.monsterIds, [goblin.id], 'eine Kopie kaempft weiter');
-    assert.ok(!room.doorDeck.includes(goblin.id), 'und liegt nicht gleichzeitig im Tuerstapel');
-    assert.ok(!room.doorDiscard.includes(goblin.id), 'und auch nicht im Ablagestapel');
+    // Der LAHME GOBLIN bringt selbst +1 aufs Weglaufen - gemessen wird deshalb
+    // die Differenz, nicht die Summe.
+    const summe = (p) => fleeModifierParts(room, p).reduce((x, t) => x + t.amount, 0);
+    const vorherA = summe(a);
+    const vorherB = summe(room.players[1]);
+
+    handlePlayCombatCard(room, 'a', steam.id);
+    assert.ok(room.pendingCardAction, '"egal fuer welche Seite" fragt die Seite ab');
+    // Bewusst fuer das MONSTER entscheiden - der Weglauf-Bonus gilt trotzdem.
+    const fuersMonster = room.pendingCardAction.options.find((o) => /Monster/.test(o.label));
+    handleResolveCardChoice(room, 'a', fuersMonster.id);
+    assert.strictEqual(combatTotals(room).monsterStrength, goblin.level + 3, '+3 fuer das Monster');
+    assert.strictEqual(summe(a) - vorherA, 1, 'die Munchkins bekommen +1 auf Weglaufen');
+    assert.strictEqual(summe(room.players[1]) - vorherB, 1, 'und zwar beide Munchkins');
+    assert.ok(fleeModifierParts(room, a).some((t) => /Steam/i.test(t.label)),
+      'der Zuschlag muss im Wurf-Protokoll benannt sein');
     done(room);
   }
 

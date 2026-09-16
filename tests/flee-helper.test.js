@@ -164,6 +164,12 @@ function fluchtRaum(monsterName, extra) {
   assert.strictEqual(b.hand.length, 2, 'die Helfer:in bekommt genau die zugesagten 2');
   assert.strictEqual(a.hand.length, 2, 'der Rest bleibt bei der kaempfenden Person');
   assert.strictEqual(b.lastReward.cardIds.length, 2, 'und sieht die Belohnung auch angezeigt');
+  // Welche Schaetze das sind, geht nur die Helfer:in etwas an: im oeffentlichen
+  // Verlauf steht die ANZAHL, aber kein Kartenverweis auf die Beute.
+  const verraten = room.logs.filter((l) => (l.cardIds || []).some((id) => b.hand.includes(id)));
+  assert.deepStrictEqual(verraten, [], 'keine Helferbeute im Verlauf');
+  assert.ok(room.logs.some((l) => l.text.includes(`${b.name} bekommt die zugesagten 2`)),
+    'die Anzahl steht weiterhin im Verlauf');
 }
 {
   // Mehr zusagen, als der Kampf hergibt, geht nicht: LAHMER GOBLIN hat 1.

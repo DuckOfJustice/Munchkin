@@ -19,6 +19,7 @@ const {
   ALL_CARDS, newEquipped, combatTotals, combatSignature, refreshCombatReady,
   handleThiefBackstab, handleThiefSteal, handlePriestResurrect,
   handleResolveCardChoice, thiefPowerInfo, priestResurrectPiles,
+  handlePlayMonsterFromHand, handleSkipToLoot,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -286,6 +287,63 @@ function run() {
     assert.strictEqual(room.pendingCardAction.cardName, 'FREMD', 'die fremde Kartenaktion bleibt stehen');
     assert.strictEqual(room.treasureDiscard.length, 1);
     done(room);
+  }
+  {
+    // Die Auferstehung ersetzt das Tuereintreten: danach laeuft der Zug in
+    // Phase 2 weiter.
+    const room = makeRoom({ turnIndex: 0 });
+    room.players[0].classes = [priester.id];
+    room.players[0].hand = [fueller[0].id, fueller[1].id];
+    room.doorDiscard = [fueller[2].id];
+    handlePriestResurrect(room, 'p1', 'door');
+    assert.strictEqual(room.turnPhase, 'aerger', 'die Tuerphase ist verbraucht');
+    done(room);
+  }
+  {
+    // Der Preis muss bezahlt sein, bevor der Zug weiterlaeuft: die Auferstehung
+    // schiebt die Phase auf 'aerger', der Ablege-Dialog steht aber noch offen.
+    // Ohne Riegel liesse sich der Preis durch eine Folgeaktion wegraeumen
+    // (advanceCardActionQueue ueberschreibt pendingCardAction kommentarlos).
+    const room = makeRoom({ turnIndex: 0 });
+    room.players[0].classes = [priester.id];
+    room.players[0].hand = [fueller[0].id, fueller[1].id, monster.id];
+    room.doorDiscard = [fueller[2].id];
+    handlePriestResurrect(room, 'p1', 'door');
+    assert.strictEqual(room.turnPhase, 'aerger');
+    assert.ok(room.pendingCardAction, 'der Preis steht noch offen');
+    handlePlayMonsterFromHand(room, 'p1', monster.id);
+    assert.strictEqual(room.combat, null, 'kein Kampf, solange der Preis offen ist');
+    handleSkipToLoot(room, 'p1');
+    assert.strictEqual(room.turnPhase, 'aerger', 'und auch kein Weiterschalten');
+    assert.ok(room.pendingCardAction, 'der Preis steht immer noch');
+    // Bezahlt: jetzt laeuft der Zug normal weiter.
+    handleResolveCardChoice(room, 'p1', room.pendingCardAction.options[0].id);
+    handleSkipToLoot(room, 'p1');
+    assert.strictEqual(room.turnPhase, 'pluendern', 'nach dem Bezahlen geht es weiter');
+    done(room);
+  }
+  {
+    // Nur in der eigenen Tuerphase - sonst nirgends.
+    const priesterRaum = (extra) => {
+      const room = makeRoom(extra);
+      room.players[0].classes = [priester.id];
+      room.players[0].hand = [fueller[0].id];
+      room.doorDiscard = [fueller[2].id];
+      return room;
+    };
+    const gesperrt = [
+      ['aerger', priesterRaum({ turnPhase: 'aerger' })],
+      ['pluendern', priesterRaum({ turnPhase: 'pluendern' })],
+      ['aufgedeckte Tuer', priesterRaum({ revealedDoorCard: monster.id })],
+      ['Kampf', priesterRaum({ turnPhase: 'kampf', combat: { monsterIds: [monster.id] } })],
+      ['nicht dran', priesterRaum({ turnIndex: 1 })],
+    ];
+    gesperrt.forEach(([was, room]) => {
+      assert.deepStrictEqual(priestResurrectPiles(room, room.players[0]), [], `keine Auferstehung: ${was}`);
+      handlePriestResurrect(room, 'p1', 'door');
+      assert.strictEqual(room.doorDiscard.length, 1, `keine Karte geholt: ${was}`);
+      done(room);
+    });
   }
 
   // ------------------------------------------------------------------

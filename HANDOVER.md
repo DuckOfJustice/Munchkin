@@ -138,6 +138,12 @@ jetzt ergänzt:
   HUHN AUF DEINEM KOPF, NARRENGOLD, BLUTSCHLEIER, RAUSCHPOCKEN,
   TOURISTENFALLE, EDELMUT, HUNGRIGER RUCKSACK, KLEINER FEHLER, TEMPORÄRE
   ANMNESIE, MIESER SPIEGEL, STINKER, WINZIGE HÄNDE.
+- **DU STOLPERST ÜBER DEINE EIGENE TRUHE** war in den Rohdaten ohne jeden
+  Text und wurde in 96495e5 deshalb entfernt; der gedruckte Wortlaut kam
+  später nach. Sie ist wieder in `data/cards.json` (mit derselben Id, das Bild
+  passte noch) und hat jetzt eine echte Wirkung: `discardMaxGoldItem` -
+  wertvollster ANGELEGTER Gegenstand nach Goldwert, dasselbe Primitiv wie bei
+  der PACKRATTE. Handkarten bleiben unangetastet.
 - ENTE DES SCHRECKENS braucht keinen Override (fällt sauber unter den
   generischen `parseAutoConsequence`-Fallback: "Verliere 2 Stufen").
 - Alle oben genannten wurden zusätzlich zu `DOOR_OTHER_AS_CURSE` hinzugefügt,
@@ -194,8 +200,9 @@ Kartendaten selbst zu erweitern:
 - Kein "Großer Gegenstand"-Flag → alle "wähle 1 großen/kleinen Gegenstand
   ab"-Karten bleiben manuelle Auswahl.
 - Keine "Untot"-/Feuerimmunitäts-Kennzeichnung auf Monsterkarten → z. B.
-  GHOULPEITSCHE/REDI-FLOW (bedingte Item-Boni gegen Untote/feuerimmune
-  Monster) bleiben unberechnet.
+  GHOULPEITSCHE (bedingte Item-Boni gegen Untote) bleibt unberechnet.
+  (REDI-FLOW, das zweite Beispiel dieser Sorte, ist mit dem
+  Pixels-&-Paper-Promo-Set entfallen.)
 - Keine Machtgruppen-Zugehörigkeit auf Monsterkarten → die "+N gegen
   [Machtgruppe]"-Kampfmodifikatoren auf ca. 20 Pathfinder-`door_other`-Karten
   (TENGU, GHOULER FREITAG, STRIX, HOBBES GOBLIN, MILBCHEN, WELPWAMPI,
@@ -532,7 +539,16 @@ Kandidat.
 
 ### 7.4 Blocker: Pathfinder hat überhaupt keine auswertbaren Kartendaten
 
-**Das ist die größte offene Baustelle und keine Fleißarbeit.**
+> **ERLEDIGT durch Entfernen.** Das Pathfinder-Set wurde auf Wunsch komplett
+> aus dem Spiel genommen: 144 Karten aus `data/cards.json`, die zugehörigen
+> Bilder in `public/images/`, der Set-Schlüssel in `SET_KEYS`/`SET_LABELS` und
+> den Voreinstellungen sowie 52 Tabelleneinträge, die auf entfernte Karten
+> zeigten (`CONSEQUENCE_OVERRIDES`, `DOOR_OTHER_AS_CURSE`,
+> `COMBAT_POTION_OVERRIDES`, `TREASURE_POWER_OVERRIDES`, `POWER_GROUP_NAMES`).
+> Der folgende Abschnitt bleibt als Begründung stehen - er beschreibt, warum
+> das Set nie spielbar war. Zurückholen ginge über die Git-Historie.
+
+**Das war die größte offene Baustelle und keine Fleißarbeit.**
 
 Alle **145** Pathfinder-Karten in `data/cards.json` haben nur die Kategorien
 `door_other` (74) oder `treasure_other` (71). Gemessen:
@@ -686,9 +702,9 @@ richten sich gegen Mitspielende, siehe 7.6).
    Sets erweitern.
 3. **JABBERWOCK/FEDERFEIND**: entscheiden, ob `MONSTER_TRAIT_BONUS` mehrere
    Regeln pro Karte können soll.
-4. **Pathfinder-Datenlage klären** (7.4). Bis dahin nichts weiter für
-   Pathfinder bauen - es wäre toter Code.
-5. **Machtgruppen in `MONSTER_TRAIT_BONUS`** (7.5), erst nach Schritt 4.
+4. ~~**Pathfinder-Datenlage klären** (7.4)~~ - erledigt, das Set ist entfernt.
+5. ~~**Machtgruppen in `MONSTER_TRAIT_BONUS`** (7.5)~~ - entfällt mit dem Set.
+   `POWER_GROUP_NAMES` ist leer, die Maschinerie drumherum steht aber noch.
 
 ### 7.8 Verifikation
 
@@ -937,7 +953,7 @@ Das zweite Set ist auf dem Stand des Basis-Sets. Plan und Audit:
 `docs/superpowers/plans/2026-09-13-clerical-errors-kartenkraefte.md`.
 
 Ausgangslage laut Audit: von 102 Karten hatten 40 keinen Weg durch die Engine.
-Heute meldet `node tools/coverage-scan.js clericalerrors` noch sechs Zeilen -
+Heute meldet `node tools/coverage-scan.js clericalerrors` noch fünf Zeilen -
 alle bewusst manuell, siehe 9.3.
 
 ### 9.1 Was dazugekommen ist
@@ -951,17 +967,26 @@ alle bewusst manuell, siehe 9.3.
 | Verstärker im Kampf | `combat.enhancerIds`. Zwei Klauseln wirken über den Moment des Ausspielens hinaus: „… aus der Hölle." (+5 gegen Priester) und UNTOT (Monster gilt als untot). `combatHasUndead(room)` beantwortet „untot?" an einer Stelle für Priester-„Vertreiben" und die GHOULPEITSCHE. |
 | Fluch-Abwehr | `fluchZiel(room, ziel, karte)` - **beide** Fluchwege (gezogen und von jemandem gespielt) laufen hindurch. PRÄCHTIGER HUT wirft den Fluch per Würfelrunde weiter, DAS MANCHMAL VERLÄSSLICHE AMULETT blockt ihn bei 4-6. |
 | Monsterstufen | `combat.levelOverrides` - TYPOGRAFISCHER FEHLER (Stufe 1) und DER GANZ NORMALE HASE (bei einer 6 Stufe 15). |
-| Kartensperre | `room.kartenSperren` für EINSTWEILIGE VERFÜGUNG, geleert beim Zugwechsel. |
+| Kartensperre | `room.kartenSperren` für EINSTWEILIGE VERFÜGUNG, geleert beim Zugwechsel. Die Karte selbst ist derzeit deaktiviert (siehe unten), der Mechanismus bleibt aber stehen. |
 
 ### 9.2 Neue Primitive in `applyPrimitiveAction`
 
 `queuedDiscardOwn` (N eigene Karten/Gegenstände selbst aussuchen),
 `queuedDiscardEachOther`, `levelUpLowerPlayersAndLose`, `setGender`,
 `packratteGeschenk` / `nimmEinenVonZweien`, `dungeonCasino`, `schatzTauschen`,
-`kartenSperre` (Ziel-Aktion) sowie im Kampf `treatMonsterAsLevel1`,
-`tripleItemBonus`, `forceSelfAsHelper`, `schatzUmtauschAnmelden`.
+`kartenSperre` (Ziel-Aktion), `enteDerVielenSachen` sowie im Kampf
+`treatMonsterAsLevel1`, `tripleItemBonus`, `forceSelfAsHelper`,
+`schatzUmtauschAnmelden`.
 
-### 9.3 Bewusst manuell geblieben (sechs Karten)
+`enteDerVielenSachen` (ENTE DER VIELEN SACHEN) ist die einzige Karte, deren
+sieben Schritte „in dieser Reihenfolge" ablaufen müssen: sie legt eine
+`openQueuedCardAction`-Warteschlange auf dieselbe Person und schiebt pro Eintrag
+einen Schritt ab. Schritte ohne Entscheidung (zufällige Karte vom Nachbarn,
+Ständchen, Stufe) liefern `null` und die Warteschlange rückt sofort weiter.
+Dafür kennt der `chooseCard`-Wähler jetzt neben `takeFrom` und `discardOwn` ein
+drittes Ziel: `giveTo` schenkt die eigene Wahl jemand anderem.
+
+### 9.3 Bewusst manuell geblieben (fünf Karten)
 
 - **GUMMI-GOLEM** (Schlimme Dinge): „Du musst in jedem Kampf deine Hilfe
   anbieten, darfst keinen Schatz annehmen, bis du einen verlierst" - eine
@@ -971,6 +996,32 @@ alle bewusst manuell, siehe 9.3.
   zurückgestellt wurden: freie
   Handelsreihenfolge, wiederkehrender Rundenend-Hook, ein neuer Kampf mitten
   in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-Status.
+
+**Entfernte Sets:** Neben Pathfinder (7.4) ist auch **Pixels & Paper Promos**
+raus. Zwei seiner fünf Karten wurden auf Wunsch ins Basis-Set übernommen und
+dabei erst spielbar gemacht:
+
+- **STEAM-CODE**: die +3 (`egal für welche Seite`) erkannte der generische
+  Trank-Parser schon. Neu ist der zweite Satz - "wenn der Kampf verloren wird,
+  erhalten die Munchkins +1 auf Weglaufen": `FLEE_BONUS_WHEN_PLAYED` setzt beim
+  Ausspielen `combat.playedFleeBonus`, `fleeModifierParts` rechnet es mit
+  eigenem Label ein. Bewusst VOR der Seitenwahl, weil der Zuschlag laut Karte
+  unabhängig von der gewählten Seite gilt.
+- **MECHA-DIRE-WOLF**: Stufe auf Wunsch von 14 auf 13 gesetzt und der Text
+  "-2 gegen alle, die das Spiel digital spielen" durch "Ein großer
+  Metall-Köter." ersetzt - hier spielen alle digital, die Klausel wäre entweder
+  immer oder nie erfüllt gewesen. Seine Schlimmen Dinge ("Lege drei Karten aus
+  deiner Hand ab") erkennt der generische Parser nicht und laufen jetzt über
+  einen `CONSEQUENCE_OVERRIDES`-Eintrag mit `queuedDiscardOwn`.
+
+**Deaktivierte Karten:** `DEAKTIVIERTE_KARTEN` in `server.js` (direkt über
+`buildDecks`) ist eine Namensliste, die beim Deckbau übersprungen wird -
+Kartendaten, Bild und Effektcode bleiben liegen, zum Reaktivieren reicht das
+Streichen des Namens. Drin liegt zurzeit **EINSTWEILIGE VERFÜGUNG**: die Sperre
+funktioniert, aber bereits gespielte Karten werden nicht zurückgenommen, und
+dafür müsste der Server zugweit mitschreiben, wer welche Karte gespielt hat
+(bei Monsterverstärkern machbar, bei Tränken/Reaktionskarten/Flüchen nicht
+sinnvoll rückabwickelbar).
 
 Halb umgesetzt, jeweils mit `// ponytail:` am Code vermerkt: der Rücknahme-Teil
 der EINSTWEILIGEN VERFÜGUNG, der Schatz-gegen-Stufenkarten-Handel bei MONSTER

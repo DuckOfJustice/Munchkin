@@ -127,6 +127,11 @@ module.exports = (ctx) => {
     // Hand ab."
     'TEQUILA-LIEDCHEN': () => ({ type: 'queuedDiscardOwn', count: 2, quelle: 'hand',
       cardName: 'TEQUILA-LIEDCHEN', prompt: 'Eine Handkarte ablegen' }),
+    // MECHA-DIRE-WOLF: "Beisst die Hand, die ihn fuettert. Lege drei Karten aus
+    // deiner Hand ab." Der generische Parser erkennt den Satz nicht (er steht
+    // hinter einem Flavor-Satz und nennt die Zahl ausgeschrieben).
+    'MECHA-DIRE-WOLF': () => ({ type: 'queuedDiscardOwn', count: 3, quelle: 'hand',
+      cardName: 'MECHA-DIRE-WOLF', prompt: 'Eine Handkarte ablegen' }),
     // "Opfere eine Karte deiner Wahl dem Uebel des Ruesselkaefers."
     'RÜSSELKÄFER': () => ({ type: 'queuedDiscardOwn', count: 1, quelle: 'hand',
       cardName: 'RÜSSELKÄFER', prompt: 'Eine Handkarte opfern' }),
@@ -178,54 +183,10 @@ module.exports = (ctx) => {
       ],
     }),
 
-    // --- Fehlkategorisierte Flüche (Pathfinder-Set): stehen in den Rohdaten in
-    // "door_other" statt "curse", sind aber textlich eindeutig sofort beim
-    // Ziehen wirkende Flüche (gleiche Wortwahl/Perspektive wie die echten
-    // Fluch-Karten oben) - siehe DOOR_OTHER_AS_CURSE unten, das sie über
-    // denselben Mechanismus wie echte Flüche laufen lässt. ---
-    'SCHUHSUPPE': () => ({ type: 'discardSlot', slot: 'feet' }), // "VERLIERE DEIN SCHUHWERK"
-    'OHRWÜRMER': () => ({ type: 'discardSlot', slot: 'head' }), // "VERLIERE DEINE KOPFBEDECKUNG."
-    'ANTHRAKITIS': () => ({ type: 'levelDelta', amount: 1 }), // "VERLIERE 1 STUFE"
-    'BRANDBAUCH': () => ({ type: 'levelDelta', amount: 1 }), // "VERLIERE 1 STUFE"
-    'VERLIERE DEINE KLASSE!': () => ({ type: 'discardClassCards' }),
-    'VERLIERE DEINE MACHTGRUPPE!': () => ({ type: 'discardPowerGroupCards' }),
-    'WECHSLE DEINE KLASSE': () => ({ type: 'replaceTraitFromDiscard', arrField: 'classes', capField: 'classCapCard', category: 'class', label: 'Klasse' }),
-    'WECHSLE DEINE MACHTGRUPPE': (player, room) => ({ type: 'replaceTraitFromDiscard', arrField: 'powerGroups', capField: 'powerGroupCapCard', category: 'door_other', label: 'Machtgruppe' }),
-    'SACKGASSE': () => ({ type: 'discardDoorCardsFromHand' }), // "Lege alle Türkarten aus deiner Hand ab."
-    'VERSAGEN BEI DER PRÜFUNG DES STERNSTEINS': () => ({ type: 'discardMaxBonusItem' }), // "Lege den Gegenstand ab, der dir den größten Kampfbonus gewährt."
-    'ROTE VERZIERUNG': () => ({ type: 'discardHandSlotItemElseLevel' }), // "VERLIERE 1 HAND-GEGENSTAND, sonst 1 Stufe"
     // "Verliere 1 Stufe" + Sonderklausel bei "ausdrücklich an den Knien
     // getragenem" Gegenstand - dafür gibt es kein Datenfeld, nur die
     // garantierte Basis-Stufe wird automatisch verrechnet:
     'EXPLODIERENDE KNIESCHÜTZER': () => ({ type: 'levelDelta', amount: 1 }),
-    // "Verliere 1 Stufe. Kundschafter können ihre Machtgruppe ablegen, anstatt
-    // 1 Stufe zu verlieren" - jetzt, wo Machtgruppen erfasst werden, als echte
-    // Wahl abbildbar:
-    'VERLIERE DEN PFAD': (player) => (hasPowerGroup(player, 'KUNDSCHAFTER')
-      ? { type: 'choice', options: [
-          { id: 'level', label: '1 Stufe verlieren', action: { type: 'levelDelta', amount: 1 } },
-          { id: 'group', label: 'Machtgruppe (Kundschafter) ablegen', action: { type: 'discardPowerGroupCards' } },
-        ] }
-      : { type: 'levelDelta', amount: 1 }),
-    // "VERLIERE 1 GROSSEN GEGENSTAND. Wenn du keinen Großen Gegenstand hast,
-    // verliere 1 Stufe."
-    'GRÜNSCHLEIM': (player, room) => (bigItemCount(player, room) ? { type: 'discardBigItem' } : { type: 'levelDelta', amount: 1 }),
-    // Betrifft, WELCHE Karte(n) andere Spieler:innen von der eigenen Hand
-    // nehmen (freie/zufällige Auswahl, in den Rohdaten nicht festgelegt) -
-    // bleibt bewusst manuell:
-    'SCHARLACHLEPRA': () => null,
-    // Freie Auswahl "irgendein kleiner Gegenstand ablegen" (hier ist ohnehin
-    // JEDER Gegenstand "klein", da kein "Großer Gegenstand"-Datenfeld
-    // existiert) - dafür gibt es schon die generischen Ablegen-Knöpfe, bleibt
-    // bewusst manuell statt einer erzwungenen Wahl:
-    'HÄNGENGELASSEN': () => null,
-    'SCHNELLES GELD': () => null,
-    // Hat einen alternativen Kampf-Einsatz ("+3 für Monster bei Goblins")
-    // zusätzlich zum Sofort-Effekt - nur der Sofort-Effekt wird automatisch
-    // berechnet, der Kampf-Bonus bleibt (wie bei Monster-Verstärkern mit
-    // Zusatzklauseln) manuell:
-    'GOBLINAUSSCHLAG': () => ({ type: 'discardSlot', slot: 'armor' }), // "DU VERLIERST DEINE RÜSTUNG"
-
     // --- Fluch, der die Konsequenz des obersten Monsters im Ablagestapel auslöst ---
     'STERBENDER FLUCH': (player, room) => {
       for (let i = room.doorDiscard.length - 1; i >= 0; i--) {
@@ -314,8 +275,6 @@ module.exports = (ctx) => {
     'GESCHLECHTSUMWANDLUNG': () => ({ type: 'setGender', value: 'wechseln' }),
     'HUHN AUF DEINEM KOPF': () => null,
     'NARRENGOLD': () => null,
-    'BLUTSCHLEIER': () => null,
-    'RAUSCHPOCKEN': () => null,
     'TOURISTENFALLE': () => null,
     'MIESER SPIEGEL': () => null,
     // ZWERGENBIER wirkt ausschliesslich ueber den Fluch-Tracker
@@ -330,21 +289,21 @@ module.exports = (ctx) => {
     'HUNGRIGER RUCKSACK': () => null,
     'KLEINER FEHLER': () => null,
     'TEMPORÄRE ANMNESIE': () => null,
+
+    // "Du verlierst deinen wertvollsten Gegenstand, den du im Spiel ausliegen
+    // hast" - wertvoll = Goldwert (dasselbe Primitiv wie bei der PACKRATTE),
+    // "ausliegen" = angelegt; Handkarten bleiben unangetastet.
+    'DU STOLPERST ÜBER DEINE EIGENE TRUHE': () => ({ type: 'discardMaxGoldItem' }),
   };
 
-  // Karten aus dem Pathfinder-Set, die in den Rohdaten als "door_other"
-  // geführt werden, aber - anders als die übrigen "Sonstige"-Türkarten -
+  // Karten, die in den Rohdaten als "door_other" geführt werden, aber - anders
+  // als die übrigen "Sonstige"-Türkarten -
   // textlich eindeutig sofort beim Ziehen wirkende Flüche sind (gleiche
   // Perspektive/Wortwahl wie die 4 echten "curse"-Karten, siehe Vergleich in
   // README). handleDrawDoor behandelt sie deshalb wie echte Fluch-Karten statt
   // sie kommentarlos auf die Hand zu legen.
   const DOOR_OTHER_AS_CURSE = new Set([
-    'SCHUHSUPPE', 'OHRWÜRMER', 'ANTHRAKITIS', 'BRANDBAUCH', 'SACKGASSE',
-    'VERLIERE DEINE KLASSE!', 'VERLIERE DEINE MACHTGRUPPE!',
-    'WECHSLE DEINE KLASSE', 'WECHSLE DEINE MACHTGRUPPE',
-    'VERSAGEN BEI DER PRÜFUNG DES STERNSTEINS', 'ROTE VERZIERUNG',
-    'EXPLODIERENDE KNIESCHÜTZER', 'VERLIERE DEN PFAD', 'GRÜNSCHLEIM',
-    'SCHARLACHLEPRA', 'HÄNGENGELASSEN', 'SCHNELLES GELD', 'GOBLINAUSSCHLAG',
+    'EXPLODIERENDE KNIESCHÜTZER',
     // Basis-Set + Erweiterungen (siehe CONSEQUENCE_OVERRIDES oben für Details
     // zu jeder einzelnen Karte):
     'Rüstung verlieren', 'Kopfbedeckung verlieren', 'SCHUHWERK VERLIEREN',
@@ -352,9 +311,9 @@ module.exports = (ctx) => {
     'KLASSE WECHSELN', 'RASSE WECHSELN', 'QUANTEN', 'REGELN DER NEUAUFLAGE',
     'WINZIGE HÄNDE', 'VERLIERE ZWEI KARTEN', 'VERLIERE 1 GROSSEN GEGENSTAND',
     'VERLIERE 1 KLEINEN GEGENSTAND', 'GESCHLECHTSUMWANDLUNG',
-    'HUHN AUF DEINEM KOPF', 'NARRENGOLD', 'BLUTSCHLEIER', 'RAUSCHPOCKEN',
+    'HUHN AUF DEINEM KOPF', 'NARRENGOLD',
     'TOURISTENFALLE', 'EDELMUT', 'HUNGRIGER RUCKSACK', 'KLEINER FEHLER',
-    'TEMPORÄRE ANMNESIE',
+    'TEMPORÄRE ANMNESIE', 'DU STOLPERST ÜBER DEINE EIGENE TRUHE',
     'ENTE DES SCHRECKENS', 'MIESER SPIEGEL', 'STINKER', 'ZWERGENBIER',
   ]);
 

@@ -125,8 +125,7 @@ s.on('connect', () => {
     // NUR_BASIS=1: der Durchlauf, um den es dem Plan geht - die Kartenkraefte
     // dieser Runde sind alle aus dem Basis-Set.
     if (process.env.NUR_BASIS) {
-      s.emit('updateSets', { base: true, clericalerrors: false, pixelsandpaperpromos: false,
-        unnaturalaxe: false, pathfinder: false });
+      s.emit('updateSets', { base: true, clericalerrors: false, unnaturalaxe: false });
     }
     setTimeout(() => s.emit('startGame'), 300);
   });

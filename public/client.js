@@ -1464,7 +1464,7 @@
     powersBox.innerHTML = '';
     (myInfo.resurrectPiles || []).forEach((pile) => {
       if (state.pendingCardAction || state.pendingRoll) return;
-      const btn = mkBtn(`✝️ Auferstehung: oberste Karte vom ${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel nehmen (kostet 1 Handkarte)`,
+      const btn = mkBtn(`✝️ Auferstehung statt Tür eintreten: oberste Karte vom ${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel nehmen (kostet 1 Handkarte)`,
         () => socket.emit('priestResurrect', { pile }));
       btn.classList.remove('small');
       powersBox.appendChild(btn);
@@ -1794,11 +1794,20 @@
       if (!myInfo.hand.includes(id)) sellSelection.delete(id);
     }
     let sum = 0;
-    sellSelection.forEach((id) => { sum += card(id).gold || 0; });
-    $('sellSum').textContent = `Ausgewählt: ${sum} Goldstücke`;
+    const werte = [];
+    sellSelection.forEach((id) => { const g = card(id).gold || 0; sum += g; werte.push(g); });
+    // HALBLING: "1 Gegenstand pro Runde zum doppelten Preis" - der Server
+    // verdoppelt den teuersten der verkauften Gegenstände (handleSellItems).
+    // Ohne diese Zeile misst der Knopf am reinen Goldwert und bleibt grau,
+    // obwohl der Verkauf durchginge.
+    const halblingBonus = (myInfo.halblingSaleOpen && werte.length) ? Math.max.apply(null, werte) : 0;
+    const echt = sum + halblingBonus;
+    $('sellSum').textContent = halblingBonus
+      ? `Ausgewählt: ${sum} Goldstücke - als Halbling ${echt} (teuerster Gegenstand zählt doppelt)`
+      : `Ausgewählt: ${sum} Goldstücke`;
     const btn = $('btnSell');
     // Verkaufen geht nur im eigenen Zug und nicht im Kampf (handleSellItems).
-    btn.disabled = sum < 1000 || !darfVerkaufen();
+    btn.disabled = echt < 1000 || !darfVerkaufen();
     btn.onclick = () => {
       socket.emit('sellItems', { cardIds: Array.from(sellSelection) });
       sellSelection.clear();
