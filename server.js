@@ -390,21 +390,27 @@ function pickItemsWorthGold(player, gold) {
   return { summe, weg };
 }
 
+// Alle Ids, die eine Hand belegen: gedruckte Handgegenstaende plus
+// Spezialslot-Karten mit slotKind 'hand' (z.B. ZWEIHAENDIGES SCHWERT). Eine
+// Stelle fuer "was ist ueberhaupt eine Waffe" - benutzt von KALI (waffenAnzahl
+// unten) und von MONDJUNGFERN (excludeIds in combatTotals), damit beide
+// niemals auseinanderlaufen.
+function handItemIds(player) {
+  const ids = new Set((player.equipped.hands || []).filter(Boolean));
+  (player.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
+  return ids;
+}
+
 // room ist optional: ohne ihn zaehlen nur die gedruckten Boni, mit ihm auch
-// die Kartenanhaenge (VERGIFTET/GESEGNET, je +2).
-function equippedBonusSum(player, room) {
+// die Kartenanhaenge (VERGIFTET/GESEGNET, je +2). excludeIds (optional):
+// Gegenstands-Ids, die komplett aussen vor bleiben - samt ihrer Anhaenge,
+// siehe MONDJUNGFERN in combatTotals.
+function equippedBonusSum(player, room, excludeIds) {
   return equippedItemIds(player).reduce((sum, id) => {
+    if (excludeIds && excludeIds.has(id)) return sum;
     const c = card(id);
     return sum + (c && c.bonus ? c.bonus : 0) + attachmentBonusSum(room, id);
   }, 0);
-}
-
-// MONDJUNGFERN: Summe der Boni, die an Hand-Gegenstaenden haengen - genau der
-// Teil, der gegen sie nicht zaehlt. Gleiche Brille wie waffenAnzahl.
-function waffenBonusSum(player) {
-  const ids = new Set((player.equipped.hands || []).filter(Boolean));
-  (player.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
-  return [...ids].reduce((sum, id) => { const c = card(id); return sum + ((c && c.bonus) || 0); }, 0);
 }
 
 // Machtgruppe Höllenritter, "Höllenritterrüstung": eine im Kampf +5 werte
@@ -423,11 +429,14 @@ function hellknightArmorBonus(player) {
 // RACE_ITEM_BONUS in src/cards/passives.js - heute nur der Gnom). Zaehlt wie
 // ein Gegenstandsbonus: MIESER SPIEGEL und GEMEINE GHOULE unterdruecken ihn
 // entsprechend, siehe combatTotals.
-function raceItemBonusSum(player) {
+// excludeIds (optional): siehe equippedBonusSum - dieselbe Ausschlussmenge,
+// damit RACE_ITEM_BONUS (z.B. GNOM) nicht ueber die Rasse zurueckholt, was
+// MONDJUNGFERN gerade an Waffenbonus gestrichen hat.
+function raceItemBonusSum(player, excludeIds) {
   return player.races.reduce((sum, id) => {
     const c = card(id);
     const fn = c && RACE_ITEM_BONUS[c.name.toUpperCase()];
-    return sum + (fn ? fn(player) : 0);
+    return sum + (fn ? fn(player, excludeIds) : 0);
   }, 0);
 }
 
@@ -437,8 +446,8 @@ function baseStrength(player, room) {
 
 // ITEM_CONDITIONAL_BONUS: siehe src/cards/passives.js (dort zusammen mit den
 // übrigen Dauerwirkungstabellen geladen, obwohl die Nutzung hier ist).
-
-function conditionalItemBonusSum(player, monsters, untot) {
+// excludeIds (optional): siehe equippedBonusSum.
+function conditionalItemBonusSum(player, monsters, untot, excludeIds) {
   if (!player || !monsters || !monsters.length) return 0;
   // EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
   // Schaden." Verdoppeln heisst: den gedruckten Bonus ein zweites Mal
@@ -446,6 +455,7 @@ function conditionalItemBonusSum(player, monsters, untot) {
   // automatisch mitzaehlen.
   const eisriese = monsters.some((m) => m && m.name === 'EISRIESE');
   return equippedItemIds(player).reduce((sum, id) => {
+    if (excludeIds && excludeIds.has(id)) return sum;
     const c = card(id);
     const fn = c && ITEM_CONDITIONAL_BONUS[c.name];
     const feuer = (eisriese && c && FIRE_ITEMS.has(c.name)) ? (c.bonus || 0) : 0;
@@ -2617,7 +2627,7 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT,
-} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace });
+} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
 // Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
@@ -3482,10 +3492,16 @@ function combatTotals(room) {
       // sind Rüstungsboni" - sonst zaehlen Ausruestung + situative Item-Boni
       // wie gewohnt. hellknightArmorBonus bleibt in beiden Faellen stehen
       // (kein regulaerer Gegenstands-Slot, siehe Kommentar dort).
+      // MONDJUNGFERN: "keine Vorteile durch Waffen" - die Waffen-Ids fliegen
+      // hier komplett aus allen drei Item-Summanden, statt hinterher eine
+      // zweite Summe abzuziehen. Sonst ueberleben Kartenanhaenge an der Waffe,
+      // konditionale Item-Boni (VORPALE KLINGE, EISRIESE-Verdopplung, ...)
+      // und rassenabhaengige Item-Boni (GNOM) den Abzug.
+      const excludeIds = ignoreWeapons ? handItemIds(p) : null;
       const items = curseSuppressesItemBonuses(p)
         ? ((card(p.equipped.armor) || {}).bonus || 0)
-        : equippedBonusSum(p, room) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters, combatHasUndead(room))
-          - (ignoreWeapons ? waffenBonusSum(p) : 0);
+        : equippedBonusSum(p, room, excludeIds) + raceItemBonusSum(p, excludeIds)
+          + conditionalItemBonusSum(p, monsters, combatHasUndead(room), excludeIds);
       return sum + p.level + items + hellknightArmorBonus(p)
         + curseCombatModifier(p) - (ignoreLevel ? p.level : 0);
     }, 0) + c.actorModifier + backstabMalus(room);
@@ -5721,7 +5737,7 @@ module.exports = {
   rollWithWindow, handlePlayReactionCard, ITEM_GRANTS_TRAIT, itemGrantsTrait,
   dryadeWirkung, hasenWurf, startCombat, applyTargetAction, handlePlayCurseFromHand,
   kartenSperreAktiv,
-  ATTACHMENT_CARDS, equippedBonusSum,
+  ATTACHMENT_CARDS, equippedBonusSum, handItemIds,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
   handlePrepReady, darfAusruesten,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,

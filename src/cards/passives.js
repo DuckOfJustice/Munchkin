@@ -2,7 +2,9 @@
 // im Spiel ist. Kuratiert statt per Regex - die Formulierungen auf den Karten
 // sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6 gegen Elfen").
 module.exports = (ctx) => {
-  const { hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace } = ctx;
+  const {
+    hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
+  } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
   // SCHUTZSANDALEN: "Flüche, die du ziehst, nachdem du eine Tür
@@ -165,8 +167,13 @@ module.exports = (ctx) => {
 
   // GNOM: "Du erhaeltst +1 fuer jeden nicht-einmal einsetzbaren Gegenstand,
   // der mit den Buchstaben G oder N beginnt."
+  // excludeIds (optional, von MONDJUNGFERN gesetzt - siehe combatTotals):
+  // Gegenstands-Ids, die hier nicht mitzaehlen duerfen, obwohl sie angelegt
+  // sind - sonst wuerde der Gnom seinen Waffenbonus ueber die Rasse
+  // zurueckholen, den die Mondjungfern gerade gestrichen hat.
   const RACE_ITEM_BONUS = {
-    'GNOM': (player) => equippedItemIds(player).filter((id) => {
+    'GNOM': (player, excludeIds) => equippedItemIds(player).filter((id) => {
+      if (excludeIds && excludeIds.has(id)) return false;
       const c = card(id);
       return c && /^[GN]/i.test(c.name) && !/nur\s+einmal\s+einsetzbar/i.test(c.text || '');
     }).length,
@@ -239,12 +246,9 @@ module.exports = (ctx) => {
   // keine Hand, siehe FREE_HAND_ITEMS) und zaehlt trotzdem mit.
   // ponytail: "Waffe" gegen "Schild" kennen die Kartendaten nicht - ein
   // Schild in der Hand zaehlt hier mit. Kuratierte Ausnahmeliste waere der
-  // Aufruestweg.
-  const waffenAnzahl = (p) => {
-    const ids = new Set((p.equipped.hands || []).filter(Boolean));
-    (p.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
-    return ids.size;
-  };
+  // Aufruestweg. Id-Menge kommt aus handItemIds (server.js) - dieselbe
+  // Definition wie bei MONDJUNGFERN, damit "Waffe" ueberall dasselbe meint.
+  const waffenAnzahl = (p) => handItemIds(p).size;
 
   // "Mensch" ist in Munchkin keine Karte, sondern ihr Fehlen: wer keine
   // Rassenkarte hat, ist Mensch. Geprueft wird durch dieselbe Brille wie alle

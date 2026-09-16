@@ -294,22 +294,90 @@ const PRIESTER = findCard('PRIESTER', 'class');
 }
 
 // --- MONDJUNGFERN: "In diesem Kampf erhaeltst du keine Vorteile durch Waffen" ---
+// Bug (Review I1): der alte Code zog nur den GEDRUCKTEN Bonus der Hand-
+// gegenstaende ab. Kartenanhaenge, konditionale Item-Boni und rassen-
+// abhaengige Item-Boni an derselben Waffe ueberlebten den Abzug, weil sie aus
+// eigenen Summen kamen, die nie gefiltert wurden. Jeder Fall unten misst die
+// Differenz "ohne Mondjungfern" minus "mit Mondjungfern" und verlangt, dass
+// sie dem VOLLEN Waffenwert entspricht - nicht nur dem gedruckten Bonus.
 {
   const waffe = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'hand' && c.bonus > 0);
   const ruestung = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'armor' && c.bonus > 0);
   assert.ok(waffe && ruestung, 'Testgegenstaende gefunden');
-  const staerke = (monsterName) => {
-    const m = findCard(monsterName, 'monster');
-    const p = makePlayer({ equipped: Object.assign(newEquipped(), { hands: [waffe.id, null], armor: ruestung.id }) });
+
+  const staerkeMit = (monsterNamen, equipped, attachments) => {
+    const p = makePlayer({ equipped });
     const room = makeRoom([p]);
-    room.combat = { actorId: p.id, helperId: null, monsterIds: [m.id], actorModifier: 0, monsterModifier: 0, backstabs: {} };
+    if (attachments) room.itemAttachments = attachments;
+    room.combat = {
+      actorId: p.id, helperId: null,
+      monsterIds: monsterNamen.map((n) => findCard(n, 'monster').id),
+      actorModifier: 0, monsterModifier: 0, backstabs: {},
+    };
     return combatTotals(room).playerStrength;
   };
-  const gegenJungfern = staerke('MONDJUNGFERN');
-  const gegenAnderes = staerke('PESTRATTEN');
-  assert.strictEqual(gegenAnderes - gegenJungfern, waffe.bonus,
-    'gegen die Mondjungfern faellt genau der Waffenbonus weg');
-  assert.ok(gegenJungfern > 0, 'Ruestung und Stufe zaehlen weiter');
+
+  // Grundfall: gedruckter Waffenbonus faellt weg.
+  {
+    const eq = Object.assign(newEquipped(), { hands: [waffe.id, null], armor: ruestung.id });
+    assert.strictEqual(staerkeMit(['PESTRATTEN'], eq) - staerkeMit(['MONDJUNGFERN'], eq), waffe.bonus,
+      'gegen die Mondjungfern faellt genau der Waffenbonus weg');
+  }
+
+  // Ruestung und Stufe zaehlen weiter - echte Differenzmessung statt "> 0"
+  // (die Testfigur liegt schon durch ihre Stufe ueber null).
+  {
+    const mitRuestung = staerkeMit(['MONDJUNGFERN'], Object.assign(newEquipped(), { armor: ruestung.id }));
+    const ohneRuestung = staerkeMit(['MONDJUNGFERN'], newEquipped());
+    assert.strictEqual(mitRuestung - ohneRuestung, ruestung.bonus,
+      'Ruestungsbonus zaehlt trotz Mondjungfern unveraendert weiter');
+  }
+
+  // Leck 1: Feuer-Verdopplung (EISRIESE) an einer Waffe - die Verdopplung
+  // wurde addiert, aber beim Mondjungfern-Abzug nicht mit abgezogen.
+  {
+    const napalm = findCard('NAPALMSTAB');
+    const eq = Object.assign(newEquipped(), { hands: [napalm.id, null] });
+    const diff = staerkeMit(['EISRIESE'], eq) - staerkeMit(['MONDJUNGFERN', 'EISRIESE'], eq);
+    assert.strictEqual(diff, napalm.bonus * 2,
+      'die Eisriesen-Verdopplung des Napalmstabs faellt mit der Waffe komplett weg');
+  }
+
+  // Leck 2: Kartenanhang (VERGIFTET) an einer Waffe.
+  {
+    const keule = findCard('GENTLEMAN-KEULE');
+    const vergiftet = findCard('VERGIFTET');
+    const eq = Object.assign(newEquipped(), { hands: [keule.id, null] });
+    const attachments = { [keule.id]: [vergiftet.id] };
+    const diff = staerkeMit(['PESTRATTEN'], eq, attachments) - staerkeMit(['MONDJUNGFERN'], eq, attachments);
+    assert.strictEqual(diff, keule.bonus + vergiftet.bonus,
+      'die Vergiftet-Karte an der Waffe faellt mit der Waffe komplett weg');
+  }
+
+  // Leck 3: konditionaler Item-Bonus (VORPALE KLINGE gegen Monster mit J).
+  {
+    const klinge = findCard('VORPALE KLINGE');
+    const eq = Object.assign(newEquipped(), { hands: [klinge.id, null] });
+    const diff = staerkeMit(['JABBERWOCK'], eq) - staerkeMit(['MONDJUNGFERN', 'JABBERWOCK'], eq);
+    assert.strictEqual(diff, klinge.bonus + 10,
+      'der Vorpale-Klinge-Zusatzbonus gegen J-Monster faellt mit der Waffe komplett weg');
+  }
+
+  // Leck 4: rassenabhaengiger Item-Bonus (GNOM zaehlt G/N-Gegenstaende).
+  {
+    const gnom = findCard('GNOM', 'door_other');
+    const grillgabel = findCard('GRILLGABEL');
+    const eq = Object.assign(newEquipped(), { hands: [grillgabel.id, null] });
+    const staerkeAlsGnom = (monsterName) => {
+      const p = makePlayer({ races: [gnom.id], equipped: eq });
+      const room = makeRoom([p]);
+      room.combat = { actorId: p.id, helperId: null, monsterIds: [findCard(monsterName, 'monster').id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {} };
+      return combatTotals(room).playerStrength;
+    };
+    assert.strictEqual(staerkeAlsGnom('PESTRATTEN') - staerkeAlsGnom('MONDJUNGFERN'), grillgabel.bonus + 1,
+      'der Gnom-Bonus fuer die Grillgabel faellt mit der Waffe komplett weg');
+  }
 }
 
 // --- EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
