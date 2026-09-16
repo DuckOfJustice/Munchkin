@@ -5,7 +5,7 @@
 // Monster aus einem anderen Grund staerker ist.
 const assert = require('assert');
 const {
-  ALL_CARDS, newEquipped, combatTotals,
+  ALL_CARDS, newEquipped, combatTotals, monsterRefusesTarget, fleeModifierParts,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -90,6 +90,32 @@ const PRIESTER = findCard('PRIESTER', 'class');
   const beides = monsterStaerke('M.T.-ANZUG', makePlayer({ classes: [ZAUBERER.id, DIEB.id] }));
   assert.strictEqual(beides - ohne, 5, 'der Anzug addiert nicht');
 }
+
+// --- "Greift niemanden mit Stufe N oder niedriger an" -----------------------
+[
+  ['FEUERLÖSCHER', 2],
+  ['TENTAKELDÄMON', 2],
+  ['JABBERWOCK', 4],
+].forEach(([monster, grenze]) => {
+  const m = findCard(monster, 'monster');
+  assert.ok(monsterRefusesTarget(m.id, makePlayer({ level: grenze })),
+    `${monster} darf Stufe ${grenze} nicht angreifen`);
+  assert.ok(!monsterRefusesTarget(m.id, makePlayer({ level: grenze + 1 })),
+    `${monster} greift Stufe ${grenze + 1} an`);
+});
+
+// --- Weglauf-Modifikatoren --------------------------------------------------
+[
+  ['WERSCHILDKRÖTE', 2],   // "Greift seeehr langsam an. +2 fuer Weglaufen."
+  ['PESTRATTEN', -1],      // "Alle anderen muessen kaempfen und erhalten -1 fuer Weglaufen."
+].forEach(([monster, erwartet]) => {
+  const m = findCard(monster, 'monster');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  room.combat = { actorId: p.id, helperId: null, monsterIds: [m.id], actorModifier: 0, monsterModifier: 0 };
+  const summe = fleeModifierParts(room, p).reduce((s, t) => s + t.amount, 0);
+  assert.strictEqual(summe, erwartet, `${monster}: Weglauf-Modifikator ${erwartet}`);
+});
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

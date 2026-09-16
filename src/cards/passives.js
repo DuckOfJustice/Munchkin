@@ -33,6 +33,10 @@ module.exports = (ctx) => {
     // das Geschlecht nur durch Karten - "geschlechtsumgewandelt" ist hier also
     // deckungsgleich mit "weiblich". Den Schatz gibt MONSTER_REFUSES_TREASURE.
     'AMAZONE': (p) => istGeschlecht(p, 'w'),
+    // --- Unnatural Axe ---
+    'FEUERLÖSCHER': (p) => p.level <= 2,   // "Greift niemanden mit Stufe 2 oder niedriger an."
+    'TENTAKELDÄMON': (p) => p.level <= 2,  // "Greift niemanden mit Stufe 2 oder niedriger an."
+    'JABBERWOCK': (p) => p.level <= 4,     // "Greift niemanden mit Stufe 4 oder niedriger an."
   };
 
   // Monster aus MONSTER_REFUSES, die beim Weiterziehen trotzdem etwas
@@ -349,6 +353,8 @@ module.exports = (ctx) => {
     'GALLERT-OKTAEDER': 1,     // "Du hast +1 auf Weglaufen."
     'LAHMER GOBLIN': 1,        // "Du hast +1 auf Weglaufen."
     'DIE TROLLE VOM TOTEN MEER': 1, // "Jeder erhaelt +1 auf Weglaufen."
+    'WERSCHILDKRÖTE': 2,  // "Greift seeehr langsam an. +2 fuer Weglaufen."
+    'PESTRATTEN': -1,     // "Alle anderen muessen kaempfen und erhalten -1 fuer Weglaufen."
   };
   // FILZLAUSE: "Denen kannst du nicht entkommen!"
   // LAUFENDE NASE: "Verlierst du den Kampf, kannst du nicht fliehen."
