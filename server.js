@@ -3960,6 +3960,15 @@ function handlePlayCombatCard(room, playerId, cardId) {
     const fungusGigantisch = c.name === 'GIGANTISCH'
       && room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'FUNGUS');
     const zuschlag = fungusGigantisch ? 25 : (trottel ? c.bonus * 2 : c.bonus);
+    // Fungus hat Vorrang: sein Text setzt einen FESTEN Ersatzwert (25 statt
+    // 10), keine Verdopplung des Kartenbonus - im Unterschied zum Trottel, der
+    // den gedruckten Bonus verdoppelt. Bei beiden gleichzeitig (Fungus +
+    // Rapier-Trottel im selben Kampf) greift nur die feste Zahl, der Trottel
+    // traegt nichts mehr bei - die Logzeile darf deshalb nur den Zusatz
+    // nennen, der tatsaechlich gegriffen hat, sonst behauptet sie zwei
+    // einander ausschliessende Dinge (siehe Review M3).
+    const zusatzText = fungusGigantisch ? ' - der Fungus erhält 25 statt 10'
+      : (trottel ? ' - der Rapier-Trottel verdoppelt' : '');
     room.combat.monsterModifier += zuschlag;
     // Getrennt mitgezaehlt, weil KUMPEL ("ein weiteres Monster mit den
     // gleichen Monsterverstaerker-Karten") genau diesen Anteil ein zweites
@@ -3977,7 +3986,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
       room.combat.enhancerTreasure = (room.combat.enhancerTreasure || 0) + delta;
     }
     room.doorDiscard.push(cardId);
-    log(room, `${player.name} spielt "${c.name}" im Kampf (${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster${trottel ? ' - der Rapier-Trottel verdoppelt' : ''}${fungusGigantisch ? ' - der Fungus erhält 25 statt 10' : ''}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
+    log(room, `${player.name} spielt "${c.name}" im Kampf (${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster${zusatzText}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
     announceCardPlay(room, player, cardId, `${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster`);
     touchRoom(room);
     return;

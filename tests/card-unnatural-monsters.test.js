@@ -414,6 +414,44 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(zuschlag(fungus), 25, 'auf dem Fungus sind es 25');
 }
 
+// --- FUNGUS + RAPIER-TROTTEL: die Logzeile darf nur den Zusatz nennen, der
+// tatsaechlich gegriffen hat (Review M3) --------------------------------------
+// Der Fungus hat Vorrang (fester Ersatzwert 25 statt einer Verdopplung) -
+// beide Zusaetze gleichzeitig zu nennen waere widerspruechlich, weil der
+// Trottel dann gar nichts mehr beitraegt.
+{
+  const fungus = findCard('FUNGUS', 'monster');
+  const trottel = findCard('RAPIER-TROTTEL', 'monster');
+  const gigantisch = findCard('GIGANTISCH');
+  const letzteLogzeile = (monsterIds) => {
+    const p = makePlayer({ hand: [gigantisch.id] });
+    const room = makeRoom([p]);
+    room.combat = { actorId: p.id, helperId: null, monsterIds,
+      actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
+      treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+    handlePlayCombatCard(room, p.id, gigantisch.id);
+    return room.logs[room.logs.length - 1].text;
+  };
+
+  // Nur der Trottel: Verdopplung des gedruckten Bonus.
+  const nurTrottel = letzteLogzeile([trottel.id]);
+  assert.ok(nurTrottel.includes(`+${gigantisch.bonus * 2} für das Monster`), 'der Trottel verdoppelt den gedruckten Bonus');
+  assert.ok(nurTrottel.includes('Rapier-Trottel verdoppelt'), 'nennt den Trottel-Zusatz');
+  assert.ok(!nurTrottel.includes('Fungus'), 'nennt keinen Fungus-Zusatz');
+
+  // Nur der Fungus: fester Ersatzwert +25.
+  const nurFungus = letzteLogzeile([fungus.id]);
+  assert.ok(nurFungus.includes('+25 für das Monster'), 'der Fungus ersetzt durch +25');
+  assert.ok(nurFungus.includes('Fungus erhält 25 statt 10'), 'nennt den Fungus-Zusatz');
+  assert.ok(!nurFungus.includes('Trottel'), 'nennt keinen Trottel-Zusatz');
+
+  // Beide zusammen: Fungus gewinnt, +25 - die Zeile nennt nur diesen Zusatz.
+  const beide = letzteLogzeile([fungus.id, trottel.id]);
+  assert.ok(beide.includes('+25 für das Monster'), 'bei beiden Monstern gilt weiterhin +25');
+  assert.ok(beide.includes('Fungus erhält 25 statt 10'), 'nennt den Fungus-Zusatz');
+  assert.ok(!beide.includes('Trottel'), 'nennt NICHT zusaetzlich den Trottel-Zusatz - das waere widerspruechlich');
+}
+
 // --- Verlauf und Einblendung muessen denselben Bonus nennen -----------------
 // Regressionstest: die Einblendung (room.cardPlay.hinweis) benutzte bisher
 // c.bonus statt des tatsaechlich angewandten zuschlag - beim GIGANTISCHEN
