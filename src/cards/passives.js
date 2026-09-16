@@ -131,6 +131,15 @@ module.exports = (ctx) => {
       label: 'Geschenk annehmen (2 offene Schaetze, einen behalten)',
       action: { type: 'packratteGeschenk' },
     },
+    // ponytail: EISKALTES HÄNDCHEN bewusst NICHT hier verdrahtet. Sein
+    // Kampftext bietet keine Alternative WIE oben (bestechen/ablenken/
+    // Geschenk), sondern ersetzt den Kampf komplett durch einen Wunschring -
+    // und die Monsterkarte selbst wird danach ein +3-Gegenstand in der Hand.
+    // Das sprengt die Aktions-Bauform hier (die Optionen oben aendern nie die
+    // Kategorie der Karte) und braucht eher einen eigenen primitiven Typ
+    // (Monster -> Gegenstand). Die Schlimmen Dinge sind schon verdrahtet,
+    // nur dieser Kampf-Alternativpfad fehlt - siehe Design-Spec §6, Welle 3
+    // (docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md).
   };
 
   // --- Monster, die VOR dem Kampf einen Gegenstand kosten --------------------
@@ -387,6 +396,10 @@ module.exports = (ctx) => {
     // Die Karte sagt die Addition ausdruecklich - deshalb zwei Regeln.
     'JABBERWOCK': [{ races: ['ZWERG'], bonus: 3 }, { classes: ['ZAUBERER'], bonus: 3 }],
     'WEIHNACHTSMANN': { races: ['ELF'], bonus: -5 },                               // "-5 gegen Elfen. Der Narr vertraut den Elfen."
+    // ponytail: nur der Kampfbonus oben ist verdrahtet. Die Schlimmen Dinge
+    // ("kein Schatz, bis du ein Monster allein toetest") sind bewusst
+    // manuell - siehe Kommentar bei CONSEQUENCE_OVERRIDES in
+    // src/cards/consequences.js (Design-Spec §6, Welle 3).
   };
 
   // --- Monster, die die Kampfrechnung selbst verändern ---------------------
@@ -409,6 +422,27 @@ module.exports = (ctx) => {
   // Die ersten beiden Regeln gelten für die ganze Munchkin-Seite: sobald
   // jemand mithilft, kämpfen beide gegen dasselbe Monster, also trifft die
   // Einschränkung auch die Helfer:in.
+  //
+  // ponytail: RIESENSTINKTIER bewusst NICHT in MONSTER_FORBIDS_HELP. Sein
+  // Kampftext geht weiter als "niemand hilft" - er verbietet auch, dich zu
+  // hintergehen oder Karten für oder gegen dich zu spielen, also quer durch
+  // Kampf-, Fluch- und Tauschpfade. Die Schlimmen Dinge ("keine Hilfe, bis
+  // alle Kleidung abgelegt ist; halber Goldwert") brauchen zudem einen
+  // zugübergreifenden Zustand am Spieler - genau die Erweiterung, die Welle 3
+  // im Design bewusst zuletzt einplant (siehe
+  // docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md §6).
+  // Aufruestweg: ein Set/Tracker analog zu activeCurses, das an jeder Stelle
+  // geprüft wird, die "gegen dich" spielen kann (Hilfe, Flüche, Tausch,
+  // Kampfkarten) - deutlich mehr Flaeche als eine einzelne Tabellenzeile.
+  //
+  // ponytail: LUSTMONSTER ebenfalls nicht hier verdrahtet. Sein Kampftext
+  // verlangt zwingend Hilfe des ANDEREN Geschlechts, sonst automatische
+  // Flucht - das ist kein einfaches "Set von Monsternamen" wie oben, sondern
+  // ein Eingriff in handleRequestHelp/handleRespondHelp (Ablehnung erzwingen)
+  // plus FLEE_AUTOMATIC (automatische Flucht ohne passende Hilfe). Die
+  // Schlimmen Dinge (Stufe plus anhaltender Fluch auf Hand-Gegenstände im
+  // naechsten Kampf) siehe Kommentar bei CONSEQUENCE_OVERRIDES in
+  // src/cards/consequences.js. Gleiche Quelle: Design-Spec §6, Welle 3.
 
   // --- Weglaufen -------------------------------------------------------------
   // Feste Modifikatoren, die ohne Zutun gelten. Der Zauberer-Flugzauber ("+1
