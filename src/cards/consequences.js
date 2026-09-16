@@ -10,6 +10,12 @@ module.exports = (ctx) => {
     equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
   } = ctx;
 
+  // "alle kleinen Gegenstaende": die Anzahl steht erst im Moment der
+  // Konsequenz fest, weil Anhaenge (NÜTZLICHE GRIFFE) aus einem Grossen einen
+  // kleinen machen koennen.
+  const kleineGegenstaendeAnzahl = (player, room) =>
+    equippedItemIds(player).filter((id) => !istGrosserGegenstand(room, id)).length;
+
   const CONSEQUENCE_OVERRIDES = {
     // --- Eindeutiger Tod in ungewöhnlicher Formulierung ---
     'BULLROG': () => ({ type: 'death' }), // "Du wirst zu Tode gepeitscht."
@@ -176,6 +182,20 @@ module.exports = (ctx) => {
     // Gleiche Bauform wie HIPPOGREIF/ANWALT - das Aufdecken selbst braucht
     // keinen eigenen Schritt, der Waehler zeigt die Hand ohnehin.
     'MONDJUNGFERN': () => ({ type: 'queuedTakeFromHand', mode: 'allOthers' }),
+    // "Er hebt dich auf und laesst dich aus grosser Hoehe fallen. Lege deine
+    // ganze Hand oder alle kleinen Gegenstaende ab ... Du hast die Wahl."
+    // Die Zahl der kleinen Gegenstaende steht erst beim Ausspielen fest,
+    // deshalb queuedDiscardOwn ueber die ganze Menge statt einer festen Zahl.
+    'PTERODAKTYL': (player, room) => ({
+      type: 'choice',
+      options: [
+        { id: 'hand', label: 'Die ganze Hand ablegen', action: { type: 'discardWholeHand' } },
+        { id: 'klein', label: 'Alle kleinen Gegenstaende ablegen',
+          action: { type: 'queuedDiscardOwn', count: kleineGegenstaendeAnzahl(player, room),
+            quelle: 'kleineGegenstaende', cardName: 'PTERODAKTYL',
+            prompt: 'Einen kleinen Gegenstand ablegen' } },
+      ],
+    }),
 
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
     'ENTIKOR': () => ({

@@ -240,5 +240,29 @@ const PRIESTER = findCard('PRIESTER', 'class');
     'der hinterlassene Schatz entspricht dem Schatzwert der Karte');
 }
 
+// --- PTERODAKTYL: "Lege deine ganze Hand ODER alle kleinen Gegenstaende ab" -
+{
+  const ptero = findCard('PTERODAKTYL', 'monster');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  assert.strictEqual(spec.type, 'choice', 'die Karte laesst waehlen');
+  assert.strictEqual(spec.options.length, 2, 'genau zwei Moeglichkeiten');
+  const ids = spec.options.map((o) => o.action.type).sort();
+  assert.deepStrictEqual(ids, ['discardWholeHand', 'queuedDiscardOwn'].sort(),
+    'ganze Hand oder alle kleinen Gegenstaende');
+}
+{
+  // Die Hand-Variante wirkt auch wirklich.
+  const ptero = findCard('PTERODAKTYL', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 3).map((c) => c.id);
+  const p = makePlayer({ hand: fueller.slice() });
+  const room = makeRoom([p]);
+  const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  const handOption = spec.options.find((o) => o.action.type === 'discardWholeHand');
+  applyPrimitiveAction(room, p, handOption.action);
+  assert.strictEqual(p.hand.length, 0, 'die Hand ist weg');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');
