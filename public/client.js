@@ -148,6 +148,14 @@
     }
     socket.emit('joinRoom', { code, name }, (res) => {
       if (!res.ok) return showStartError(res.error);
+      // Die Partie kann inzwischen schon laufen - der Server setzt uns dann
+      // statt eines Fehlers direkt als Zuschauer:in in den Raum
+      // (siehe trySpectatorJoin/autoSpectator in server.js).
+      if (res.autoSpectator) {
+        isSpectator = true;
+        saveSession({ code: res.code, spectatorId: res.spectatorId, token: res.token, name, isSpectator: true });
+        return;
+      }
       saveSession({ code: res.code, playerId: res.playerId, token: res.token, name });
     });
   });

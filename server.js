@@ -180,6 +180,31 @@ function newPlayer(name, socketId, isBot) {
 // gesetzt bekommen - siehe joinAsSpectator/socket.data.spectatorId). Sie
 // duerfen laut Bugreport per Dropdown IRGENDEINE Hand ansehen, siehe
 // sendSpectatorInfo - deshalb reicht hier Name/Verbindung/Token.
+// Gemeinsame Logik fuer den Zuschauer-Beitritt: sowohl fuer den expliziten
+// "Nur zuschauen"-Schalter (joinAsSpectator) als auch fuer den Fall, dass
+// jemand ganz normal ueber "Beitreten" in einen Raum will, dessen Partie
+// schon laeuft (joinRoom faellt dann hierher zurueck, statt einen Fehler
+// zu zeigen - siehe dort). `auto` steuert nur die Log-Meldung.
+function trySpectatorJoin(room, name, socket, cb, { auto = false } = {}) {
+  if (room.spectators.length >= MAX_SPECTATORS) {
+    return cb({ ok: false, error: 'Gerade zu viele Zuschauer:innen in diesem Raum.' });
+  }
+  name = (name || '').trim().slice(0, 20) || 'Zuschauer:in';
+  const vergeben = room.players.some((p) => p.name.toLowerCase() === name.toLowerCase())
+    || room.spectators.some((s) => s.name.toLowerCase() === name.toLowerCase());
+  if (vergeben) return cb({ ok: false, error: 'Dieser Name ist bereits vergeben.' });
+  const spectator = newSpectator(name, socket.id);
+  room.spectators.push(spectator);
+  socket.join(room.code);
+  socket.data.roomCode = room.code;
+  socket.data.spectatorId = spectator.id;
+  log(room, auto
+    ? `${name} wollte beitreten, aber die Partie läuft schon - schaut jetzt als Zuschauer:in zu.`
+    : `${name} schaut als Zuschauer:in zu.`);
+  cb({ ok: true, code: room.code, spectatorId: spectator.id, token: spectator.token, autoSpectator: auto });
+  broadcastState(room);
+}
+
 function newSpectator(name, socketId) {
   return { id: makeId(), token: makeId(), name, socketId: socketId || null, connected: true };
 }
@@ -5257,7 +5282,10 @@ io.on('connection', (socket) => {
         return;
       }
     }
-    if (room.phase !== 'lobby') return cb({ ok: false, error: 'Das Spiel läuft bereits.' });
+    // Die Partie läuft schon: statt einer Fehlermeldung setzen wir die Person
+    // direkt als Zuschauer:in in den Raum - kein Sackgassen-Fehler, sondern
+    // derselbe Weg wie über den expliziten "Nur zuschauen"-Schalter.
+    if (room.phase !== 'lobby') return trySpectatorJoin(room, name, socket, cb, { auto: true });
     if (room.players.length >= MAX_PLAYERS) return cb({ ok: false, error: `Der Raum ist voll (max. ${MAX_PLAYERS}).` });
     name = (name || '').trim().slice(0, 20) || 'Spieler';
     if (room.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
@@ -5303,19 +5331,7 @@ io.on('connection', (socket) => {
         return;
       }
     }
-    if (room.spectators.length >= MAX_SPECTATORS) return cb({ ok: false, error: 'Gerade zu viele Zuschauer:innen in diesem Raum.' });
-    name = (name || '').trim().slice(0, 20) || 'Zuschauer:in';
-    const vergeben = room.players.some((p) => p.name.toLowerCase() === name.toLowerCase())
-      || room.spectators.some((s) => s.name.toLowerCase() === name.toLowerCase());
-    if (vergeben) return cb({ ok: false, error: 'Dieser Name ist bereits vergeben.' });
-    const spectator = newSpectator(name, socket.id);
-    room.spectators.push(spectator);
-    socket.join(room.code);
-    socket.data.roomCode = room.code;
-    socket.data.spectatorId = spectator.id;
-    log(room, `${name} schaut als Zuschauer:in zu.`);
-    cb({ ok: true, code: room.code, spectatorId: spectator.id, token: spectator.token });
-    broadcastState(room);
+    trySpectatorJoin(room, name, socket, cb);
   });
 
   onSafe(socket, 'leaveRoom', () => {
