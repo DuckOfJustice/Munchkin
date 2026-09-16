@@ -110,6 +110,19 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(elf - zwerg, 5, 'Elfen bekommen denselben Bonus');
 }
 
+// --- FEUERLÖSCHER: "Erhaelt +5, wenn dir niemand hilft." --------------------
+{
+  const m = findCard('FEUERLÖSCHER', 'monster');
+  const a = makePlayer({ level: 9 });
+  const b = makePlayer({ id: 'p2', name: 'B', level: 9 });
+  const room = makeRoom([a, b]);
+  room.combat = { actorId: a.id, helperId: null, monsterIds: [m.id], actorModifier: 0, monsterModifier: 0, backstabs: {} };
+  const allein = combatTotals(room).monsterStrength;
+  room.combat.helperId = b.id;
+  const mitHilfe = combatTotals(room).monsterStrength;
+  assert.strictEqual(allein - mitHilfe, 5, 'ohne Hilfe ist der Loescher 5 staerker');
+}
+
 // --- "Greift niemanden mit Stufe N oder niedriger an" -----------------------
 [
   ['FEUERLÖSCHER', 2],

@@ -2774,7 +2774,10 @@ function monsterTraitBonusSum(room) {
       const kandidaten = rule.nurKaempfer ? parts.filter((p) => p.id === room.combat.actorId) : parts;
       const hit = kandidaten.some((p) => (!(immun && traitImmun(p, 'races')) && (rule.races || []).some((r) => monsterSeesRace(p, r)))
         || (!(immun && traitImmun(p, 'classes')) && (rule.classes || []).some((k) => hasClass(p, k)))
-        || (rule.wennErfuellt ? rule.wennErfuellt(p) : false));
+        // Der Raum kommt als zweites Argument dazu, damit eine Regel den
+        // Kampfzustand sehen kann (FEUERLÖSCHER: "+5, wenn dir niemand
+        // hilft"). Alle aelteren Regeln ignorieren ihn.
+        || (rule.wennErfuellt ? rule.wennErfuellt(p, room) : false));
       return teil + (hit ? rule.bonus : 0);
     }, 0);
   }, 0);

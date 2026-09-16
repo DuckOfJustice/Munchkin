@@ -327,6 +327,9 @@ module.exports = (ctx) => {
     // kein Mensch, die Faelle schliessen sich aus.
     'RIESENKAKERLAKE': { wennErfuellt: (p) => monsterSeesRace(p, 'ELF') || istMensch(p), bonus: 5 },
     'GRASGNOLL': { wennErfuellt: (p) => istMensch(p), bonus: 5 },   // "+5 gegen Menschen."
+    // "Greift mit zahlreichen Koepfen an. Erhaelt +5, wenn dir niemand hilft."
+    // Haengt am Kampf, nicht an der Person - deshalb ueber den Raum.
+    'FEUERLÖSCHER': { wennErfuellt: (p, room) => !(room.combat && room.combat.helperId), bonus: 5 },
     // "+3 gegen Zwerge oder Zauberer. Ja, das macht +6 gegen Zwergenzauberer."
     // Die Karte sagt die Addition ausdruecklich - deshalb zwei Regeln.
     'JABBERWOCK': [{ races: ['ZWERG'], bonus: 3 }, { classes: ['ZAUBERER'], bonus: 3 }],
