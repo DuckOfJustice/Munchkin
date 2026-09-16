@@ -4329,20 +4329,33 @@ function resolveCombatWin(room) {
   const baseTreasures = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0) + extras.treasures;
   // PIÑATA: "Wenn Pinata besiegt wird, zieht jedes Gruppenmitglied einen
   // Schatz aufgedeckt. Es spielt keine Rolle, wer am Kampf teilgenommen hat."
-  // Ersetzt die normale Beute - die Karte nennt selbst 0 Schaetze.
+  // Additiv zur normalen Beute (die Piñata nennt selbst 0 Schaetze) - bei
+  // einem zweiten Monster im selben Kampf bekommt die kaempfende Person also
+  // beides, das ist regeltechnisch richtig.
+  // Die Piñata-Karte von actor/helper wird HIER nur gezogen, aber erst unten
+  // bei fuerActor/fuerHelfer eingereiht - sonst wuerde die dortige
+  // lastReward-Zuweisung sie kommentarlos ueberschreiben (siehe Review I3).
   const pinata = monsters.some((m) => m && m.name === 'PIÑATA');
+  let actorPinataCard = null;
+  let helperPinataCard = null;
   if (pinata) {
+    let gezogen = 0;
     room.players.forEach((p) => {
       const t = drawTreasure(room);
       if (!t) return;
+      gezogen += 1;
+      if (p.id === actor.id) { actorPinataCard = t; return; }
+      if (helper && p.id === helper.id) { helperPinataCard = t; return; }
       p.hand.push(t);
       p.lastReward = {
         seq: (p.lastReward ? p.lastReward.seq : 0) + 1,
-        cardIds: [t], levelsGained: p.id === actor.id ? levelsGained : 0,
+        cardIds: [t], levelsGained: 0,
         monsterNames: monsters.map((m) => m.name),
       };
     });
-    log(room, `Die Piñata platzt - jede:r am Tisch zieht 1 Schatzkarte.`);
+    log(room, gezogen === room.players.length
+      ? `Die Piñata platzt - jede:r am Tisch zieht 1 Schatzkarte.`
+      : `Die Piñata platzt - der Schatzstapel reicht nur für ${gezogen} von ${room.players.length} Personen, die je 1 Schatzkarte ziehen.`);
   }
   // Monster-Verstärker aus dem Kampf zählen mit; BABY sagt ausdrücklich
   // "mindestens 1", deshalb die Untergrenze - aber nur, wenn überhaupt ein
@@ -4358,8 +4371,8 @@ function resolveCombatWin(room) {
   // Rest geht wie bisher an die kaempfende Person; darueber hinaus bleibt
   // jede Weitergabe freier Handel.
   const zusage = helper ? Math.max(0, Math.min(c.helperReward || 0, drawn.length)) : 0;
-  const fuerHelfer = drawn.slice(0, zusage);
-  const fuerActor = drawn.slice(zusage);
+  const fuerHelfer = drawn.slice(0, zusage).concat(helperPinataCard ? [helperPinataCard] : []);
+  const fuerActor = drawn.slice(zusage).concat(actorPinataCard ? [actorPinataCard] : []);
   fuerActor.forEach((id) => actor.hand.push(id));
   actor.lastReward = {
     seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
@@ -4404,7 +4417,11 @@ function resolveCombatWin(room) {
     });
   }
   discardMonsterIds(room.doorDiscard, c.monsterIds);
-  log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${treasureCount} Schatzkarte(n) gezogen.`, c.monsterIds);
+  // treasureCount zaehlt nur die reguläre Beute - die Piñata-Karte der
+  // kaempfenden Person kommt (falls gezogen) obendrauf, sonst meldet die
+  // Zeile faelschlich "0 Schatzkarte(n)", obwohl eine Karte in der Hand liegt.
+  const gemeldeteSchaetze = treasureCount + (actorPinataCard ? 1 : 0);
+  log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${gemeldeteSchaetze} Schatzkarte(n) gezogen.`, c.monsterIds);
   if (extras.levels) log(room, `Kartenbonus: +${extras.levels} zusätzliche Stufe(n).`);
   if (extras.treasures) log(room, `Kartenbonus: +${extras.treasures} zusätzliche(r) Schatz.`);
   if (hasClass(actor, 'BARDE')) log(room, `Bardenglück: ${actor.name} zieht 1 Extraschatz und wirft dafür sofort 1 beliebige Karte ab.`);

@@ -572,6 +572,10 @@ const PRIESTER = findCard('PRIESTER', 'class');
 // --- PIÑATA, Sieg -----------------------------------------------------------
 // "Wenn Pinata besiegt wird, zieht jedes Gruppenmitglied einen Schatz
 // aufgedeckt. Es spielt keine Rolle, wer am Kampf teilgenommen hat."
+// Review I3: die kaempfende Person zog die Karte tatsaechlich (Handkarten
+// stimmten), aber lastReward.cardIds war leer und der Verlauf meldete
+// "0 Schatzkarte(n) gezogen" - die spaetere Zuweisung ueberschrieb die
+// Piñata-Belohnung kommentarlos.
 {
   const { resolveCombatWin } = require('../server.js');
   const pinata = findCard('PIÑATA', 'monster');
@@ -587,6 +591,55 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(b.hand.length, 1, 'auch wer nicht mitgekaempft hat, bekommt einen Schatz');
   assert.strictEqual(c4.hand.length, 1, 'und zwar alle');
   assert.strictEqual(a.hand.length, 1, 'die kaempfende Person ebenfalls genau einen');
+  assert.strictEqual(a.lastReward.cardIds.length, 1, 'lastReward der kaempfenden Person nennt die gezogene Karte');
+  assert.strictEqual(a.lastReward.cardIds[0], a.hand[0], 'und zwar genau die, die in der Hand liegt');
+  const siegZeile = room.logs.find((l) => l.text.includes('besiegt PIÑATA'));
+  assert.ok(siegZeile, 'Siegzeile vorhanden');
+  assert.ok(!siegZeile.text.includes('0 Schatzkarte'), 'die Siegzeile darf nicht 0 Schatzkarten behaupten');
+  assert.ok(siegZeile.text.includes('1 Schatzkarte'), 'die Siegzeile nennt die tatsaechlich gezogene Piñata-Karte');
+}
+
+// --- PIÑATA, Sieg mit Helfer:in ----------------------------------------------
+// Dieselbe Ueberschreib-Gefahr bestand fuer eine Helfer:in mit Zusage - auch
+// ihre Piñata-Karte muss in lastReward auftauchen.
+{
+  const { resolveCombatWin } = require('../server.js');
+  const pinata = findCard('PIÑATA', 'monster');
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 10).map((c) => c.id);
+  const a = makePlayer({});
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([a, b]);
+  room.treasureDeck = schaetze.slice();
+  room.combat = { actorId: a.id, helperId: b.id, monsterIds: [pinata.id], actorModifier: 0,
+    monsterModifier: 0, treasureDelta: 0, helperReward: 1, backstabs: {} };
+  resolveCombatWin(room);
+  assert.strictEqual(b.hand.length, 1, 'die Helfer:in bekommt ihre Piñata-Karte');
+  assert.strictEqual(b.lastReward.cardIds.length, 1, 'und lastReward nennt sie auch');
+  assert.strictEqual(b.lastReward.cardIds[0], b.hand[0]);
+}
+
+// --- PIÑATA, Schatzstapel reicht nicht fuer alle -----------------------------
+// Die Log-Zeile behauptete bisher immer "jede:r am Tisch zieht 1
+// Schatzkarte", auch wenn der Stapel (und der leere Ablagestapel) das gar
+// nicht hergaben.
+{
+  const { resolveCombatWin } = require('../server.js');
+  const pinata = findCard('PIÑATA', 'monster');
+  const zweiSchaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 2).map((c) => c.id);
+  const a = makePlayer({});
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c5 = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([a, b, c5]);
+  room.treasureDeck = zweiSchaetze.slice();
+  room.treasureDiscard = [];
+  room.combat = { actorId: a.id, helperId: null, monsterIds: [pinata.id], actorModifier: 0,
+    monsterModifier: 0, treasureDelta: 0, helperReward: 0, backstabs: {} };
+  resolveCombatWin(room);
+  const pinataZeile = room.logs.find((l) => l.text.includes('Piñata platzt'));
+  assert.ok(pinataZeile, 'Piñata-Zeile vorhanden');
+  assert.ok(!pinataZeile.text.includes('jede:r am Tisch zieht 1 Schatzkarte.'),
+    'die Zeile darf nicht mehr Karten behaupten als tatsaechlich gezogen wurden');
+  assert.ok(pinataZeile.text.includes('2 von 3'), 'die Zeile nennt die tatsaechliche Zahl');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
