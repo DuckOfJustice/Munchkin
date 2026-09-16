@@ -440,10 +440,16 @@ function baseStrength(player, room) {
 
 function conditionalItemBonusSum(player, monsters, untot) {
   if (!player || !monsters || !monsters.length) return 0;
+  // EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
+  // Schaden." Verdoppeln heisst: den gedruckten Bonus ein zweites Mal
+  // dazuzaehlen. Generisch ueber FIRE_ITEMS, damit neue Feuergegenstaende
+  // automatisch mitzaehlen.
+  const eisriese = monsters.some((m) => m && m.name === 'EISRIESE');
   return equippedItemIds(player).reduce((sum, id) => {
     const c = card(id);
     const fn = c && ITEM_CONDITIONAL_BONUS[c.name];
-    return sum + (fn ? fn(player, monsters, !!untot) : 0);
+    const feuer = (eisriese && c && FIRE_ITEMS.has(c.name)) ? (c.bonus || 0) : 0;
+    return sum + (fn ? fn(player, monsters, !!untot) : 0) + feuer;
   }, 0);
 }
 

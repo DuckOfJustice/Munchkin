@@ -312,6 +312,21 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.ok(gegenJungfern > 0, 'Ruestung und Stufe zaehlen weiter');
 }
 
+// --- EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
+// Schaden." ------------------------------------------------------------------
+{
+  const feuer = findCard('FLAMMENDE RÜSTUNG');
+  const staerke = (monsterName) => {
+    const m = findCard(monsterName, 'monster');
+    const p = makePlayer({ equipped: Object.assign(newEquipped(), { armor: feuer.id }) });
+    const room = makeRoom([p]);
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [m.id], actorModifier: 0, monsterModifier: 0, backstabs: {} };
+    return combatTotals(room).playerStrength;
+  };
+  assert.strictEqual(staerke('EISRIESE') - staerke('PESTRATTEN'), feuer.bonus,
+    'gegen den Eisriesen zaehlt die Flammende Ruestung doppelt');
+}
+
 // --- SL-Monster, Schlimme Dinge ---------------------------------------------
 // "Halblinge verlieren eine Stufe. Elfen verlieren zwei Stufen. Maenner
 // verlieren eine zusaetzliche Stufe und muessen eine Karte ablegen.
