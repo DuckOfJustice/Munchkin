@@ -801,6 +801,7 @@ git commit -m "Unnatural Axe: Katzenmaedchen wuerfelt die Zahl der abgelegten Ka
   const p = makePlayer({});
   const room = makeRoom([p]);
   const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
   assert.strictEqual(spec.type, 'choice', 'die Karte laesst waehlen');
   assert.strictEqual(spec.options.length, 2, 'genau zwei Moeglichkeiten');
   const ids = spec.options.map((o) => o.action.type).sort();
@@ -814,6 +815,7 @@ git commit -m "Unnatural Axe: Katzenmaedchen wuerfelt die Zahl der abgelegten Ka
   const p = makePlayer({ hand: fueller.slice() });
   const room = makeRoom([p]);
   const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
   const handOption = spec.options.find((o) => o.action.type === 'discardWholeHand');
   applyPrimitiveAction(room, p, handOption.action);
   assert.strictEqual(p.hand.length, 0, 'die Hand ist weg');

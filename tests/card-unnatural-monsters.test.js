@@ -246,6 +246,7 @@ const PRIESTER = findCard('PRIESTER', 'class');
   const p = makePlayer({});
   const room = makeRoom([p]);
   const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
   assert.strictEqual(spec.type, 'choice', 'die Karte laesst waehlen');
   assert.strictEqual(spec.options.length, 2, 'genau zwei Moeglichkeiten');
   const ids = spec.options.map((o) => o.action.type).sort();
@@ -259,9 +260,33 @@ const PRIESTER = findCard('PRIESTER', 'class');
   const p = makePlayer({ hand: fueller.slice() });
   const room = makeRoom([p]);
   const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
   const handOption = spec.options.find((o) => o.action.type === 'discardWholeHand');
   applyPrimitiveAction(room, p, handOption.action);
   assert.strictEqual(p.hand.length, 0, 'die Hand ist weg');
+}
+{
+  // Der kleine Gegenstände-Zweig wird geprüft - ein großer und zwei kleine
+  // Gegenstände. Der count muss exakt 2 sein (nur die kleinen zählen).
+  // Mit vertauschtem Filter-Vorzeichen würde count = 1 sein (nur der große).
+  // Damit wird sichergestellt dass istGrosserGegenstand korrekt filtert.
+  const ptero = findCard('PTERODAKTYL', 'monster');
+  const bigCard = findCard('STANGE, 11-FUSS');  // bekanntermaßen groß
+  const smallCards = ALL_CARDS.filter((c) => c.type === 'treasure' && c.name !== 'STANGE, 11-FUSS').slice(0, 2);
+  assert.ok(bigCard, 'STANGE, 11-FUSS existiert');
+  assert.strictEqual(smallCards.length, 2, 'es gibt zwei kleine Gegenstände zum Testen');
+  const e = newEquipped();
+  e.head = bigCard.id;        // großer Gegenstand
+  e.armor = smallCards[0].id; // erster kleiner Gegenstand
+  e.feet = smallCards[1].id;  // zweiter kleiner Gegenstand
+  const p = makePlayer({ equipped: e });
+  const room = makeRoom([p]);
+  const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
+  const kleinOption = spec.options.find((o) => o.action.type === 'queuedDiscardOwn');
+  assert.ok(kleinOption, 'kleine Gegenstände-Option existiert');
+  assert.strictEqual(kleinOption.action.count, 2,
+    'count ist 2: nur die zwei kleinen zählen, der große nicht');
 }
 
 // --- SL-Monster, Schlimme Dinge ---------------------------------------------
