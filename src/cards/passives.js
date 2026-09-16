@@ -37,12 +37,21 @@ module.exports = (ctx) => {
     'FEUERLÖSCHER': (p) => p.level <= 2,   // "Greift niemanden mit Stufe 2 oder niedriger an."
     'TENTAKELDÄMON': (p) => p.level <= 2,  // "Greift niemanden mit Stufe 2 oder niedriger an."
     'JABBERWOCK': (p) => p.level <= 4,     // "Greift niemanden mit Stufe 4 oder niedriger an."
+    // "Greift keine Frauen an oder Traeger des Stacheligen Genitalschoners."
+    // ponytail: nur die Geschlechts-Klausel. Der STACHELIGE GENITALSCHONER
+    // liegt in den Rohdaten als treasure_other ohne slotKind und laesst sich
+    // deshalb gar nicht tragen - die Klausel kommt in der Runde nach, in der
+    // die Unnatural-Axe-Schatzkarten ihren Slot bekommen.
+    'PSYCHO-EICHHÖRNCHEN': (p) => istGeschlecht(p, 'w'),
+    // "Fluechtet vor Orks, statt anzugreifen und hinterlaesst den Schatz."
+    'PESTRATTEN': (p) => hasRace(p, 'ORK'),
   };
 
   // Monster aus MONSTER_REFUSES, die beim Weiterziehen trotzdem etwas
   // dalassen: Kartenname -> Anzahl Schatzkarten.
   const MONSTER_REFUSES_TREASURE = {
     'AMAZONE': 1,
+    'PESTRATTEN': 2,  // "... und hinterlaesst den Schatz." - die Karte nennt 2 Schaetze.
   };
 
   // --- Monster, die eine Rasse automatisch totstampft ----------------------

@@ -223,5 +223,22 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(b.hand.length + c2.hand.length, 2, 'und liegen bei den anderen');
 }
 
+// --- Monster, die bestimmte Leute gar nicht angreifen -----------------------
+{
+  // "Greift keine Frauen an oder Traeger des Stacheligen Genitalschoners."
+  const m = findCard('PSYCHO-EICHHÖRNCHEN', 'monster');
+  assert.ok(monsterRefusesTarget(m.id, makePlayer({ gender: 'w' })), 'Frauen werden nicht angegriffen');
+  assert.ok(!monsterRefusesTarget(m.id, makePlayer({ gender: 'm' })), 'Maenner schon');
+}
+{
+  // "Fluechtet vor Orks, statt anzugreifen und hinterlaesst den Schatz."
+  const m = findCard('PESTRATTEN', 'monster');
+  assert.ok(monsterRefusesTarget(m.id, makePlayer({ races: [ORK.id] })), 'vor Orks fluechten sie');
+  assert.ok(!monsterRefusesTarget(m.id, makePlayer({})), 'alle anderen muessen kaempfen');
+  const { MONSTER_REFUSES_TREASURE } = require('../server.js');
+  assert.strictEqual(MONSTER_REFUSES_TREASURE['PESTRATTEN'], m.treasureCount,
+    'der hinterlassene Schatz entspricht dem Schatzwert der Karte');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');
