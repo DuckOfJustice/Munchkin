@@ -33,7 +33,7 @@
 - Consumes: `MONSTER_TRAIT_BONUS` mit den drei erlaubten Schreibweisen (`{races|classes, bonus}`, Regel-Array, `{wennErfuellt, bonus}`)
 - Produces: die Testhelfer `findCard`, `makePlayer`, `makeRoom`, `monsterStaerke(monsterName, player)`, die alle folgenden Tasks weiterbenutzen
 
-- [ ] **Step 1: Testdatei mit Helfern und den Bonus-Fällen anlegen**
+- [x] **Step 1: Testdatei mit Helfern und den Bonus-Fällen anlegen**
 
 `tests/card-unnatural-monsters.test.js`:
 
@@ -135,12 +135,12 @@ raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.
 console.log('card-unnatural-monsters: ok');
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `KATZENMÄDCHEN: erwartet 5, gemessen 0`
 
-- [ ] **Step 3: Die Tabellenzeilen ergänzen**
+- [x] **Step 3: Die Tabellenzeilen ergänzen**
 
 In `src/cards/passives.js`, in `MONSTER_TRAIT_BONUS` hinter dem Block der Clerical-Errors-Einträge:
 
@@ -159,16 +159,16 @@ In `src/cards/passives.js`, in `MONSTER_TRAIT_BONUS` hinter dem Block der Cleric
     'WEIHNACHTSMANN': { races: ['ELF'], bonus: -5 },                               // "-5 gegen Elfen. Der Narr vertraut den Elfen."
 ```
 
-- [ ] **Step 4: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 4: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: `card-unnatural-monsters: ok` und `27/27 Tests erfolgreich.`
 
-- [ ] **Step 5: Gegenprobe**
+- [x] **Step 5: Gegenprobe**
 
 Eine Zeile (z. B. `'JUDGE FREDD'`) auskommentieren, `node tests/card-unnatural-monsters.test.js` muss rot werden, Zeile zurück.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/cards/passives.js tests/card-unnatural-monsters.test.js
@@ -187,7 +187,7 @@ git commit -m "Unnatural Axe: Monsterboni der Monsterkarten"
 - Consumes: `MONSTER_REFUSES` als `{ [name]: (player) => boolean }`, `FLEE_MONSTER_MOD` als `{ [name]: number }`
 - Produces: nichts Neues
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 Import-Zeile der Testdatei erweitern zu:
 
@@ -227,12 +227,12 @@ Vor der Aufräumzeile am Dateiende einfügen:
 });
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `FEUERLÖSCHER darf Stufe 2 nicht angreifen`
 
-- [ ] **Step 3: Tabellenzeilen ergänzen**
+- [x] **Step 3: Tabellenzeilen ergänzen**
 
 In `MONSTER_REFUSES`:
 
@@ -250,16 +250,16 @@ In `FLEE_MONSTER_MOD`:
     'PESTRATTEN': -1,     // "Alle anderen muessen kaempfen und erhalten -1 fuer Weglaufen."
 ```
 
-- [ ] **Step 4: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 4: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 5: Gegenprobe**
+- [x] **Step 5: Gegenprobe**
 
 `'JABBERWOCK': (p) => p.level <= 4,` auskommentieren → Test rot. Zurück.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/cards/passives.js tests/card-unnatural-monsters.test.js
@@ -278,7 +278,7 @@ git commit -m "Unnatural Axe: Stufengrenzen und Weglauf-Modifikatoren"
 - Consumes: Primitive `queuedDiscardOwn` (`{ type, count, quelle: 'hand', cardName, prompt }`) und `queuedTakeFromHand` (`{ type, mode: 'allOthers' }`)
 - Produces: nichts Neues
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 Import erweitern um `resolveConsequenceSpec, applyPrimitiveAction, handleResolveCardCardChoice`. Dann:
 
@@ -322,12 +322,12 @@ Import erweitern um `resolveConsequenceSpec, applyPrimitiveAction, handleResolve
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `der Bazillus braucht eine Automatik`
 
-- [ ] **Step 3: Overrides ergänzen**
+- [x] **Step 3: Overrides ergänzen**
 
 In `src/cards/consequences.js`, in `CONSEQUENCE_OVERRIDES` neben den anderen `queuedDiscardOwn`-Einträgen:
 
@@ -342,16 +342,16 @@ In `src/cards/consequences.js`, in `CONSEQUENCE_OVERRIDES` neben den anderen `qu
     'MONDJUNGFERN': () => ({ type: 'queuedTakeFromHand', mode: 'allOthers' }),
 ```
 
-- [ ] **Step 4: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 4: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 5: Gegenprobe**
+- [x] **Step 5: Gegenprobe**
 
 `'MONDJUNGFERN'`-Zeile auskommentieren → Test rot. Zurück.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/cards/consequences.js tests/card-unnatural-monsters.test.js
@@ -372,7 +372,7 @@ Damit ist Welle 1 fertig.
 - Consumes: `monsterSeesRace` wird der Fabrik heute **nicht** übergeben — die Fabrik bekommt `{ card, hasRace, hasClass, equippedItemIds, istGeschlecht }` (server.js:2564). Dieser Task erweitert den Übergabesatz um `monsterSeesRace`.
 - Produces: `istMensch(player)` innerhalb von `passives.js`
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- "Mensch" = keine Rassenkarte -------------------------------------------
@@ -394,12 +394,12 @@ Damit ist Welle 1 fertig.
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `RIESENKAKERLAKE: Menschen bekommen 5`
 
-- [ ] **Step 3: `monsterSeesRace` an die Fabrik durchreichen**
+- [x] **Step 3: `monsterSeesRace` an die Fabrik durchreichen**
 
 In `server.js` Zeile 2564 den Übergabesatz erweitern:
 
@@ -421,7 +421,7 @@ In `src/cards/passives.js` die Signatur der Fabrik entsprechend erweitern und ob
     .some((r) => monsterSeesRace(p, r));
 ```
 
-- [ ] **Step 4: Die zwei Einträge ergänzen**
+- [x] **Step 4: Die zwei Einträge ergänzen**
 
 In `MONSTER_TRAIT_BONUS`, im Unnatural-Axe-Block:
 
@@ -432,12 +432,12 @@ In `MONSTER_TRAIT_BONUS`, im Unnatural-Axe-Block:
     'GRASGNOLL': { wennErfuellt: (p) => istMensch(p), bonus: 5 },   // "+5 gegen Menschen."
 ```
 
-- [ ] **Step 5: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 5: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server.js src/cards/passives.js tests/card-unnatural-monsters.test.js
@@ -457,7 +457,7 @@ git commit -m "Unnatural Axe: Menschen-Begriff fuer Riesenkakerlake und Grasgnol
 - Consumes: `monsterTraitBonusSum(room)` ruft heute `rule.wennErfuellt(p)` auf
 - Produces: erweiterte Signatur `wennErfuellt(player, room)` — alle bestehenden Regeln ignorieren das zweite Argument
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- FEUERLÖSCHER: "Erhaelt +5, wenn dir niemand hilft." --------------------
@@ -474,12 +474,12 @@ git commit -m "Unnatural Axe: Menschen-Begriff fuer Riesenkakerlake und Grasgnol
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `ohne Hilfe ist der Loescher 5 staerker` (gemessen 0)
 
-- [ ] **Step 3: Signatur erweitern**
+- [x] **Step 3: Signatur erweitern**
 
 In `server.js`, in `monsterTraitBonusSum`, die Zeile
 
@@ -496,7 +496,7 @@ ersetzen durch
         || (rule.wennErfuellt ? rule.wennErfuellt(p, room) : false));
 ```
 
-- [ ] **Step 4: Eintrag ergänzen**
+- [x] **Step 4: Eintrag ergänzen**
 
 In `MONSTER_TRAIT_BONUS`, Unnatural-Axe-Block:
 
@@ -506,12 +506,12 @@ In `MONSTER_TRAIT_BONUS`, Unnatural-Axe-Block:
     'FEUERLÖSCHER': { wennErfuellt: (p, room) => !(room.combat && room.combat.helperId), bonus: 5 },
 ```
 
-- [ ] **Step 5: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 5: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün. Besonders `tests/card-clerical-monsters.test.js` muss grün bleiben — dort hängen die bestehenden `wennErfuellt`-Regeln.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server.js src/cards/passives.js tests/card-unnatural-monsters.test.js
@@ -530,7 +530,7 @@ git commit -m "Unnatural Axe: Feuerloescher-Bonus ohne Hilfe, wennErfuellt sieht
 - Consumes: `istGeschlecht(player, 'w')` aus der Fabrik-Übergabe
 - Produces: nichts Neues
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT -------------------------
@@ -570,12 +570,12 @@ git commit -m "Unnatural Axe: Feuerloescher-Bonus ohne Hilfe, wennErfuellt sieht
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `Zwerge +4`
 
-- [ ] **Step 3: Eintrag ergänzen**
+- [x] **Step 3: Eintrag ergänzen**
 
 ```js
     // "+4 gegen Zwerge, +2 gegen Frauen, -3 gegen Zauberer, -2 am Samstag."
@@ -591,12 +591,12 @@ Expected: FAIL — `Zwerge +4`
     ],
 ```
 
-- [ ] **Step 4: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 4: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/cards/passives.js tests/card-unnatural-monsters.test.js
@@ -615,7 +615,7 @@ git commit -m "Unnatural Axe: der vierteilige Bonus des SL-Monsters"
 - Consumes: `MONSTER_REFUSES_TREASURE` als `{ [name]: anzahlSchaetze }` (Vorbild AMAZONE)
 - Produces: nichts Neues
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- Monster, die bestimmte Leute gar nicht angreifen -----------------------
@@ -636,12 +636,12 @@ git commit -m "Unnatural Axe: der vierteilige Bonus des SL-Monsters"
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `Frauen werden nicht angegriffen`
 
-- [ ] **Step 3: `MONSTER_REFUSES_TREASURE` exportieren**
+- [x] **Step 3: `MONSTER_REFUSES_TREASURE` exportieren**
 
 Die Konstante wird in server.js:2553 aus der Fabrik entnommen, steht aber **nicht** in `module.exports` — nachgeprüft: `require('./server.js').MONSTER_REFUSES_TREASURE` ist heute `undefined`. In `module.exports` neben `MONSTER_REFUSES` ergänzen:
 
@@ -651,7 +651,7 @@ Die Konstante wird in server.js:2553 aus der Fabrik entnommen, steht aber **nich
 
 (die bestehende Export-Zeile um `MONSTER_REFUSES_TREASURE` erweitern, Reihenfolge sonst unverändert lassen)
 
-- [ ] **Step 4: Einträge ergänzen**
+- [x] **Step 4: Einträge ergänzen**
 
 In `MONSTER_REFUSES`:
 
@@ -672,12 +672,12 @@ In `MONSTER_REFUSES_TREASURE`:
     'PESTRATTEN': 2,  // "... und hinterlaesst den Schatz." - die Karte nennt 2 Schaetze.
 ```
 
-- [ ] **Step 5: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 5: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server.js src/cards/passives.js tests/card-unnatural-monsters.test.js
@@ -697,7 +697,7 @@ git commit -m "Unnatural Axe: Eichhoernchen und Pestratten verweigern den Kampf"
 - Consumes: `wurfMitFenster(room, player, zweck, (roll) => beschreibung)` — der zentrale Wurf inklusive Reaktionsfenster; `queuedDiscardOwn` als Folgeaktion
 - Produces: Primitiv `{ type: 'diceDiscardHand', cardName }`
 
-- [ ] **Step 1: Vorbild kennen**
+- [x] **Step 1: Vorbild kennen**
 
 Die Wurf-Hilfsfunktion heißt `wurfMitFenster(room, player, zweck, (roll) => beschreibung)` — sie öffnet bei Bedarf das Reaktionsfenster (GEZINKTER WÜRFEL) und ruft den Rückruf mit der Augenzahl auf; der Rückruf gibt den Beschreibungstext zurück. Vorbild ist `case 'diceLevelLoss'` (server.js:1410):
 
@@ -709,7 +709,7 @@ Die Wurf-Hilfsfunktion heißt `wurfMitFenster(room, player, zweck, (roll) => bes
       });
 ```
 
-- [ ] **Step 2: Test ergänzen**
+- [x] **Step 2: Test ergänzen**
 
 ```js
 // --- KATZENMÄDCHEN: "Wirf den Wuerfel und lege so viele Karten ab." ---------
@@ -735,12 +735,12 @@ Die Wurf-Hilfsfunktion heißt `wurfMitFenster(room, player, zweck, (roll) => bes
 }
 ```
 
-- [ ] **Step 3: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 3: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — der Spec liefert `null`, `applyPrimitiveAction` bekommt `null`.
 
-- [ ] **Step 4: Primitiv ergänzen**
+- [x] **Step 4: Primitiv ergänzen**
 
 In `server.js`, in `applyPrimitiveAction` direkt hinter `case 'diceLevelLoss':`:
 
@@ -758,7 +758,7 @@ In `server.js`, in `applyPrimitiveAction` direkt hinter `case 'diceLevelLoss':`:
       });
 ```
 
-- [ ] **Step 5: Override ergänzen**
+- [x] **Step 5: Override ergänzen**
 
 In `src/cards/consequences.js`:
 
@@ -768,12 +768,12 @@ In `src/cards/consequences.js`:
     'KATZENMÄDCHEN': () => ({ type: 'diceDiscardHand', cardName: 'KATZENMÄDCHEN' }),
 ```
 
-- [ ] **Step 6: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 6: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add server.js src/cards/consequences.js tests/card-unnatural-monsters.test.js
@@ -792,7 +792,7 @@ git commit -m "Unnatural Axe: Katzenmaedchen wuerfelt die Zahl der abgelegten Ka
 - Consumes: `choice`-Spec (`{ type: 'choice', options: [{ id, label, action }] }`), Primitive `discardWholeHand` und `queuedDiscardOwn` mit `quelle: 'kleineGegenstaende'`
 - Produces: nichts Neues
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- PTERODAKTYL: "Lege deine ganze Hand ODER alle kleinen Gegenstaende ab" -
@@ -822,12 +822,12 @@ git commit -m "Unnatural Axe: Katzenmaedchen wuerfelt die Zahl der abgelegten Ka
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `spec` ist `null`, Zugriff auf `.type` wirft.
 
-- [ ] **Step 3: Override ergänzen**
+- [x] **Step 3: Override ergänzen**
 
 ```js
     // "Er hebt dich auf und laesst dich aus grosser Hoehe fallen. Lege deine
@@ -858,12 +858,12 @@ Dafür oberhalb der Tabelle eine Hilfszeile ergänzen — `istGrosserGegenstand`
 
 `equippedItemIds` und `istGrosserGegenstand` stehen bereits im Übergabesatz der Fabrik (server.js:1913-1917) — hier ist nichts nachzureichen.
 
-- [ ] **Step 4: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 4: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/cards/consequences.js tests/card-unnatural-monsters.test.js
@@ -882,7 +882,7 @@ git commit -m "Unnatural Axe: Pterodaktyl laesst zwischen Hand und kleinen Gegen
 - Consumes: `combo` (`{ type: 'combo', actions: [...] }`), `levelDelta`, `queuedDiscardOwn`
 - Produces: nichts Neues
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- SL-Monster, Schlimme Dinge ---------------------------------------------
@@ -910,12 +910,12 @@ git commit -m "Unnatural Axe: Pterodaktyl laesst zwischen Hand und kleinen Gegen
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `das SL-Monster braucht eine Automatik`
 
-- [ ] **Step 3: Override ergänzen**
+- [x] **Step 3: Override ergänzen**
 
 ```js
     // "Halblinge verlieren eine Stufe. Elfen verlieren zwei Stufen. Maenner
@@ -936,12 +936,12 @@ Expected: FAIL — `das SL-Monster braucht eine Automatik`
     },
 ```
 
-- [ ] **Step 4: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 4: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/cards/consequences.js tests/card-unnatural-monsters.test.js
@@ -961,7 +961,7 @@ git commit -m "Unnatural Axe: die vierteiligen Schlimmen Dinge des SL-Monsters"
 - Consumes: `combatTotals` berechnet `items` je Person; `curseSuppressesItemBonuses` ist das Vorbild für „Boni ausblenden, aber nicht alle"
 - Produces: `MONSTER_IGNORES_WEAPONS` (Set von Monsternamen)
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- MONDJUNGFERN: "In diesem Kampf erhaeltst du keine Vorteile durch Waffen"
@@ -984,12 +984,12 @@ git commit -m "Unnatural Axe: die vierteiligen Schlimmen Dinge des SL-Monsters"
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — Differenz 0 statt `waffe.bonus`
 
-- [ ] **Step 3: Tabelle anlegen**
+- [x] **Step 3: Tabelle anlegen**
 
 In `src/cards/passives.js` neben `MONSTER_IGNORES_BONUSES`:
 
@@ -1005,7 +1005,7 @@ In `src/cards/passives.js` neben `MONSTER_IGNORES_BONUSES`:
 
 Am Ende der Fabrik im Rückgabeobjekt ergänzen (dort, wo auch `MONSTER_IGNORES_BONUSES` steht).
 
-- [ ] **Step 4: In `server.js` übernehmen und anwenden**
+- [x] **Step 4: In `server.js` übernehmen und anwenden**
 
 Den Namen in die Destrukturierung bei server.js:2555 aufnehmen. Dann in `combatTotals` die Item-Berechnung erweitern:
 
@@ -1034,12 +1034,12 @@ function waffenBonusSum(player) {
 }
 ```
 
-- [ ] **Step 5: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 5: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server.js src/cards/passives.js tests/card-unnatural-monsters.test.js
@@ -1058,7 +1058,7 @@ git commit -m "Unnatural Axe: gegen die Mondjungfern zaehlen Waffen nicht"
 - Consumes: `FIRE_ITEMS` (Set, heute `FLAMMENDE RÜSTUNG` und `NAPALMSTAB`)
 - Produces: nichts Neues
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
@@ -1077,12 +1077,12 @@ git commit -m "Unnatural Axe: gegen die Mondjungfern zaehlen Waffen nicht"
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — Differenz 0
 
-- [ ] **Step 3: Regel ergänzen**
+- [x] **Step 3: Regel ergänzen**
 
 In `server.js`, `conditionalItemBonusSum`:
 
@@ -1103,12 +1103,12 @@ function conditionalItemBonusSum(player, monsters, untot) {
 }
 ```
 
-- [ ] **Step 4: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 4: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add server.js tests/card-unnatural-monsters.test.js
@@ -1127,12 +1127,12 @@ git commit -m "Unnatural Axe: Feuergegenstaende wirken doppelt gegen den Eisries
 - Consumes: der Verstärker-Zweig, der heute schon den RAPIER-TROTTEL verdoppelt
 - Produces: nichts Neues
 
-- [ ] **Step 1: Vorbild lesen**
+- [x] **Step 1: Vorbild lesen**
 
 Run: `grep -n "RAPIER-TROTTEL" -A 8 server.js`
 Dort steht das Muster: aus den Monstern im Kampf einen Sonderfall ableiten und den `zuschlag` ändern, bevor er in `monsterModifier` und `enhancerBonus` fließt.
 
-- [ ] **Step 2: Test ergänzen**
+- [x] **Step 2: Test ergänzen**
 
 Import erweitern um `handlePlayCombatCard`.
 
@@ -1157,12 +1157,12 @@ Import erweitern um `handlePlayCombatCard`.
 }
 ```
 
-- [ ] **Step 3: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 3: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `auf dem Fungus sind es 25` (gemessen 10)
 
-- [ ] **Step 4: Sonderfall ergänzen**
+- [x] **Step 4: Sonderfall ergänzen**
 
 Im Verstärker-Zweig von `handlePlayCombatCard`, direkt neben der Trottel-Zeile:
 
@@ -1182,12 +1182,12 @@ und die Zuschlagszeile erweitern:
 
 Den Logtext gleich mitziehen, damit die Zahl im Verlauf stimmt — dort steht heute `${trottel ? c.bonus * 2 : c.bonus}`; daraus wird `${zuschlag}`.
 
-- [ ] **Step 5: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 5: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server.js tests/card-unnatural-monsters.test.js
@@ -1206,7 +1206,7 @@ git commit -m "Unnatural Axe: Gigantischer Fungus gibt 25 statt 10"
 - Consumes: `wennErfuellt(player, room)` aus Task 5 — die Kombi-Regel braucht die Monsterliste des Kampfes
 - Produces: nichts Neues
 
-- [ ] **Step 1: Test ergänzen**
+- [x] **Step 1: Test ergänzen**
 
 ```js
 // --- ROTZ-ELEMENTAR mit Laufender Nase / Schattennase -----------------------
@@ -1227,12 +1227,12 @@ git commit -m "Unnatural Axe: Gigantischer Fungus gibt 25 statt 10"
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — der Kombi-Bonus fehlt
 
-- [ ] **Step 3: Einträge ergänzen**
+- [x] **Step 3: Einträge ergänzen**
 
 Den ROTZ-ELEMENTAR-Eintrag aus Task 1 zu einem Regel-Array erweitern:
 
@@ -1255,12 +1255,12 @@ In `FLEE_IMPOSSIBLE`:
     'DIE SCHATTENNASE',  // "Du kannst nicht fluechten und wirst automatisch gefangen."
 ```
 
-- [ ] **Step 4: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 4: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/cards/passives.js tests/card-unnatural-monsters.test.js
@@ -1280,7 +1280,7 @@ git commit -m "Unnatural Axe: Rotz-Elementar mit der Nase, Schattennase ohne Flu
 - Consumes: `resolveCombatWin` verteilt heute nur an `actor` und `helper`; `playerQueueFrom(room, player, 'after')` liefert die Zugreihenfolge ab der nächsten Person; `openQueuedCardAction` für die Fremdauswahl
 - Produces: Primitiv `{ type: 'queuedDiscardItemOfVictim' }`
 
-- [ ] **Step 1: Test für die Schlimmen Dinge ergänzen**
+- [x] **Step 1: Test für die Schlimmen Dinge ergänzen**
 
 ```js
 // --- PIÑATA, Niederlage -----------------------------------------------------
@@ -1303,12 +1303,12 @@ git commit -m "Unnatural Axe: Rotz-Elementar mit der Nase, Schattennase ohne Flu
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag prüfen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js`
 Expected: FAIL — `jemand muss waehlen`
 
-- [ ] **Step 3: Primitiv ergänzen**
+- [x] **Step 3: Primitiv ergänzen**
 
 In `server.js`, in `applyPrimitiveAction` direkt hinter `case 'queuedTakeItem':`:
 
@@ -1351,7 +1351,7 @@ In `handleResolveCardCardChoice` einen Zweig neben `pa.takeFrom` und `pa.giveTo`
     log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" von ${opfer.name} abgelegt.`, [chosenCardId]);
 ```
 
-- [ ] **Step 4: Override ergänzen**
+- [x] **Step 4: Override ergänzen**
 
 In `src/cards/consequences.js`:
 
@@ -1361,7 +1361,7 @@ In `src/cards/consequences.js`:
     'PIÑATA': () => ({ type: 'queuedDiscardItemOfVictim', cardName: 'PIÑATA' }),
 ```
 
-- [ ] **Step 5: Test für den Sieg ergänzen**
+- [x] **Step 5: Test für den Sieg ergänzen**
 
 ```js
 // --- PIÑATA, Sieg -----------------------------------------------------------
@@ -1385,7 +1385,7 @@ In `src/cards/consequences.js`:
 }
 ```
 
-- [ ] **Step 6: Sieg-Hook ergänzen**
+- [x] **Step 6: Sieg-Hook ergänzen**
 
 In `resolveCombatWin`, direkt vor der Zeile `const treasureCount = c.treasureDelta ? ... : baseTreasures;`:
 
@@ -1411,12 +1411,12 @@ In `resolveCombatWin`, direkt vor der Zeile `const treasureCount = c.treasureDel
 
 Der reguläre Beutezug darunter zieht bei `treasureCount === 0` ohnehin nichts, weil die Karte `treasureCount: 0` hat — also keine doppelte Ausschüttung. Das im Test mit `a.hand.length === 1` absichern.
 
-- [ ] **Step 7: Test laufen lassen, Erfolg prüfen**
+- [x] **Step 7: Test laufen lassen, Erfolg prüfen**
 
 Run: `node tests/card-unnatural-monsters.test.js && npm test`
 Expected: beide grün.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add server.js src/cards/consequences.js tests/card-unnatural-monsters.test.js
@@ -1431,14 +1431,14 @@ git commit -m "Unnatural Axe: Pinata beschenkt den Tisch und kostet bei Niederla
 - Modify: `HANDOVER.md`
 - Modify: `docs/superpowers/plans/2026-09-16-unnatural-axe-monster.md` (Haken setzen)
 
-- [ ] **Step 1: Abdeckung messen**
+- [x] **Step 1: Abdeckung messen**
 
 Run: `node tools/coverage-scan.js unnaturalaxe`
 Erwartet: Im Abschnitt MONSTER stehen nur noch RIESENSTINKTIER, LUSTMONSTER und WEIHNACHTSMANN — die drei zurückgestellten Welle-3-Karten.
 
 Steht dort etwas anderes, ist eine Regel aus diesem Plan nicht angekommen: den zugehörigen Task nachsehen.
 
-- [ ] **Step 2: Die zwei Teilabdeckungen im Code markieren**
+- [x] **Step 2: Die zwei Teilabdeckungen im Code markieren**
 
 In `src/cards/consequences.js` über den bestehenden Einträgen:
 
@@ -1455,16 +1455,16 @@ In `src/cards/consequences.js` über den bestehenden Einträgen:
     'GRASGNOLL': () => ({ type: 'levelDelta', amount: 3 }),
 ```
 
-- [ ] **Step 3: HANDOVER ergänzen**
+- [x] **Step 3: HANDOVER ergänzen**
 
 Einen neuen Abschnitt „Unnatural Axe: Monsterkarten" mit: was jetzt läuft, die zwei Teilabdeckungen (FUNGUS-Verdopplung, GRASGNOLL-Trankrückgabe), die zurückgestellte Welle 3 und den Verweis auf Spec und Plan.
 
-- [ ] **Step 4: Volle Prüfung**
+- [x] **Step 4: Volle Prüfung**
 
 Run: `npm test && node tools/coverage-scan.js unnaturalaxe`
 Expected: `27/27 Tests erfolgreich.` plus die erwartete Restliste.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add HANDOVER.md src/cards/consequences.js docs/superpowers/plans/2026-09-16-unnatural-axe-monster.md

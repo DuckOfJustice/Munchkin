@@ -62,8 +62,9 @@ module.exports = (ctx) => {
 
     // --- Rassen-bedingte Stufenzahl ---
     'ZUNGENDÄMON': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 3 : 2 }),
-    // Verdopplung bei angehängtem "Gigantisch" wird nicht erkannt (dafür gibt
-    // es kein Datenfeld an dieser Stelle) - Basis-Effekt wird trotzdem berechnet:
+    // ponytail: "Verdoppelt die Strafe, wenn der Fungus Gigantisch ist" fehlt -
+    // die Konsequenz weiss nicht, welche Verstaerker im Kampf lagen. Aufruestweg:
+    // den Verstaerker-Zustand in die Konsequenz durchreichen.
     'FUNGUS': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 2 : 1 }),
 
     // --- Bedingt auf aktuellen Ausrüstungszustand (zum Zeitpunkt der Konsequenz bekannt) ---
@@ -79,8 +80,8 @@ module.exports = (ctx) => {
     // "Kratzer und Allergien. Wirf den Wuerfel und lege so viele Karten aus
     // deiner Hand ab."
     'KATZENMÄDCHEN': () => ({ type: 'diceDiscardHand', cardName: 'KATZENMÄDCHEN' }),
-    // "+1 Stufe zurück je sofort abgelegtem Trank" wird nicht erkannt (kein
-    // Datenfeld für "Trank") - nur der garantierte Basis-Verlust:
+    // ponytail: "Du erhaeltst eine Stufe zurueck fuer jeden Trank, den du SOFORT
+    // ablegst" fehlt - ein Zeitfenster fuer freiwilliges Ablegen gibt es nicht.
     'GRASGNOLL': () => ({ type: 'levelDelta', amount: 3 }),
 
     // --- Werte-/textbasierter Gegenstandsverlust ---

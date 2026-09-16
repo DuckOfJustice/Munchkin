@@ -1098,3 +1098,118 @@ Dinge aller. Mit dem Nutzer abgestimmt, eigene Runde.
 `GUARANTEED_FLEE_CARDS` beenden weiterhin nur die eigene Flucht ohne
 Stufenstrafe und ohne Kleberfläschchen-Fenster (`// ponytail:` am Code) — neu
 ist nur, dass danach die Helfer:in trotzdem selbst laufen muss.
+
+---
+
+## 11. Unnatural Axe: Monsterkarten (Runde vom 2026-09-16)
+
+Drittes Set, gleiche Bauform wie Clerical Errors. Spec und Plan:
+`docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md` und
+`docs/superpowers/plans/2026-09-16-unnatural-axe-monster.md` (16 Tasks,
+alle abgehakt).
+
+### 11.1 Was jetzt läuft
+
+- **Monsterboni** über `MONSTER_TRAIT_BONUS` (src/cards/passives.js): der
+  Normalfall bleibt `{ races/classes: [...], bonus }`, alles Textliche ohne
+  Rasse/Klasse (Geschlecht, Wochentag, Ausrüstungszahl, Kampfzustand) läuft
+  über `{ wennErfuellt: (p, room) => bool, bonus }`.
+- **Stufengrenzen** (`monsterRefusesTarget`/`MONSTER_REFUSES`) und
+  **Weglauf-Modifikatoren** (`FLEE_MONSTER_MOD`, `FLEE_IMPOSSIBLE`) um die
+  Unnatural-Axe-Monster erweitert (FEUERLÖSCHER, TENTAKELDÄMON, JABBERWOCK,
+  PSYCHO-EICHHÖRNCHEN, PESTRATTEN, DIE SCHATTENNASE).
+- **`istMensch(p)`** (src/cards/passives.js): "keine Rassenkarte" - für
+  RIESENKAKERLAKE und GRASGNOLL, die beide gegen Menschen bonusieren.
+- **`wennErfuellt` bekommt jetzt den Raum** (zweiter Parameter, optional),
+  nicht nur den Spieler - nötig für alles, was am Kampfzustand statt an der
+  Person hängt: FEUERLÖSCHER ("+5 ohne Hilfe"), ROTZ-ELEMENTAR mit LAUFENDE
+  NASE/DIE SCHATTENNASE im selben Kampf.
+- **Würfel-Ablege-Primitiv** `diceDiscardHand` (server.js, `applyPrimitiveAction`):
+  würfelt und legt so viele Handkarten ab wie gewürfelt, gedeckelt auf die
+  tatsächliche Handkartenzahl. Träger: KATZENMÄDCHEN.
+- **Waffen-Ausblendung** `MONSTER_IGNORES_WEAPONS` (Set): MONDJUNGFERN zählt
+  keinen Waffenbonus - "Waffe" heißt wie bei `waffenAnzahl` "belegt eine
+  Hand", ein Schild zählt mit.
+- **Feuer-Verdopplung**: `conditionalItemBonusSum` verdoppelt gegen den
+  EISRIESEN jeden Gegenstand aus `FIRE_ITEMS` (Feuer/Flamme-Text), generisch
+  statt kuratierte Liste - neue Feuergegenstände zählen automatisch mit.
+- **Gigantischer Fungus**: `handlePlayCombatCard` erkennt GIGANTISCH auf
+  einem FUNGUS und gibt +25 statt der gedruckten +10 (`zuschlag` statt
+  `c.bonus`, siehe Commit "Einblendung im Kampf nennt jetzt denselben Bonus
+  wie der Verlauf" - Verlauf und `room.cardPlay.hinweis` bezogen sich vorher
+  auf unterschiedliche Werte).
+- **PIÑATA**: Niederlage kostet die nachfolgende Person die Wahl eines
+  Gegenstands des Opfers (der Gegenstand geht in den Ablagestapel, nicht an
+  die wählende Person - Spiegelbild zu `queuedTakeItem`, siehe
+  `discardVictim`). Sieg gibt einen Sieg-Hook für den **ganzen Tisch**:
+  `resolveCombatWin` erkennt PIÑATA unter den Monstern und lässt jede Person
+  am Tisch einen Schatz ziehen, unabhängig von der Kampfteilnahme.
+
+### 11.2 Was bewusst nur teilweise abgedeckt ist
+
+Markiert im Code mit `// ponytail:`, jeweils mit Aufrüstweg:
+
+- **Gigantischer Fungus, Strafenverdopplung** (`src/cards/consequences.js`,
+  Eintrag `'FUNGUS'`): die Schlimmen Dinge verdoppeln sich laut Text
+  ebenfalls, wenn der Fungus Gigantisch ist - die Konsequenz-Funktion sieht
+  aber nur `player`, nicht den Verstärker-Zustand des Kampfs. Aufrüstweg: den
+  Verstärker-Zustand in die Konsequenz durchreichen.
+- **GRASGNOLL, Trank-Rückgabe** (`src/cards/consequences.js`, Eintrag
+  `'GRASGNOLL'`): "+1 Stufe zurück je sofort abgelegtem Trank" fehlt - dafür
+  bräuchte es ein Zeitfenster für freiwilliges Ablegen während der Konsequenz,
+  das es aktuell nicht gibt. Nur der garantierte Basis-Verlust (3 Stufen)
+  läuft.
+- **PSYCHO-EICHHÖRNCHEN, Genitalschoner-Klausel** (`src/cards/passives.js`,
+  `MONSTER_REFUSES`): "Greift keine Frauen an oder Träger des Stacheligen
+  Genitalschoners" - nur die Geschlechts-Klausel ist umgesetzt. Der
+  STACHELIGE GENITALSCHONER liegt in den Rohdaten als `treasure_other` ohne
+  `slotKind` und lässt sich deshalb gar nicht anlegen; die Klausel kommt erst
+  in der Runde, in der die Unnatural-Axe-Schatzkarten ihren Ausrüstungsplatz
+  bekommen.
+
+### 11.3 Was zurückgestellt ist (Welle 3, eigener Plan nach Rücksprache)
+
+Vier Karten brauchen zugübergreifenden Zustand, den es heute nicht gibt -
+siehe Spec (Abschnitt "Wave 3") und den Anhang "Offen für Welle 3" am Ende
+von `docs/superpowers/plans/2026-09-16-unnatural-axe-monster.md`:
+
+- **RIESENSTINKTIER**: Kampftext (niemand darf helfen, hintergehen oder
+  Karten für/gegen dich spielen) und Schlimme Dinge (keine Hilfe, bis alle
+  Kleidung abgelegt ist; halber Goldwert).
+- **LUSTMONSTER**: Kampftext (Hilfe des anderen Geschlechts zwingend
+  erforderlich) und Schlimme Dinge (Stufe plus anhaltender Fluch auf
+  Hand-Gegenstände).
+- **WEIHNACHTSMANN**: nur die Schlimmen Dinge fehlen (kein Schatz, bis ein
+  Monster allein getötet wird) - der Kampfbonus (-5 gegen Elfen) läuft
+  bereits seit Task 1.
+- **EISKALTES HÄNDCHEN**: Wunschring statt Kampf, die Monsterkarte wird ein
+  +3-Gegenstand. Die Schlimmen Dinge laufen schon, offen ist nur die
+  Verwandlung in ein Ausrüstungsstück.
+
+`node tools/coverage-scan.js unnaturalaxe` zeigt im Abschnitt MONSTER
+entsprechend nur noch diese drei Karten (RIESENSTINKTIER, LUSTMONSTER,
+WEIHNACHTSMANN) - EISKALTES HÄNDCHEN läuft als `door_other`-Karte und taucht
+dort in einem anderen Abschnitt auf.
+
+### 11.4 Wartungshinweis: die Manuell-Schranke in `auto-consequence.test.js`
+
+`tests/auto-consequence.test.js` hält eine Untergrenze "mindestens N Karten
+bleiben manuell" gegen `resolveConsequenceSpec` - ein Wächter gegen zu
+großzügige Text-Regex-Regeln, die versehentlich Karten einfangen, die
+eigentlich manuell bleiben sollten. Sie wandert bei jeder Runde mit, weil
+jede Runde weitere Karten kuratiert automatisiert:
+
+27 → 20 → 12 → 9 → 7 → 6 → 5 Karten tatsächlich manuell,
+Schranke jeweils 15 → 10 → 8 → 5.
+
+Nach dieser Runde steht sie bei **exakt** ihrem Grenzwert: 5 Karten manuell,
+Schranke `assert.ok(manual >= 5, ...)`. Die nächste kuratierte
+Automatisierung senkt `manual` auf 4 und lässt die Assertion ohne Anpassung
+der Schranke fehlschlagen.
+
+**Vorschlag** (nicht umgesetzt, nur benannt): kuratierte Einträge aus der
+Zählung herausnehmen statt die Schranke bei jeder Runde weiter zu senken -
+z.B. eine feste Liste kuratierter Kartennamen, die von `manual` abgezogen
+werden, bevor die Schranke geprüft wird. Das macht die Schranke haltbar über
+mehrere Runden hinweg, statt bei jeder Runde neu kalibriert werden zu
+müssen.
