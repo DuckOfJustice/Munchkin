@@ -1412,6 +1412,17 @@ function applyPrimitiveAction(room, player, action) {
         setLevel(player, player.level - roll);
         return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
       });
+    // KATZENMÄDCHEN: "Wirf den Wuerfel und lege so viele Karten aus deiner
+    // Hand ab." Gleiche Bauform wie diceLevelLoss, nur dass die Augenzahl die
+    // Anzahl der Karten ist statt der Stufen.
+    case 'diceDiscardHand':
+      return wurfMitFenster(room, player, 'handkartenverlust', (roll) => {
+        const anzahl = Math.min(roll, player.hand.length);
+        if (!anzahl) return `Würfelwurf ${roll} -> keine Handkarten zum Ablegen`;
+        applyPrimitiveAction(room, player, { type: 'queuedDiscardOwn', count: anzahl, quelle: 'hand',
+          cardName: action.cardName || 'Schlimme Dinge', prompt: 'Eine Handkarte ablegen' });
+        return `Würfelwurf ${roll} -> ${anzahl} Handkarte(n) ablegen`;
+      });
     case 'diceThresholdDeath':
       return wurfMitFenster(room, player, 'schlimmeDinge', (roll) => {
         if (action.deathValues.includes(roll)) {

@@ -313,5 +313,29 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(stufenVerlust({ gender: 'w' }), 0, 'Frau ohne Rasse: keine Stufe, dafuer Karten');
 }
 
+// --- KATZENMÄDCHEN: "Wirf den Wuerfel und lege so viele Karten ab." ---------
+{
+  const katze = findCard('KATZENMÄDCHEN', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 6).map((c) => c.id);
+  const p = makePlayer({ hand: fueller.slice() });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  const echtesRandom = Math.random;
+  Math.random = () => 0.5; // 6 * 0.5 = 3 -> Wurf 4
+  try {
+    const spec = resolveConsequenceSpec(katze.name, katze.badstuff, p, room);
+    assert.ok(spec, 'das KATZENMÄDCHEN braucht eine Automatik');
+    applyPrimitiveAction(room, p, spec);
+  } finally {
+    Math.random = echtesRandom;
+  }
+  let gewaehlt = 0;
+  while (room.pendingCardAction && gewaehlt < 10) {
+    handleResolveCardCardChoice(room, p.id, room.pendingCardAction.candidateIds[0]);
+    gewaehlt++;
+  }
+  assert.strictEqual(gewaehlt, 4, 'bei einer 4 werden vier Karten abgelegt');
+  assert.strictEqual(p.hand.length, 2, 'von sechs bleiben zwei');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

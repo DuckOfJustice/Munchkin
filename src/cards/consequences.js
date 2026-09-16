@@ -76,6 +76,9 @@ module.exports = (ctx) => {
     '3.872 ORKS': () => ({ type: 'diceThresholdDeath', deathValues: [1, 2] }), // "bei 1/2 Tod, sonst so viele Stufen wie gewürfelt"
     'DIE TROLLE VOM TOTEN MEER': () => ({ type: 'diceLevelLoss' }),
     'FEUERLÖSCHER': () => ({ type: 'diceLevelLoss' }),
+    // "Kratzer und Allergien. Wirf den Wuerfel und lege so viele Karten aus
+    // deiner Hand ab."
+    'KATZENMÄDCHEN': () => ({ type: 'diceDiscardHand', cardName: 'KATZENMÄDCHEN' }),
     // "+1 Stufe zurück je sofort abgelegtem Trank" wird nicht erkannt (kein
     // Datenfeld für "Trank") - nur der garantierte Basis-Verlust:
     'GRASGNOLL': () => ({ type: 'levelDelta', amount: 3 }),
