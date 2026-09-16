@@ -3,7 +3,9 @@
 // als auch die kuratierte Sonderfall-Tabelle (CONSEQUENCE_OVERRIDES) über
 // resolveConsequenceSpec, inklusive tatsächlicher Zustandsänderungen.
 const assert = require('assert');
-const { parseAutoConsequence, resolveConsequenceSpec, ALL_CARDS } = require('../server.js');
+const {
+  parseAutoConsequence, resolveConsequenceSpec, ALL_CARDS, CONSEQUENCE_OVERRIDES,
+} = require('../server.js');
 
 function makePlayer(overrides) {
   return Object.assign({
@@ -97,12 +99,16 @@ function run() {
   const monsters = ALL_CARDS.filter((c) => c.category === 'monster');
   const curses = ALL_CARDS.filter((c) => c.category === 'curse');
   const defaultPlayer = makePlayer();
-  let resolved = 0, choice = 0, manual = 0;
+  let resolved = 0, choice = 0, manual = 0, manualOhneOverride = 0;
   [...monsters.map((c) => ({ name: c.name, text: c.badstuff })), ...curses.map((c) => ({ name: c.name, text: c.text }))]
     .forEach((s) => {
       const spec = resolveConsequenceSpec(s.name, s.text, defaultPlayer, room);
-      if (!spec) manual++;
-      else if (spec.type === 'choice') choice++;
+      if (!spec) {
+        manual++;
+        // Nur Karten OHNE Eintrag in CONSEQUENCE_OVERRIDES sind ueberhaupt
+        // beim generischen Textparser (parseAutoConsequence) - siehe unten.
+        if (!CONSEQUENCE_OVERRIDES[s.name]) manualOhneOverride++;
+      } else if (spec.type === 'choice') choice++;
       else resolved++;
     });
   const total = monsters.length + curses.length;
@@ -110,32 +116,25 @@ function run() {
   // Untergrenze statt exakter Zahl: neue Overrides dürfen die Abdeckung nur
   // erhöhen; ein deutlicher RÜCKGANG deutet auf eine kaputte Regel hin.
   assert.ok(resolved + choice >= 60, `Abdeckung eingebrochen: nur noch ${resolved + choice} von ${total} automatisch/Wahl (erwartet >= 60)`);
-  // Nach der Runde vom 2026-09-12 (Task 9, "Schlimme Dinge mit Fremd-
-  // beteiligung") sind sieben weitere Karten kuratiert automatisiert:
-  // HIPPOGREIF, ANWALT, LEPRACHAUN, NETZ-TROLL, VERSICHERUNGSVERTRETER,
-  // SCHNECKEN AUF SPEED (Monster) und FLUCH! EINKOMMENSSTEUER (Fluch) -
-  // GALLERT-OKTAEDER war schon vorher automatisiert und zaehlt hier nicht
-  // erneut. Die Schranke sinkt deshalb von 27 auf tatsaechlich 20 manuell;
-  // sie wird hier bewusst nur bis 15 gesenkt (statt exakt auf 20), damit
-  // etwas Spielraum bleibt. Die Schranke schuetzt weiter davor, dass eine zu
-  // grosszuegige REGEX-Regel Karten einfaengt - kuratierte Eintraege wie die
-  // sieben obigen sind davon nicht betroffen.
-  // Runde vom 2026-09-13 (Clerical Errors, Tasks 2-3): neun weitere Karten
-  // sind kuratiert dazugekommen - TEQUILA-LIEDCHEN, RÜSSELKÄFER,
-  // DOPPELGANGSTER, KAMIKAZE-KOBOLDE, GOTHYANKI, BOBBELKOPF, STRICHMÄNNCHEN,
-  // CHAUVINISTENSCHWEIN (Monster) und GESCHLECHTSUMWANDLUNG (Fluch, seit dem
-  // Geschlechtsmerkmal mit echtem Sofort-Effekt). Tatsaechlich stehen damit
-  // noch 12 Karten manuell; die Schranke geht auf 10, der Zweck bleibt
-  // derselbe: eine zu grosszuegige REGEX-Regel auffallen lassen. Kuratierte
-  // Eintraege sind davon nicht betroffen.
-  // Runde vom 2026-09-16 (Unnatural Axe, Task 3): zwei weitere Karten
-  // sind kuratiert dazugekommen - GEWALTIGER BAZILLUS und MONDJUNGFERN.
-  // Tatsaechlich stehen damit noch 9 Karten manuell; die Schranke geht auf 8.
-  // Runde vom 2026-09-16 (Unnatural Axe, Tasks 7-10): drei weitere Karten
-  // sind kuratiert dazugekommen - PSYCHO-EICHHÖRNCHEN, PTERODAKTYL und die
-  // Schlimmen Dinge des SL-Monsters. Tatsaechlich stehen damit noch 6 Karten
-  // manuell; die Schranke geht auf 5.
-  assert.ok(manual >= 5, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
+  // Waechter gegen eine zu grosszuegige generische TEXTREGEL
+  // (parseAutoConsequence) - NICHT gegen kuratierte Fortschritte in
+  // CONSEQUENCE_OVERRIDES. Frueher zaehlte er ueber ALLE Karten (manual statt
+  // manualOhneOverride) und musste nach jeder neu kuratierten Karte
+  // nachgezogen werden, weil jede kuratierte Automatisierung (egal ob sie
+  // eine Karte automatisch loest ODER bewusst manuell laesst, siehe
+  // GUMMI-GOLEM/VERFLUCHTER GEGENSTAND) den Gesamtwert veraendert. Zuletzt
+  // stand die Schranke exakt auf ihrem eigenen Grenzwert (5 manuell gesamt,
+  // Schranke >= 5) - die naechste kuratierte Karte haette sie rot gefaerbt,
+  // obwohl nichts kaputt war (Review M5).
+  // Kuratierte Eintraege gehoeren schlicht nicht mitgezaehlt: gemessen wird
+  // nur, wie viele Karten OHNE Override durch den Textparser fallen und dort
+  // manuell bleiben. Das aendert sich nur, wenn sich parseAutoConsequence
+  // selbst aendert - nie durch eine neue Zeile in CONSEQUENCE_OVERRIDES.
+  // Aktuell sind das drei Karten, deren Text zu komplex fuer den Parser ist
+  // (zugriffsbedingt/anhaltend, siehe die ponytail-Kommentare an den
+  // jeweiligen Monstertabellen): RIESENSTINKTIER, LUSTMONSTER, WEIHNACHTSMANN.
+  assert.ok(manualOhneOverride >= 3,
+    `Der generische Textparser loest zu viel automatisch (${manualOhneOverride} statt mindestens 3 Karten ohne Override bleiben manuell) - vermutlich eine zu großzügige Regex-Regel; bitte gegen die Kartentexte prüfen`);
 }
 
 run();
