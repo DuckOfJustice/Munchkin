@@ -167,6 +167,16 @@ module.exports = (ctx) => {
       return { type: 'noEffect' };
     },
 
+    // --- Unnatural Axe: Schlimme Dinge mit freier Auswahl -------
+    // "Du niest unaufhoerlich und laesst deine Karten fallen. Lege zwei Karten
+    // (deiner Wahl) aus deiner Hand ab."
+    'GEWALTIGER BAZILLUS': () => ({ type: 'queuedDiscardOwn', count: 2, quelle: 'hand',
+      cardName: 'GEWALTIGER BAZILLUS', prompt: 'Eine Handkarte ablegen' }),
+    // "Decke deine Hand auf und jeder andere Spieler darf eine Karte waehlen."
+    // Gleiche Bauform wie HIPPOGREIF/ANWALT - das Aufdecken selbst braucht
+    // keinen eigenen Schritt, der Waehler zeigt die Hand ohnehin.
+    'MONDJUNGFERN': () => ({ type: 'queuedTakeFromHand', mode: 'allOthers' }),
+
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
     'ENTIKOR': () => ({
       type: 'choice',

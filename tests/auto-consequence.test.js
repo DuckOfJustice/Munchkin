@@ -128,7 +128,10 @@ function run() {
   // noch 12 Karten manuell; die Schranke geht auf 10, der Zweck bleibt
   // derselbe: eine zu grosszuegige REGEX-Regel auffallen lassen. Kuratierte
   // Eintraege sind davon nicht betroffen.
-  assert.ok(manual >= 10, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
+  // Runde vom 2026-09-16 (Unnatural Axe, Task 3): zwei weitere Karten
+  // sind kuratiert dazugekommen - GEWALTIGER BAZILLUS und MONDJUNGFERN.
+  // Tatsaechlich stehen damit noch 9 Karten manuell; die Schranke geht auf 8.
+  assert.ok(manual >= 8, `Zu viele Karten automatisch erkannt (${manual} manuell) - vermutlich eine zu großzügige Regel; bitte gegen die Kartentexte prüfen`);
 }
 
 run();

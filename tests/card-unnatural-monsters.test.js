@@ -6,6 +6,7 @@
 const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, combatTotals, monsterRefusesTarget, fleeModifierParts,
+  resolveConsequenceSpec, applyPrimitiveAction, handleResolveCardCardChoice,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -116,6 +117,44 @@ const PRIESTER = findCard('PRIESTER', 'class');
   const summe = fleeModifierParts(room, p).reduce((s, t) => s + t.amount, 0);
   assert.strictEqual(summe, erwartet, `${monster}: Weglauf-Modifikator ${erwartet}`);
 });
+
+// --- Schlimme Dinge: GEWALTIGER BAZILLUS ------------------------------------
+// "Du niest unaufhoerlich ... Lege zwei Karten (deiner Wahl) aus deiner Hand ab."
+{
+  const bazillus = findCard('GEWALTIGER BAZILLUS', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 4).map((c) => c.id);
+  const p = makePlayer({ hand: fueller.slice() });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  const spec = resolveConsequenceSpec(bazillus.name, bazillus.badstuff, p, room);
+  assert.ok(spec, 'der Bazillus braucht eine Automatik');
+  applyPrimitiveAction(room, p, spec);
+  for (let i = 0; i < 2; i++) {
+    assert.ok(room.pendingCardAction, `Wahl ${i + 1} von 2 muss offen sein`);
+    handleResolveCardCardChoice(room, p.id, room.pendingCardAction.candidateIds[0]);
+  }
+  assert.strictEqual(p.hand.length, 2, 'genau zwei Karten abgelegt');
+  assert.strictEqual(room.pendingCardAction, null, 'danach haengt nichts');
+}
+
+// --- Schlimme Dinge: MONDJUNGFERN -------------------------------------------
+// "Decke deine Hand auf und jeder andere Spieler darf eine Karte waehlen."
+{
+  const jungfern = findCard('MONDJUNGFERN', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 3).map((c) => c.id);
+  const opfer = makePlayer({ hand: fueller.slice() });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c2 = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([opfer, b, c2]);
+  applyPrimitiveAction(room, opfer, resolveConsequenceSpec(jungfern.name, jungfern.badstuff, opfer, room));
+  const nehmer = [];
+  while (room.pendingCardAction) {
+    nehmer.push(room.pendingCardAction.playerId);
+    handleResolveCardCardChoice(room, room.pendingCardAction.playerId, room.pendingCardAction.candidateIds[0]);
+  }
+  assert.deepStrictEqual(nehmer.sort(), ['p2', 'p3'], 'beide anderen duerfen je eine Karte nehmen');
+  assert.strictEqual(opfer.hand.length, 1, 'zwei Karten sind weg');
+  assert.strictEqual(b.hand.length + c2.hand.length, 2, 'und liegen bei den anderen');
+}
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');
