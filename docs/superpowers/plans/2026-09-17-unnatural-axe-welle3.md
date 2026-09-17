@@ -17,8 +17,9 @@
 - **Tabellen gehören nach `src/cards/`**, Mechanik nach `server.js`. Jede neue Tabelle wird im `return`-Block ihres Moduls exportiert und in `server.js` aus dem `ctx`-Destructuring gelesen.
 - **`ponytail:`-Kommentare** markieren jede bewusste Teilabdeckung und nennen den Aufrüstweg.
 - **Tests laufen echte Pfade**, nicht Tabellen. `assert.ok(TABELLE.has('X'))` ist in diesem Plan kein gültiger Test — er beweist nur, dass ein Eintrag existiert. Maßgeblich ist der Commit `b246e64`, der genau diese Umstellung für zwei ältere Tests gemacht hat.
-- **`levelDelta` zieht ab:** `{ type: 'levelDelta', amount: 1 }` kostet eine Stufe (server.js:1355-1357). Eine negative Zahl würde eine schenken.
+- **`levelDelta` zieht ab:** `{ type: 'levelDelta', amount: 1 }` kostet eine Stufe (server.js:1411-1413). Eine negative Zahl würde eine schenken.
 - **Verifikation je Task:** `npm test` muss grün sein (aktuell 27/27), bevor committet wird.
+- **Zeilennummern sind Wegweiser, kein Vertrag.** Sie stammen vom Stand nach dem Merge von `origin/main` (Merge-Commit auf `feat/unnatural-axe-monster`). Maßgeblich ist immer der **zitierte Ankertext**: suche die genannte Funktion bzw. den abgedruckten Code und füge dort ein. Weicht eine Zeilennummer ab, ist das kein Grund zur Rückfrage — der Ankertext gewinnt.
 
 ---
 
@@ -38,7 +39,7 @@
 ### Task 1: Primitiv `lingeringCurse` — activeCurses für Monster öffnen
 
 **Files:**
-- Modify: `server.js:2651-2684` (`addActiveCurse` aufteilen), `server.js:1355` (neues `case` daneben), `server.js:2690` (`clearActiveCurseByKind` daneben)
+- Modify: `server.js:2707-2740` (`addActiveCurse` aufteilen), `server.js:1411` (neues `case` daneben), `server.js:2746` (`clearActiveCurseByKind` daneben)
 - Test: `tests/card-unnatural-monsters.test.js`
 
 **Interfaces:**
@@ -134,7 +135,7 @@ function applyLingeringRule(room, player, cardName, cardId, regel) {
 
 - [ ] **Step 4: Add `clearActiveCurseByKind`**
 
-Direkt unter `clearActiveCurse` (server.js:2690) einfügen:
+Direkt unter `clearActiveCurse` (server.js:2746) einfügen:
 
 ```js
 // Gezieltes Loeschen nach Wirkungsart statt nach Index. Gebraucht von den
@@ -308,7 +309,7 @@ In `server.js` im `ctx`-Destructuring der passives (Zeile ~2621) `MONSTER_LOCKS_
 
 - [ ] **Step 5: Add the gate function**
 
-In `server.js` direkt unter `kartenSperreAktiv` (~2249) einfügen:
+In `server.js` direkt unter `kartenSperreAktiv` (~2305) einfügen:
 
 ```js
 // RIESENSTINKTIER: gesperrt ist, wer NICHT selbst kaempft. Der Kartentext
@@ -324,7 +325,7 @@ function stinktierSperre(room, playerId) {
 
 - [ ] **Step 6: Gate the three simple paths**
 
-`handleRequestHelp` (server.js:4176) — direkt **vor** dem bestehenden `MONSTER_FORBIDS_HELP`-Block:
+`handleRequestHelp` (server.js:3595) — direkt **vor** dem bestehenden `MONSTER_FORBIDS_HELP`-Block:
 
 ```js
   if (stinktierSperre(room, targetId)) {
@@ -344,7 +345,7 @@ function stinktierSperre(room, playerId) {
   }
 ```
 
-`handlePlayCurseFromHand` (server.js:997) — direkt **nach** dem bestehenden `kartenSperreAktiv`-Block:
+`handlePlayCurseFromHand` (server.js:1051) — direkt **nach** dem bestehenden `kartenSperreAktiv`-Block:
 
 ```js
   if (stinktierSperre(room, playerId) && combatParticipants(room).some((p) => p.id === targetId)) {
@@ -569,7 +570,7 @@ In `handleSellItems`, direkt **vor** `if (total < 1000) return;`:
   }
 ```
 
-Dafür muss `total` als `let` deklariert sein — ist es (server.js:5045).
+Dafür muss `total` als `let` deklariert sein — ist es (server.js:5100).
 
 - [ ] **Step 7: Shorten the collected comment**
 
@@ -602,7 +603,7 @@ keine der einzelnen Gegenstaende."
 
 **Files:**
 - Modify: `src/cards/passives.js` (Tabelle + Export, ersetzt den `ponytail:`-Block ab Zeile 439)
-- Modify: `server.js` — `passendeHilfe` neben `combatHasMonster` (~2612), Gate in `handleRespondHelp` (4195), Zweig in `resolveCombat` (~4303)
+- Modify: `server.js` — `passendeHilfe` neben `combatHasMonster` (~2666), Gate in `handleRespondHelp` (4195), Zweig in `resolveCombat` (~4359)
 - Test: `tests/card-unnatural-monsters.test.js`
 
 **Interfaces:**
@@ -880,7 +881,7 @@ In `src/cards/consequences.js`:
 
 - [ ] **Step 4: Add the read helper**
 
-In `server.js` direkt unter `curseSuppressesItemBonuses` (~2713):
+In `server.js` direkt unter `curseSuppressesItemBonuses` (~2768):
 
 ```js
 // LUSTMONSTER: "in deinem naechsten Kampf werden deine Hand-Gegenstaende
@@ -1053,7 +1054,7 @@ In `resolveCombatWin` direkt nach `const helper = c.helperId ? findPlayer(room, 
   }
 ```
 
-Dann die drei Stellen, an denen Schätze tatsächlich übergeben werden, durch die Sperre führen. Die Piñata-Schleife (server.js:4351-4360): vor `const t = drawTreasure(room);` einfügen
+Dann die drei Stellen, an denen Schätze tatsächlich übergeben werden, durch die Sperre führen. Die Piñata-Schleife (server.js:4407-4416): vor `const t = drawTreasure(room);` einfügen
 
 ```js
       if (hatSchatzSperre(p)) return;
@@ -1257,7 +1258,7 @@ In `SPECIAL_SLOT_ITEMS`:
 
 - [ ] **Step 6: Bonus fallback in `equippedBonusSum`**
 
-`server.js:408` ersetzen durch:
+`server.js:446` ersetzen durch:
 
 ```js
 function equippedBonusSum(player, room, excludeIds) {
