@@ -733,7 +733,7 @@ const PRIESTER = findCard('PRIESTER', 'class');
 // Weisse Liste: gesperrt ist alles, erlaubt sind genau die zwei Ausnahmen.
 {
   const { handleRequestHelp, handleThiefBackstab, handlePlayCombatCard,
-    backstabMalus } = require('../server.js');
+    backstabMalus, handlePlayCurseFromHand } = require('../server.js');
   const stinktier = findCard('RIESENSTINKTIER', 'monster');
   const verstaerker = ALL_CARDS.find((c) => c.category === 'door_other'
     && typeof c.bonus === 'number' && c.bonus !== 0 && /für\s+(das\s+)?Monster/i.test(c.text || ''));
@@ -797,6 +797,28 @@ const PRIESTER = findCard('PRIESTER', 'class');
     handlePlayCombatCard(room, kaempfer.id, trank.id);
     assert.ok(!kaempfer.hand.includes(trank.id),
       'wer gegen das Stinktier kaempft, spielt seine eigenen Karten weiter');
+  }
+  // 6. "... oder beliebige Karten für oder gegen dich verwenden": auch ein
+  //    Fluch aus der Hand ist gesperrt. Die Sperre in
+  //    handlePlayCurseFromHand hatte bis 2026-09-17 keinen Test - mit
+  //    `if (false)` blieb die Suite gruen.
+  {
+    const huhn = findCard('HUHN AUF DEINEM KOPF');
+    const { room, kaempfer, dritter } = stinktierKampf();
+    dritter.hand.push(huhn.id);
+    handlePlayCurseFromHand(room, dritter.id, huhn.id, kaempfer.id);
+    assert.ok(dritter.hand.includes(huhn.id), 'die Fluchkarte bleibt auf der Hand');
+    assert.strictEqual(kaempfer.activeCurses.length, 0,
+      'und die kaempfende Person bekommt keinen Fluch-Eintrag');
+    // Gegenprobe: ohne das Stinktier im Kampf geht genau derselbe Weg durch -
+    // sonst prueft der Fall nur, dass handlePlayCurseFromHand nichts tut.
+    const ohneStinktier = stinktierKampf();
+    ohneStinktier.room.combat.monsterIds = [findCard('PESTRATTEN', 'monster').id];
+    ohneStinktier.dritter.hand.push(huhn.id);
+    handlePlayCurseFromHand(ohneStinktier.room, ohneStinktier.dritter.id, huhn.id, ohneStinktier.kaempfer.id);
+    assert.ok(!ohneStinktier.dritter.hand.includes(huhn.id), 'Gegenprobe: der Fluch ist spielbar');
+    assert.strictEqual(ohneStinktier.kaempfer.activeCurses.length, 1,
+      'Gegenprobe: und landet als Eintrag beim Ziel');
   }
 }
 
@@ -1183,27 +1205,44 @@ const PRIESTER = findCard('PRIESTER', 'class');
     assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
     assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt einen Bonus-Schatz zu behaupten');
   }
-  // 8. finishTrade-Filter + Log-Highlight: Schatzkarten an eine gesperrte
-  //    Person bleiben bei der gebenden Person, und der Verlauf markiert nur
-  //    die Karte, die wirklich den Besitzer gewechselt hat.
+  // 8. finishTrade LEHNT AB (Spec §6), statt die gesperrten Schatzkarten
+  //    herauszufiltern und den Rest zu tauschen. Gefiltert wurde bis
+  //    2026-09-17 - dabei gab die gesperrte Person ihre Seite her und bekam
+  //    nichts zurueck, was ein Gegner beliebig oft wiederholen konnte.
   {
     const { handleProposeTrade, handleRespondTrade } = require('../server.js');
-    const { p, room } = aufDerListe();
-    const geber = makePlayer({ id: 'p2', name: 'B', hand: [schaetze[0], ORK.id] });
-    room.players.push(geber);
-    handleProposeTrade(room, geber.id, p.id, [schaetze[0], ORK.id]);
-    const tradeId = room.trades[0].id;
-    handleRespondTrade(room, p.id, tradeId, true, []);
-    assert.ok(!p.hand.includes(schaetze[0]),
-      'die gesperrte Person bekommt die Schatzkarte aus dem Handel nicht');
-    assert.ok(geber.hand.includes(schaetze[0]),
-      'die Schatzkarte bleibt bei der gebenden Person');
-    assert.ok(p.hand.includes(ORK.id),
-      'Nicht-Schatzkarten wechseln trotzdem den Besitzer');
-    const handelsZeile = room.logs.filter((l) => l.text.startsWith('Handel:')).pop();
-    assert.ok(handelsZeile, 'der Handel steht im Verlauf');
-    assert.deepStrictEqual(handelsZeile.cardIds, [ORK.id],
-      'der Verlauf markiert nur die Karte, die wirklich den Besitzer gewechselt hat');
+    // 8a. Die gesperrte Person soll eine Schatzkarte BEKOMMEN.
+    {
+      const { p, room } = aufDerListe();
+      const geber = makePlayer({ id: 'p2', name: 'B', hand: [schaetze[0], ORK.id] });
+      room.players.push(geber);
+      handleProposeTrade(room, geber.id, p.id, [schaetze[0], ORK.id]);
+      handleRespondTrade(room, p.id, room.trades[0].id, true, []);
+      assert.ok(geber.hand.includes(schaetze[0]) && geber.hand.includes(ORK.id),
+        'der Handel kommt gar nicht zustande - auch die Nicht-Schatzkarte bleibt liegen');
+      assert.strictEqual(p.hand.length, 0, 'und die gesperrte Person bekommt nichts');
+      assert.strictEqual(room.trades.length, 0, 'das Angebot ist damit vom Tisch');
+      assert.ok(!room.logs.some((l) => l.text.startsWith('Handel:')),
+        'kein Verlaufseintrag, der einen Tausch behauptet');
+      assert.ok(room.logs.some((l) => /kommt nicht zustande/.test(l.text) && /Störerliste/.test(l.text)),
+        'der Verlauf sagt, warum');
+    }
+    // 8b. Die gesperrte Person GIBT und bekaeme als Gegenleistung einen
+    //     Schatz - genau der farmbare Fall: ohne Ablehnung war ihr
+    //     Gegenstand weg und die Gegenleistung verfiel.
+    {
+      const { p, room } = aufDerListe();
+      const partner = makePlayer({ id: 'p2', name: 'B', hand: [schaetze[0]] });
+      room.players.push(partner);
+      p.hand.push(ORK.id);
+      handleProposeTrade(room, p.id, partner.id, [ORK.id]);
+      handleRespondTrade(room, partner.id, room.trades[0].id, true, [schaetze[0]]);
+      handleRespondTrade(room, p.id, room.trades[0].id, true);
+      assert.ok(p.hand.includes(ORK.id), 'die gesperrte Person behaelt ihre Karte');
+      assert.ok(partner.hand.includes(schaetze[0]), 'und die Gegenleistung bleibt beim Partner');
+      assert.ok(room.logs.some((l) => /kommt nicht zustande/.test(l.text)),
+        'auch diese Richtung wird abgelehnt');
+    }
   }
   // 9. Kartenerhaltung bei der Helfer:in-Zusage, alle vier Kombinationen aus
   //    gesperrt/nicht gesperrt fuer kaempfende Person und Helfer:in. Nummer

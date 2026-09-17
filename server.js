@@ -528,6 +528,14 @@ function unequipSlotCard(player, cardId) {
 // ---------------------------------------------------------------------------
 
 function publicPlayer(room, p) {
+  // RIESENSTINKTIER: die Strafe endet beim LESEN, sobald keine Kleidung mehr
+  // anliegt (siehe stinktierStrafeAktiv). Ausruestung kann auf vielen Wegen
+  // verschwinden, nicht nur ueber handleUnequipItem - Verkauf, Diebstahl,
+  // Fluch, Schlimme Dinge, Tod. Dieser eine Aufruf in der Serialisierung
+  // normalisiert activeCurses fuer ALLE Leser: die Anzeige im Client zeigt
+  // keine abgelaufene Strafe mehr an, und der WUNSCHRING, der die Rohliste
+  // liest, kann nicht mehr an sie verschwendet werden.
+  stinktierStrafeAktiv(p);
   return {
     id: p.id,
     name: p.name,
@@ -2904,11 +2912,22 @@ function hatSchatzSperre(player) {
 // gezogen wird - siehe resolveCombatWin.
 // Deckt ausserdem NICHT ab: eine Schatzkarte, die OHNE drawTreasure() die
 // Hand wechselt - also nicht gezogen, sondern von einer Person zur
-// anderen bewegt wird. Bekannte Faelle: DIEB "Diebstahl" (stealItemFrom
-// nimmt einen bereits getragenen Schatz-Gegenstand direkt von der
-// bestohlenen Person) und ENTE DER VIELEN SACHEN, Schritt "klauen" (nimmt
-// eine zufaellige Handkarte der naechsten Person, die zufaellig auch ein
-// Schatz sein kann). Beide bewusst ungefixt (Ruling 2026-09-17): seltener
+// anderen bewegt wird - oder ohne drawTreasure() aus einem Ablagestapel
+// kommt. Bekannte Faelle:
+//   - DIEB "Diebstahl" (stealItemFrom nimmt einen bereits getragenen
+//     Schatz-Gegenstand direkt von der bestohlenen Person),
+//   - ENTE DER VIELEN SACHEN, Schritt "klauen" (nimmt eine zufaellige
+//     Handkarte der naechsten Person, die zufaellig auch ein Schatz sein
+//     kann),
+//   - PRIESTER-Wiederbelebung (handlePriestResurrect: treasureDiscard.pop()
+//     direkt auf die Hand),
+//   - EINHEITSGRÖSSE (takeFirstWearableFromTreasureDiscard: erster
+//     tragbarer Gegenstand aus dem Schatz-Ablagestapel),
+//   - openCardCardChoice/WÜNSCHELSTAB (freie Wahl einer Karte aus den
+//     Ablagestapeln),
+//   - Leichenfund nach einem Tod (applyDeathConsequence verteilt die
+//     Ausruestung der gestorbenen Person an die anderen).
+// Alle bewusst ungefixt (Ruling 2026-09-17): seltener
 // als PESTRATTEN/AMAZONE, und ein sauberer Fix braucht ein Audit der
 // gesamten .hand.push(-Flaeche in server.js, nicht nur dieser zwei
 // Stellen. Aufruestweg: diese Flaeche durchsuchen und jede Stelle, die
@@ -3407,7 +3426,7 @@ function handleThiefBackstab(room, playerId, discardCardId, targetId) {
   if (!dieb || !opfer || (!hasClass(dieb, 'DIEB') && !stichOMat)) return;
   if (dieb.id === opfer.id) return;                                     // nicht sich selbst
   if (stinktierSperre(room, playerId)) {
-    log(room, `${dieb.name} kommt am Riesenstinktier nicht vorbei - kein Rueckenfall.`);
+    log(room, `${dieb.name} kommt am Riesenstinktier nicht vorbei - kein Rückenfall.`);
     touchRoom(room);
     return;
   }
@@ -4143,7 +4162,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     const erlaubt = stinktierKarte
       && (stinktierKarte.name === 'WANDERNDES MONSTER' || isMonsterEnhancerCard(stinktierKarte));
     if (!erlaubt) {
-      log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - nur Wandernde Monster und Monsterverstaerker gehen durch.`);
+      log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - nur Wandernde Monster und Monsterverstärker gehen durch.`);
       touchRoom(room);
       return;
     }
@@ -4412,7 +4431,7 @@ function handleRequestHelp(room, playerId, targetId, reward) {
   const target = findPlayer(room, targetId);
   if (!target || targetId === c.actorId) return;
   if (stinktierSperre(room, targetId)) {
-    log(room, 'Das Riesenstinktier haelt alle anderen auf 20 Meter Abstand - niemand hilft.');
+    log(room, 'Das Riesenstinktier hält alle anderen auf 20 Meter Abstand - niemand hilft.');
     touchRoom(room);
     return;
   }
@@ -4861,7 +4880,7 @@ function finishFleeSuccess(room, actor, c) {
   const tuba = equippedItemIds(actor).find((id) => FLEE_TREASURE_ITEMS.has((card(id) || {}).name));
   if (tuba) {
     if (hatSchatzSperre(actor)) {
-      log(room, `${actor.name} koennte wegen "${card(tuba).name}" noch eine Schatzkarte mitnehmen, steht aber auf der Störerliste und bekommt keine.`);
+      log(room, `${actor.name} könnte wegen "${card(tuba).name}" noch eine Schatzkarte mitnehmen, steht aber auf der Störerliste und bekommt keine.`);
     } else {
       const [t] = zieheSchaetzeFuer(room, actor, 1);
       if (t) {
@@ -5624,13 +5643,22 @@ function finishTrade(room, trade, from, to, counterCardIds) {
   // übersprungen; der Rest wird getauscht.
   const offerIds = ownTradeIds(from, trade.offerCardIds);
   const counterIds = ownTradeIds(to, counterCardIds);
-  // WEIHNACHTSMANN: "auch nicht von anderen Spielern". Schatzkarten, die an
-  // eine gesperrte Person gingen, bleiben schlicht bei der gebenden Person -
-  // der Handel kommt sonst normal zustande.
-  const ohneGesperrteSchaetze = (ids, empfaenger) => (hatSchatzSperre(empfaenger)
-    ? ids.filter((id) => (card(id) || {}).type !== 'treasure') : ids);
-  const anEmpfaenger = ohneGesperrteSchaetze(offerIds, to);
-  const anGeber = ohneGesperrteSchaetze(counterIds, from);
+  // WEIHNACHTSMANN: "auch nicht von anderen Spielern". Die Annahme wird
+  // ABGELEHNT, nicht gefiltert: gefiltert wurde bis 2026-09-17, und dabei gab
+  // eine gesperrte Person ihre Seite des Handels her und bekam nichts zurueck
+  // - ein Gegner konnte das beliebig oft wiederholen. Geprueft werden beide
+  // Richtungen, denn beide Seiten koennen Schatzkarten enthalten.
+  const istSchatz = (id) => (card(id) || {}).type === 'treasure';
+  const gesperrt = [];
+  if (hatSchatzSperre(to) && offerIds.some(istSchatz)) gesperrt.push(to);
+  if (hatSchatzSperre(from) && counterIds.some(istSchatz)) gesperrt.push(from);
+  if (gesperrt.length) {
+    log(room, `Der Handel zwischen ${from.name} und ${to.name} kommt nicht zustande: ${gesperrt.map((p) => p.name).join(' und ')} steht auf der Störerliste und darf keine Schatzkarten annehmen.`);
+    touchRoom(room);
+    return;
+  }
+  const anEmpfaenger = offerIds;
+  const anGeber = counterIds;
   anEmpfaenger.forEach((id) => { takeTradedCard(from, id); clearCheatIfLost(from, id); to.hand.push(id); });
   anGeber.forEach((id) => { takeTradedCard(to, id); clearCheatIfLost(to, id); from.hand.push(id); });
   const names = (ids) => ids.map((id) => { const c = card(id); return c ? c.name : id; }).join(', ');
