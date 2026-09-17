@@ -885,6 +885,30 @@ const PRIESTER = findCard('PRIESTER', 'class');
     assert.ok(p.activeCurses.some((f) => f.kind === 'noHelpHalfGold'),
       'eine Waffe ist keine Kleidung - die Strafe bleibt');
   }
+  // 6. Regression: die Halbierung darf einen Verkauf, der VOR der Halbierung
+  //    ueber der 1000er-Schwelle liegt, DANACH aber druntersackt, komplett
+  //    scheitern lassen - ohne eine Logzeile, die einen Verkauf behauptet,
+  //    der nie stattfand. 600 (Ruestung) + 500 (GHOULPEITSCHE) = 1100 vor
+  //    der Halbierung (>= 1000, Verkauf waere ohne Fluch moeglich), 550
+  //    danach (< 1000, Verkauf muss ganz ausbleiben).
+  {
+    const { p, room } = besprueht();
+    room.turnPhase = 'kampf';
+    room.combat = null;
+    room.turnIndex = 0;
+    const kleinesItem = findCard('GHOULPEITSCHE', 'item');
+    p.hand.push(kleinesItem.id);
+    const summeVorHalbierung = (ruestung.gold || 0) + kleinesItem.gold;
+    assert.ok(summeVorHalbierung >= 1000 && summeVorHalbierung < 2000
+      && Math.floor(summeVorHalbierung / 2) < 1000,
+      'Testvoraussetzung: Summe liegt vor der Halbierung ueber, danach unter der Schwelle');
+    const vorher = p.level;
+    handleSellItems(room, p.id, [ruestung.id, kleinesItem.id]);
+    assert.strictEqual(p.level, vorher,
+      'halbiert unter die Schwelle: kein Stufenaufstieg, der Verkauf scheitert ganz');
+    assert.ok(p.hand.includes(kleinesItem.id), 'und der Gegenstand bleibt auf der Hand');
+    assert.strictEqual(p.equipped.armor, ruestung.id, 'die Ruestung bleibt angelegt - nichts wurde verkauft');
+  }
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

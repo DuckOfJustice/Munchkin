@@ -5219,12 +5219,13 @@ function handleSellItems(room, playerId, cardIds) {
   // (nach Alchemisten-Mindestwert und Halbling-Bonus), nicht der einzelne
   // Gegenstand: der Kartentext nennt eine Eigenschaft der Person, keine der
   // Gegenstaende - und die Endsumme ist ohnehin die Stelle, an der gerundet
-  // wird.
-  if (stinktierStrafeAktiv(player)) {
-    const voll = total;
-    total = Math.floor(total / 2);
-    log(room, `${player.name} stinkt noch - der Goldwert ist halbiert: ${voll} GS zählen nur ${total} GS.`);
-  }
+  // wird. Halbiert wird VOR der Schwelle - der halbierte Wert darf einen
+  // Verkauf also unter 1000 druecken und ihn scheitern lassen. Geloggt wird
+  // die Halbierung aber erst NACH der Schwelle (wie der Halbling-Bonus),
+  // sonst behauptet die Logzeile einen Verkauf, der gar nicht stattfand.
+  const vollVorHalbierung = total;
+  const besprueht = stinktierStrafeAktiv(player);
+  if (besprueht) total = Math.floor(total / 2);
   if (total < 1000) return;
   if (halblingBonus) player.halblingSaleUsed = true;
   const levels = Math.floor(total / 1000);
@@ -5234,6 +5235,7 @@ function handleSellItems(room, playerId, cardIds) {
   });
   setLevel(player, player.level + levels);
   if (halblingBonus) log(room, `${player.name} ist Halbling und verkauft den teuersten Gegenstand zum doppelten Preis (+${halblingBonus} Goldstücke, einmal pro Runde).`);
+  if (besprueht) log(room, `${player.name} stinkt noch - der Goldwert ist halbiert: ${vollVorHalbierung} GS zählen nur ${total} GS.`);
   log(room, `${player.name} legt Gegenstände im Wert von ${total} Goldstücken ab und steigt ${levels} Stufe(n) auf (jetzt Stufe ${player.level}).`);
   // Die Siegesstufe ist laut Regelwerk nur durch ein besiegtes Monster
   // erreichbar - Verkaufen bringt auf Stufe 10, gewinnt aber nicht. Der Sieg
