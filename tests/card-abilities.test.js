@@ -478,14 +478,18 @@ function run() {
   assert.deepStrictEqual(sandwichJa.players[0].equipped.special, [sandwich.id], 'Halblinge dürfen das Sandwich anlegen');
 
   // Jede Karte in der Tabelle muss es auch wirklich geben und etwas bringen -
-  // entweder einen Kampfbonus oder (seit Clerical Errors) eine verliehene
-  // Rasse/Klasse wie bei FALSCHE OHREN und ZAUBERCOUCH. Ohne beides waere der
-  // Platz sinnlos.
+  // entweder einen Kampfbonus (gedruckt ODER, seit EISKALTES HÄNDCHEN, an der
+  // Regel selbst - siehe equippedBonusSum-Rueckfall) oder (seit Clerical
+  // Errors) eine verliehene Rasse/Klasse wie bei FALSCHE OHREN und
+  // ZAUBERCOUCH. Ohne alle drei waere der Platz sinnlos.
   Object.keys(SPECIAL_SLOT_ITEMS).forEach((name) => {
     const c = findCard(name);
-    const bringtWas = (typeof c.bonus === 'number' && c.bonus !== 0) || !!ITEM_GRANTS_TRAIT[name];
+    const regel = SPECIAL_SLOT_ITEMS[name];
+    const bringtWas = (typeof c.bonus === 'number' && c.bonus !== 0)
+      || (typeof regel.bonus === 'number' && regel.bonus !== 0)
+      || !!ITEM_GRANTS_TRAIT[name];
     assert.ok(bringtWas, `${name}: Spezialausrüstung ohne Kampfbonus und ohne verliehene Rasse/Klasse`);
-    assert.ok(SPECIAL_SLOTS[SPECIAL_SLOT_ITEMS[name].slot], `${name}: verweist auf einen unbekannten Platz`);
+    assert.ok(SPECIAL_SLOTS[regel.slot], `${name}: verweist auf einen unbekannten Platz`);
   });
 
   // MIETLING wurde aus dem Spiel genommen.

@@ -99,6 +99,14 @@ module.exports = (ctx) => {
       .some((id) => { const c = card(id); return c && (c.gold || 0) >= minGold; });
   }
 
+  // EISKALTES HÄNDCHEN: "Wenn du Eiskaltes Händchen einen Wunschring gibst".
+  // Geben heisst hergeben, nicht tragen - deshalb Hand UND Ausruestung, wie
+  // bei hatGegenstandAbGold.
+  function hatWunschring(player) {
+    return equippedItemIds(player).concat(player.hand)
+      .some((id) => (card(id) || {}).name === 'WUNSCHRING');
+  }
+
   const COMBAT_START_OPTIONS = {
     // "Statt zu kaempfen kann ein Priester den Moechtegern-Vampir wegjagen,
     // indem er 'Booga Booga' ruft und seinen Schatz nimmt. Steige keine Stufe
@@ -131,15 +139,18 @@ module.exports = (ctx) => {
       label: 'Geschenk annehmen (2 offene Schaetze, einen behalten)',
       action: { type: 'packratteGeschenk' },
     },
-    // ponytail: EISKALTES HÄNDCHEN bewusst NICHT hier verdrahtet. Sein
-    // Kampftext bietet keine Alternative WIE oben (bestechen/ablenken/
-    // Geschenk), sondern ersetzt den Kampf komplett durch einen Wunschring -
-    // und die Monsterkarte selbst wird danach ein +3-Gegenstand in der Hand.
-    // Das sprengt die Aktions-Bauform hier (die Optionen oben aendern nie die
-    // Kategorie der Karte) und braucht eher einen eigenen primitiven Typ
-    // (Monster -> Gegenstand). Die Schlimmen Dinge sind schon verdrahtet,
-    // nur dieser Kampf-Alternativpfad fehlt - siehe Design-Spec §6, Welle 3
-    // (docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md).
+    // "Wenn du Eiskaltes Händchen einen Wunschring gibst, anstatt sie zu
+    // bekämpfen, wird sie deine kleine Freundin. Lege den Ring ab; behalte
+    // diese Karte und zähle die Hand als einen kleinen Gegenstand, der einen
+    // Bonus von +3 im Kampf gibt." Wie die vier Optionen darueber ein eigenes
+    // Primitiv - dass es die Karte aus dem Monster- in den Ausruestungs-
+    // Zustand bringt, ist kein Bruch der Bauform: wegjagenMitSchatz verschiebt
+    // die Monsterkarte ebenfalls selbst.
+    'EISKALTES HÄNDCHEN': {
+      wennErfuellt: (p) => hatWunschring(p),
+      label: 'Einen Wunschring geben (kein Kampf, die Hand wird ein +3-Gegenstand)',
+      action: { type: 'haendchenBesaenftigen' },
+    },
   };
 
   // --- Monster, die VOR dem Kampf einen Gegenstand kosten --------------------
@@ -587,6 +598,10 @@ module.exports = (ctx) => {
     // SCHRECKLICHE SOCKEN: "Du kannst die Socken unter anderem Schuhwerk
     // tragen, aber wenn du dein Schuhwerk verlierst, sind sie auch weg."
     'SCHRECKLICHE SOCKEN': { slot: 'special', mitSlot: 'feet' },
+    // Keine Ausruestungskarte, sondern die besaenftigte Monsterkarte selbst -
+    // sie hat in den Rohdaten weder slotKind noch bonus, deshalb steht der
+    // Bonus hier an der Regel (siehe equippedBonusSum).
+    'EISKALTES HÄNDCHEN': { slot: 'special', bonus: 3 },
   };
   // Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
   // nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).

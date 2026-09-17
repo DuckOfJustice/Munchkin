@@ -447,7 +447,10 @@ function equippedBonusSum(player, room, excludeIds) {
   return equippedItemIds(player).reduce((sum, id) => {
     if (excludeIds && excludeIds.has(id)) return sum;
     const c = card(id);
-    return sum + (c && c.bonus ? c.bonus : 0) + attachmentBonusSum(room, id);
+    // Rueckfall auf den Bonus der Spezialplatz-Regel: das EISKALTE HÄNDCHEN
+    // ist eine Monsterkarte und nennt in den Rohdaten selbst keinen Bonus.
+    const regelBonus = (specialSlotRule(c) || {}).bonus || 0;
+    return sum + (c && c.bonus ? c.bonus : regelBonus) + attachmentBonusSum(room, id);
   }, 0);
 }
 
@@ -1414,6 +1417,20 @@ function applyPrimitiveAction(room, player, action) {
       room.doorDiscard.push(action.cardId);
       room.turnPhase = 'aerger';
       return `laesst "${card(chosen).name}" fallen - "${card(action.cardId).name}" lenkt ab (automatische Flucht)`;
+    }
+    // EISKALTES HÄNDCHEN: kein Kampf, der Ring geht weg, die Monsterkarte
+    // wird zur Ausruestung. Der Ring wird aus der Hand ODER der Ausruestung
+    // genommen - "geben" heisst hergeben.
+    case 'haendchenBesaenftigen': {
+      const m = card(action.cardId);
+      const ringId = player.hand.find((id) => (card(id) || {}).name === 'WUNSCHRING')
+        || equippedItemIds(player).find((id) => (card(id) || {}).name === 'WUNSCHRING');
+      if (!ringId) return 'kein Wunschring da';
+      if (player.hand.includes(ringId)) removeFromHand(player, ringId); else unequipSlotCard(player, ringId);
+      discardCard(room, ringId);
+      player.equipped.special = [...specialSlotCards(player, 'special'), action.cardId];
+      room.turnPhase = 'aerger';
+      return `gibt den Wunschring - "${m.name}" wird die kleine Freundin (+3 im Kampf)`;
     }
     case 'death':
       applyDeathConsequence(room, player);

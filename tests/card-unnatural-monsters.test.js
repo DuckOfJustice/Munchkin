@@ -1347,5 +1347,68 @@ const PRIESTER = findCard('PRIESTER', 'class');
   }
 }
 
+// --- EISKALTES HÄNDCHEN: Wunschring statt Kampf -----------------------------
+// "Wenn du Eiskaltes Händchen einen Wunschring gibst, anstatt sie zu
+// bekämpfen, wird sie deine kleine Freundin. Lege den Ring ab; behalte diese
+// Karte und zähle die Hand als einen kleinen Gegenstand, der einen Bonus von
+// +3 im Kampf gibt."
+{
+  const { handleDrawDoor, handleResolveCardChoice, applyPrimitiveAction,
+    combatTotals, istGrosserGegenstand } = require('../server.js');
+  const haendchen = findCard('EISKALTES HÄNDCHEN', 'monster');
+  const ring = findCard('WUNSCHRING');
+
+  // 1. Ohne Ring gibt es keine Wahl - es wird gekaempft wie bisher.
+  {
+    const p = makePlayer({});
+    const room = makeRoom([p]);
+    room.turnPhase = 'tuer';
+    room.doorDeck = [haendchen.id];
+    handleDrawDoor(room, p.id);
+    assert.ok(!room.pendingCardAction, 'ohne Wunschring keine Wahl');
+    assert.ok(room.combat, 'stattdessen der normale Kampf');
+  }
+  // 2. Mit Ring auf der Hand erscheint die Wahl.
+  {
+    const p = makePlayer({ hand: [ring.id] });
+    const room = makeRoom([p]);
+    room.turnPhase = 'tuer';
+    room.doorDeck = [haendchen.id];
+    handleDrawDoor(room, p.id);
+    assert.ok(room.pendingCardAction, 'mit Wunschring gibt es die Wahl');
+    assert.strictEqual(room.pendingCardAction.options.length, 2, 'kaempfen oder den Ring geben');
+  }
+  // 3. Nach der Zusage: kein Kampf, Ring weg, Karte angelegt, +3 im Kampf.
+  {
+    const p = makePlayer({ hand: [ring.id] });
+    const room = makeRoom([p]);
+    room.turnPhase = 'tuer';
+    room.doorDeck = [haendchen.id];
+    handleDrawDoor(room, p.id);
+    const altOption = room.pendingCardAction.options.find((o) => o.id === 'alt');
+    assert.ok(altOption, 'die Alternative steht zur Wahl');
+    handleResolveCardChoice(room, p.id, altOption.id);
+    assert.ok(!room.combat, 'es findet kein Kampf statt');
+    assert.ok(!p.hand.includes(ring.id), 'der Ring ist abgegeben');
+    assert.ok(room.treasureDiscard.includes(ring.id),
+      'und liegt im Schatz-Ablagestapel (WUNSCHRING ist type: treasure)');
+    assert.ok((p.equipped.special || []).includes(haendchen.id),
+      'die Hand liegt als Spezialausruestung an');
+    assert.ok(!istGrosserGegenstand(room, haendchen.id), 'sie ist ein KLEINER Gegenstand');
+
+    // Der +3-Bonus zaehlt in einem spaeteren Kampf.
+    const ohne = makePlayer({ id: 'p9', name: 'C', level: p.level });
+    const raumOhne = makeRoom([ohne]);
+    raumOhne.combat = { actorId: ohne.id, helperId: null,
+      monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    room.combat = { actorId: p.id, helperId: null,
+      monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    assert.strictEqual(combatTotals(room).playerStrength - combatTotals(raumOhne).playerStrength, 3,
+      'die besaenftigte Hand gibt +3 im Kampf');
+  }
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');
