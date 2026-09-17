@@ -917,5 +917,58 @@ const PRIESTER = findCard('PRIESTER', 'class');
   }
 }
 
+// --- LUSTMONSTER, Kampftext -------------------------------------------------
+// "Du musst dir von einem Charakter des anderen Geschlechts helfen lassen ...
+// Findest du keinen passenden Charakter, musst du leider flüchten."
+{
+  const { handleRespondHelp, resolveCombat } = require('../server.js');
+  const lust = findCard('LUSTMONSTER', 'monster');
+
+  function lustKampf(helferGender) {
+    const kaempfer = makePlayer({ id: 'p1', name: 'A', gender: 'm', level: 9 });
+    const helfer = makePlayer({ id: 'p2', name: 'B', gender: helferGender, level: 9 });
+    const room = makeRoom([kaempfer, helfer]);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [lust.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false,
+      helperPending: { targetId: 'p2', compelled: false, reward: 0 } };
+    return { room, kaempfer, helfer };
+  }
+
+  // 1. Gleiches Geschlecht: die Hilfe kommt nicht zustande.
+  {
+    const { room } = lustKampf('m');
+    handleRespondHelp(room, 'p2', true);
+    assert.strictEqual(room.combat.helperId, null,
+      'das Lustmonster verlangt das andere Geschlecht - gleiches zaehlt nicht');
+  }
+  // 2. Anderes Geschlecht: die Hilfe kommt zustande. (Gegenprobe zu 1 - ohne
+  //    sie wuerde Fall 1 auch gruen sein, wenn handleRespondHelp gar nichts
+  //    mehr taete.)
+  {
+    const { room } = lustKampf('w');
+    handleRespondHelp(room, 'p2', true);
+    assert.strictEqual(room.combat.helperId, 'p2', 'das andere Geschlecht darf helfen');
+  }
+  // 3. Geschlechtslos (STRICHMÄNNCHEN) ist fuer eine Regel, die ein
+  //    Geschlecht NENNT, keins von beiden.
+  {
+    const { room } = lustKampf(null);
+    handleRespondHelp(room, 'p2', true);
+    assert.strictEqual(room.combat.helperId, null,
+      'geschlechtslos erfuellt "anderes Geschlecht" nicht');
+  }
+  // 4. Ohne passende Hilfe ist der Kampf verloren - auch bei erdrueckender
+  //    Uebermacht.
+  {
+    const kaempfer = makePlayer({ id: 'p1', name: 'A', gender: 'm', level: 99 });
+    const room = makeRoom([kaempfer]);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [lust.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    resolveCombat(room);
+    assert.strictEqual(room.combat && room.combat.mustFlee, true,
+      'ohne passende Hilfe hilft auch Stufe 99 nicht - fliehen');
+  }
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

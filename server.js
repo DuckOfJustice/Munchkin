@@ -2707,6 +2707,24 @@ function combatHasMonster(room, nameSet) {
   return !!room.combat && room.combat.monsterIds.some((id) => { const c = card(id); return c && nameSet.has(c.name); });
 }
 
+// LUSTMONSTER: "ein Charakter des anderen Geschlechts". istGeschlecht liefert
+// fuer das geschlechtslose STRICHMÄNNCHEN ueberall false - fuer eine Regel,
+// die ein Geschlecht NENNT, ist es keins von beiden, und zwar auf beiden
+// Seiten der Bedingung.
+function passendeHilfe(room) {
+  const c = room.combat;
+  if (!c || !c.helperId) return false;
+  const actor = findPlayer(room, c.actorId);
+  const helfer = findPlayer(room, c.helperId);
+  return istAnderesGeschlecht(actor, helfer);
+}
+
+function istAnderesGeschlecht(a, b) {
+  if (!a || !b || !a.gender || !b.gender) return false;
+  return (istGeschlecht(a, 'm') && istGeschlecht(b, 'w'))
+    || (istGeschlecht(a, 'w') && istGeschlecht(b, 'm'));
+}
+
 // Dauerwirkungstabellen (CURSE_PROOF_ITEMS, MONSTER_REFUSES, ...): siehe
 // src/cards/passives.js. Aufruf hier - erst nach hasRace/hasClass, aber vor
 // der ersten Benutzung der Tabellen (curseProtectionItem gleich darunter).
@@ -2723,7 +2741,7 @@ const {
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
-  BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT,
+  BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
 } = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
@@ -4348,6 +4366,17 @@ function handleRespondHelp(room, playerId, accept) {
     accept = true;
   }
   if (accept) {
+    // LUSTMONSTER: die Zusage kommt nicht zustande, wenn das Geschlecht nicht
+    // passt. Bewusst hier und nicht in handleRequestHelp: das Fragen bleibt
+    // erlaubt, nur das Zustandekommen nicht - so sieht der Tisch im Verlauf,
+    // dass es versucht wurde.
+    if (combatHasMonster(room, MONSTER_REQUIRES_OTHER_GENDER)
+      && !istAnderesGeschlecht(findPlayer(room, c.actorId), target)) {
+      log(room, `${target.name} kann hier nicht helfen - das Lustmonster verlangt einen Charakter des anderen Geschlechts.`);
+      c.helperPending = null;
+      touchRoom(room);
+      return;
+    }
     c.helperId = playerId;
     // Die Zusage aus der Anfrage wird beim Sieg eingeloest (resolveCombatWin).
     c.helperReward = c.helperPending.reward || 0;
@@ -4435,6 +4464,11 @@ function handleEvaluateCombat(room, playerId) {
   // darf also selbst noch mit einem gezinkten Wuerfel geaendert werden. Dann
   // wartet die Auswertung auf das Fenster.
   if (hasenWurf(room, () => handleEvaluateCombat(room, playerId))) return;
+  resolveCombat(room);
+}
+
+function resolveCombat(room) {
+  const c = room.combat;
   const { playerStrength, monsterStrength } = combatTotals(room);
   // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Greift vor der
   // ALUFOLIE-Notlösung, damit die Karte nicht unnötig verbraucht wird.
@@ -4445,13 +4479,17 @@ function handleEvaluateCombat(room, playerId) {
     resolveCombatWin(room);
     return;
   }
+  // LUSTMONSTER: "sonst kannst du das Lustmonster nicht besiegen". Ohne
+  // passende Hilfe ist der Kampf unabhaengig von der Kampfstaerke verloren -
+  // deshalb VOR dem Staerkevergleich.
+  const lustOhneHilfe = combatHasMonster(room, MONSTER_REQUIRES_OTHER_GENDER) && !passendeHilfe(room);
   const tie = playerStrength === monsterStrength ? findTieBreaker(room) : null;
   if (tie) {
     removeFromHand(tie.player, tie.cardId);
     discardCard(room, tie.cardId);
     log(room, `${tie.player.name} setzt "${TIE_BREAKER_CARD}" ein: Gleichstand (${playerStrength} vs. ${monsterStrength}) zählt als Sieg.`, [tie.cardId]);
   }
-  if (playerStrength > monsterStrength || tie) {
+  if (!lustOhneHilfe && (playerStrength > monsterStrength || tie)) {
     resolveCombatWin(room);
   } else {
     c.mustFlee = true;
@@ -4461,7 +4499,9 @@ function handleEvaluateCombat(room, playerId) {
     c.fleeFailed = [];
     const wer = combatParticipants(room).length > 1
       ? ` Jede:r läuft einzeln weg (${combatParticipants(room).map((p) => p.name).join(', ')}).` : '';
-    log(room, `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`);
+    log(room, lustOhneHilfe
+      ? `Ohne Hilfe eines Charakters des anderen Geschlechts ist das Lustmonster nicht zu besiegen. Fliehen nötig!${wer}`
+      : `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`);
     touchRoom(room);
   }
 }
@@ -5986,7 +6026,7 @@ module.exports = {
   dryadeWirkung, hasenWurf, startCombat, applyTargetAction, handlePlayCurseFromHand,
   kartenSperreAktiv,
   ATTACHMENT_CARDS, equippedBonusSum, handItemIds,
-  handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
+  handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, resolveCombat, handleAttemptFlee, baseStrength,
   handlePrepReady, darfAusruesten,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, halblingSaleOpen, endTurn,

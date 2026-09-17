@@ -432,14 +432,12 @@ module.exports = (ctx) => {
   // gesperrt ist, wer nicht selbst kaempft.
   const MONSTER_LOCKS_OTHERS = new Set(['RIESENSTINKTIER']);
   //
-  // ponytail: LUSTMONSTER ebenfalls nicht hier verdrahtet. Sein Kampftext
-  // verlangt zwingend Hilfe des ANDEREN Geschlechts, sonst automatische
-  // Flucht - das ist kein einfaches "Set von Monsternamen" wie oben, sondern
-  // ein Eingriff in handleRequestHelp/handleRespondHelp (Ablehnung erzwingen)
-  // plus FLEE_AUTOMATIC (automatische Flucht ohne passende Hilfe). Die
-  // Schlimmen Dinge (Stufe plus anhaltender Fluch auf Hand-Gegenstände im
-  // naechsten Kampf) siehe Kommentar bei CONSEQUENCE_OVERRIDES in
-  // src/cards/consequences.js. Gleiche Quelle: Design-Spec §6, Welle 3.
+  // LUSTMONSTER: "Du musst dir von einem Charakter des anderen Geschlechts
+  // helfen lassen ... sonst kannst du das Lustmonster nicht besiegen. Findest
+  // du keinen passenden Charakter, musst du leider flüchten." Bewusst NICHT
+  // in FLEE_AUTOMATIC: das Set laesst eine Flucht GELINGEN, hier geht es
+  // darum, dass der Kampf nicht GEWONNEN werden kann (siehe resolveCombat).
+  const MONSTER_REQUIRES_OTHER_GENDER = new Set(['LUSTMONSTER']);
 
   // --- Weglaufen -------------------------------------------------------------
   // Feste Modifikatoren, die ohne Zutun gelten. Der Zauberer-Flugzauber ("+1
@@ -608,6 +606,6 @@ module.exports = (ctx) => {
     COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
     TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
     GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
-    BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT,
+    BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
   };
 };
