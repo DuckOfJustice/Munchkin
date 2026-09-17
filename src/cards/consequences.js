@@ -253,7 +253,8 @@ module.exports = (ctx) => {
       if (stufen) actions.push({ type: 'levelDelta', amount: stufen });
       if (karten) actions.push({ type: 'queuedDiscardOwn', count: karten, quelle: 'hand',
         cardName: 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT', prompt: 'Eine Handkarte ablegen' });
-      if (!actions.length) return { type: 'noEffect' };
+      // Kein Leerfall moeglich: stufen===0 erzwingt karten=2, stufen!=0
+      // liefert selbst schon einen Eintrag - actions ist nie leer.
       return actions.length === 1 ? actions[0] : { type: 'combo', actions };
     },
 

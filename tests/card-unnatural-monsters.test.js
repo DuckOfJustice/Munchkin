@@ -236,9 +236,21 @@ const PRIESTER = findCard('PRIESTER', 'class');
   const m = findCard('PESTRATTEN', 'monster');
   assert.ok(monsterRefusesTarget(m.id, makePlayer({ races: [ORK.id] })), 'vor Orks fluechten sie');
   assert.ok(!monsterRefusesTarget(m.id, makePlayer({})), 'alle anderen muessen kaempfen');
-  const { MONSTER_REFUSES_TREASURE } = require('../server.js');
-  assert.strictEqual(MONSTER_REFUSES_TREASURE['PESTRATTEN'], m.treasureCount,
-    'der hinterlassene Schatz entspricht dem Schatzwert der Karte');
+  // Verhaltensprüfung statt Tabellen-Check: MONSTER_REFUSES_TREASURE[...] ===
+  // m.treasureCount beweist nicht, dass beim Aufdecken auch wirklich Schaetze
+  // uebergeben werden - dafuer muss der echte Aufdeck-Pfad (handleDrawDoor)
+  // laufen.
+  const { handleDrawDoor } = require('../server.js');
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 5).map((c) => c.id);
+  const ork = makePlayer({ races: [ORK.id] });
+  const room = makeRoom([ork]);
+  room.turnPhase = 'tuer';
+  room.doorDeck = [m.id];
+  room.treasureDeck = schaetze.slice();
+  handleDrawDoor(room, ork.id);
+  assert.strictEqual(ork.hand.length, m.treasureCount,
+    'die Pestratten hinterlassen beim Aufdecken tatsaechlich ihren Schatzwert');
+  assert.strictEqual(room.turnPhase, 'aerger', 'der Zug laeuft trotzdem normal weiter');
 }
 
 // --- PTERODAKTYL: "Lege deine ganze Hand ODER alle kleinen Gegenstaende ab" -
@@ -581,9 +593,20 @@ const PRIESTER = findCard('PRIESTER', 'class');
 }
 
 // --- DIE SCHATTENNASE: "Du kannst nicht fluechten" --------------------------
+// Verhaltensprüfung statt Tabellen-Check: FLEE_IMPOSSIBLE.has(...) allein
+// beweist nicht, dass eine Flucht tatsaechlich verweigert wird - dafuer muss
+// der echte Fluchtpfad (handleAttemptFlee) laufen. +9 macht den Wurf ohne die
+// Sperre garantiert erfolgreich (siehe FILZLAUSE-Test in card-passives.test.js).
 {
-  const { FLEE_IMPOSSIBLE } = require('../server.js');
-  assert.ok(FLEE_IMPOSSIBLE.has('DIE SCHATTENNASE'), 'vor dem Schatten gibt es kein Entkommen');
+  const { handleAttemptFlee } = require('../server.js');
+  const schatten = findCard('DIE SCHATTENNASE', 'monster');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  room.combat = { actorId: p.id, helperId: null, monsterIds: [schatten.id],
+    actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: true };
+  handleAttemptFlee(room, p.id, 9);
+  assert.strictEqual(room.dieRoll.success, false,
+    'vor dem Schatten gibt es kein Entkommen - auch mit +9 nicht');
 }
 
 // --- PIÑATA, Niederlage -----------------------------------------------------
