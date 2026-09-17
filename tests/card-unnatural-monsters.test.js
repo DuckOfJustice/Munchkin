@@ -1354,7 +1354,7 @@ const PRIESTER = findCard('PRIESTER', 'class');
 // +3 im Kampf gibt."
 {
   const { handleDrawDoor, handleResolveCardChoice, applyPrimitiveAction,
-    combatTotals, istGrosserGegenstand } = require('../server.js');
+    combatTotals, istGrosserGegenstand, handleEquipItem } = require('../server.js');
   const haendchen = findCard('EISKALTES HÄNDCHEN', 'monster');
   const ring = findCard('WUNSCHRING');
 
@@ -1407,6 +1407,27 @@ const PRIESTER = findCard('PRIESTER', 'class');
       actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
     assert.strictEqual(combatTotals(room).playerStrength - combatTotals(raumOhne).playerStrength, 3,
       'die besaenftigte Hand gibt +3 im Kampf');
+  }
+  // 4. Die rohe Monsterkarte auf der Hand ist KEINE Ausruestung: sie kommt
+  //    ueber Beute, Erstausteilung, aufgedeckte Tueren und Leichenfunde in
+  //    Haende - ohne diese Sperre gaebe es den +3 gratis, ohne Wunschring.
+  {
+    const p = makePlayer({ hand: [haendchen.id] });
+    const room = makeRoom([p]);
+    room.turnPhase = 'ausruesten';
+    const ohne = makePlayer({ id: 'p9', name: 'C', level: p.level });
+    const raumOhne = makeRoom([ohne]);
+    handleEquipItem(room, p.id, haendchen.id);
+    assert.ok(p.hand.includes(haendchen.id), 'die Monsterkarte bleibt auf der Hand');
+    assert.strictEqual((p.equipped.special || []).length, 0, 'kein Spezialslot fuer die rohe Monsterkarte');
+    room.combat = { actorId: p.id, helperId: null,
+      monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    raumOhne.combat = { actorId: ohne.id, helperId: null,
+      monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    assert.strictEqual(combatTotals(room).playerStrength - combatTotals(raumOhne).playerStrength, 0,
+      'und gibt keinen Kampfbonus, solange sie nicht besaenftigt ist');
   }
 }
 

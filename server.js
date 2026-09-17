@@ -5188,6 +5188,17 @@ function handleEquipItem(room, playerId, cardId) {
   const special = specialSlotRule(c);
   if (special) {
     if (specialSlotCards(player, special.slot).includes(cardId)) return; // liegt schon an
+    // EISKALTES HÄNDCHEN: die Spezialslot-Regel (+3) gilt nur fuer die
+    // BESAENFTIGTE Monsterkarte. Eine Monsterkarte kommt legitim einzig
+    // ueber das Primitiv 'haendchenBesaenftigen' in equipped.special - das
+    // setzt den Slot direkt und bezahlt dafuer den Wunschring. Aus der Hand
+    // (Beute, Erstausteilung, aufgedeckte Tuer, Leichenfund) darf sie
+    // niemals angelegt werden, sonst gaebe es den +3 gratis.
+    if (c.category === 'monster') {
+      log(room, `${player.name} kann "${c.name}" nicht anlegen - eine Monsterkarte rüstet man nicht aus.`);
+      touchRoom(room);
+      return;
+    }
     // FALSCHE OHREN: "Erlaubt dem Traeger, elfen-exklusive Gegenstaende zu
     // nutzen." - deshalb hier itemGrantsTrait statt nur hasRace.
     if (!geschummelt && special.races
