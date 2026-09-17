@@ -423,17 +423,14 @@ module.exports = (ctx) => {
   // jemand mithilft, kämpfen beide gegen dasselbe Monster, also trifft die
   // Einschränkung auch die Helfer:in.
   //
-  // ponytail: RIESENSTINKTIER bewusst NICHT in MONSTER_FORBIDS_HELP. Sein
-  // Kampftext geht weiter als "niemand hilft" - er verbietet auch, dich zu
-  // hintergehen oder Karten für oder gegen dich zu spielen, also quer durch
-  // Kampf-, Fluch- und Tauschpfade. Die Schlimmen Dinge ("keine Hilfe, bis
-  // alle Kleidung abgelegt ist; halber Goldwert") brauchen zudem einen
-  // zugübergreifenden Zustand am Spieler - genau die Erweiterung, die Welle 3
-  // im Design bewusst zuletzt einplant (siehe
-  // docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md §6).
-  // Aufruestweg: ein Set/Tracker analog zu activeCurses, das an jeder Stelle
-  // geprüft wird, die "gegen dich" spielen kann (Hilfe, Flüche, Tausch,
-  // Kampfkarten) - deutlich mehr Flaeche als eine einzelne Tabellenzeile.
+  // RIESENSTINKTIER: "Deine 'Freunde' kommen nicht dichter als 20 Meter ...
+  // Sie können dir nicht helfen, dich hintergehen, oder beliebige Karten für
+  // oder gegen dich verwenden - außer Wandernde Monster und
+  // Monsterverstärker." Bewusst NICHT in MONSTER_FORBIDS_HELP: das Set sperrt
+  // nur die Hilfe, hier ist alles gesperrt ausser zwei Ausnahmen. Umgesetzt
+  // als weisse Liste in stinktierSperre/handlePlayCombatCard (server.js) -
+  // gesperrt ist, wer nicht selbst kaempft.
+  const MONSTER_LOCKS_OTHERS = new Set(['RIESENSTINKTIER']);
   //
   // ponytail: LUSTMONSTER ebenfalls nicht hier verdrahtet. Sein Kampftext
   // verlangt zwingend Hilfe des ANDEREN Geschlechts, sonst automatische
@@ -602,7 +599,8 @@ module.exports = (ctx) => {
   return {
     CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
     MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
-    MONSTER_IGNORES_WEAPONS, MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
+    MONSTER_IGNORES_WEAPONS, MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, MONSTER_LOCKS_OTHERS,
+    FLEE_ITEM_BONUS,
     FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,
     FLEE_TREASURE_ITEMS, MONSTER_EXTRA_LEVEL, FIRE_ITEMS,
     CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,

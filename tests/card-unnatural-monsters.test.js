@@ -727,5 +727,78 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.strictEqual(clearActiveCurseByKind(p, 'noHandItemBonus'), false, 'ein zweiter Aufruf findet nichts mehr');
 }
 
+// --- RIESENSTINKTIER, Kampftext ---------------------------------------------
+// "Sie können dir nicht helfen, dich hintergehen, oder beliebige Karten für
+// oder gegen dich verwenden - außer Wandernde Monster und Monsterverstärker."
+// Weisse Liste: gesperrt ist alles, erlaubt sind genau die zwei Ausnahmen.
+{
+  const { handleRequestHelp, handleThiefBackstab, handlePlayCombatCard,
+    backstabMalus } = require('../server.js');
+  const stinktier = findCard('RIESENSTINKTIER', 'monster');
+  const verstaerker = ALL_CARDS.find((c) => c.category === 'door_other'
+    && typeof c.bonus === 'number' && c.bonus !== 0 && /für\s+(das\s+)?Monster/i.test(c.text || ''));
+  assert.ok(verstaerker, 'Testvoraussetzung: es gibt einen Monsterverstaerker');
+  // ponytail: die urspruengliche Suche ueber ein numerisches bonus-Feld
+  // findet keinen Trank - echte Kampftraenke (FLAMMENDER GIFTTRANK & Co.)
+  // tragen ihren Bonus nur im Fliesstext (parseCombatPotion), bonus bleibt
+  // null. Deshalb hier eine konkrete, garantiert vorhandene Karte statt der
+  // Regex-Suche.
+  const trank = findCard('FLAMMENDER GIFTTRANK', 'treasure_other');
+
+  function stinktierKampf() {
+    const kaempfer = makePlayer({ id: 'p1', name: 'A' });
+    const dritter = makePlayer({ id: 'p2', name: 'B', classes: [findCard('DIEB', 'class').id] });
+    const room = makeRoom([kaempfer, dritter]);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [stinktier.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    return { room, kaempfer, dritter };
+  }
+
+  // 1. Keine Hilfe.
+  {
+    const { room, dritter } = stinktierKampf();
+    handleRequestHelp(room, 'p1', dritter.id, 0);
+    assert.ok(!room.combat.helperPending, 'gegen das Stinktier wird niemand um Hilfe gebeten');
+  }
+  // 2. Kein Hintergehen.
+  {
+    const { room, dritter } = stinktierKampf();
+    const ablage = ALL_CARDS[0].id;
+    dritter.hand.push(ablage);
+    handleThiefBackstab(room, dritter.id, ablage, 'p1');
+    assert.strictEqual(backstabMalus(room), 0, 'der Rueckenfall greift nicht');
+    assert.ok(dritter.hand.includes(ablage), 'und kostet auch keine Karte');
+  }
+  // 3. Eine dritte Person spielt eine beliebige Kampfkarte: gesperrt.
+  {
+    const { room, dritter } = stinktierKampf();
+    dritter.hand.push(trank.id);
+    const vorher = room.combat.actorModifier + room.combat.monsterModifier;
+    handlePlayCombatCard(room, dritter.id, trank.id);
+    assert.strictEqual(room.combat.actorModifier + room.combat.monsterModifier, vorher,
+      'eine fremde Kampfkarte bleibt wirkungslos');
+    assert.ok(dritter.hand.includes(trank.id), 'und bleibt auf der Hand');
+  }
+  // 4. Gegenprobe - die weisse Liste ist wirklich weiss: derselbe Weg mit
+  //    einem Monsterverstaerker MUSS durchgehen, sonst prueft Fall 3 nur,
+  //    dass handlePlayCombatCard ueberhaupt nichts tut.
+  {
+    const { room, dritter } = stinktierKampf();
+    dritter.hand.push(verstaerker.id);
+    handlePlayCombatCard(room, dritter.id, verstaerker.id);
+    assert.ok(room.combat.monsterModifier !== 0,
+      'ein Monsterverstaerker ist ausdruecklich erlaubt und wirkt');
+  }
+  // 5. Die kaempfende Person selbst ist NICHT gesperrt - der Text richtet
+  //    sich an "deine Freunde".
+  {
+    const { room, kaempfer } = stinktierKampf();
+    kaempfer.hand.push(trank.id);
+    handlePlayCombatCard(room, kaempfer.id, trank.id);
+    assert.ok(!kaempfer.hand.includes(trank.id),
+      'wer gegen das Stinktier kaempft, spielt seine eigenen Karten weiter');
+  }
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

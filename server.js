@@ -1053,6 +1053,11 @@ function handlePlayCurseFromHand(room, playerId, cardId, targetId) {
     touchRoom(room);
     return;
   }
+  if (stinktierSperre(room, playerId) && combatParticipants(room).some((p) => p.id === targetId)) {
+    log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - kein Fluch gegen ${target.name}.`);
+    touchRoom(room);
+    return;
+  }
   removeFromHand(player, cardId);
   discardCard(room, cardId);
   // PRÄCHTIGER HUT / AMULETT koennen den Fluch umlenken oder ganz abwehren.
@@ -2313,6 +2318,16 @@ function kartenSperreAktiv(room, wer, gegen) {
   return (room.kartenSperren || []).some((k) => k.gesperrt === wer && k.geschuetzt === gegen);
 }
 
+// RIESENSTINKTIER: gesperrt ist, wer NICHT selbst kaempft. Der Kartentext
+// richtet sich an "deine Freunde" ("SIE können dir nicht helfen, dich
+// hintergehen, oder ..."), nicht an die kaempfende Person - die spielt ihre
+// eigenen Waffen und Traenke weiter. Eine Helfer:in kann es nicht geben, weil
+// schon die Anfrage gesperrt ist.
+function stinktierSperre(room, playerId) {
+  if (!room.combat || !combatHasMonster(room, MONSTER_LOCKS_OTHERS)) return false;
+  return !combatParticipants(room).some((p) => p.id === playerId);
+}
+
 function applyTargetAction(room, actor, target, action) {
   switch (action.type) {
     case 'kartenSperre': {
@@ -2683,7 +2698,8 @@ const passivesFactory = require('./src/cards/passives.js');
 const {
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
   MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
-  MONSTER_IGNORES_WEAPONS, MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
+  MONSTER_IGNORES_WEAPONS, MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, MONSTER_LOCKS_OTHERS,
+  FLEE_ITEM_BONUS,
   FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,
   FLEE_TREASURE_ITEMS, MONSTER_EXTRA_LEVEL, FIRE_ITEMS,
   CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
@@ -3280,6 +3296,11 @@ function handleThiefBackstab(room, playerId, discardCardId, targetId) {
   const stichOMat = dieb && equippedItemIds(dieb).some((id) => BACKSTAB_ITEMS.has((card(id) || {}).name));
   if (!dieb || !opfer || (!hasClass(dieb, 'DIEB') && !stichOMat)) return;
   if (dieb.id === opfer.id) return;                                     // nicht sich selbst
+  if (stinktierSperre(room, playerId)) {
+    log(room, `${dieb.name} kommt am Riesenstinktier nicht vorbei - kein Rueckenfall.`);
+    touchRoom(room);
+    return;
+  }
   if (!combatParticipants(room).some((p) => p.id === opfer.id)) return; // nur Kaempfende
   if (!dieb.hand.includes(discardCardId)) return;
   c.backstabs = c.backstabs || {};
@@ -3993,6 +4014,20 @@ function handlePlayCombatCard(room, playerId, cardId) {
     touchRoom(room);
     return;
   }
+  // RIESENSTINKTIER, weisse Liste: erlaubt sind genau die zwei Ausnahmen, die
+  // der Kartentext nennt. Alles andere ist gesperrt - ausdruecklich auch
+  // KUMPEL, ILLUSION, HILF MIR und ÜBERFALLTRANK: es sind Karten, die "fuer
+  // oder gegen dich" wirken, und die Karte nimmt sie nicht aus.
+  if (stinktierSperre(room, playerId)) {
+    const stinktierKarte = card(cardId);
+    const erlaubt = stinktierKarte
+      && (stinktierKarte.name === 'WANDERNDES MONSTER' || isMonsterEnhancerCard(stinktierKarte));
+    if (!erlaubt) {
+      log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - nur Wandernde Monster und Monsterverstaerker gehen durch.`);
+      touchRoom(room);
+      return;
+    }
+  }
   const c = card(cardId);
   if (!c) return;
   // COMBAT_REACTION_CARDS (Kumpel, Wanderndes Monster, Illusion, Hilf mir,
@@ -4256,6 +4291,11 @@ function handleRequestHelp(room, playerId, targetId, reward) {
   const actor = findPlayer(room, playerId);
   const target = findPlayer(room, targetId);
   if (!target || targetId === c.actorId) return;
+  if (stinktierSperre(room, targetId)) {
+    log(room, 'Das Riesenstinktier haelt alle anderen auf 20 Meter Abstand - niemand hilft.');
+    touchRoom(room);
+    return;
+  }
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
   if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
     log(room, 'Gegen dieses Monster darf niemand helfen.');
