@@ -30,6 +30,11 @@
       <input id="joinNameInput" maxlength="20" placeholder="z. B. Alex">
       <label>Raum-Code</label>
       <input id="codeInput" maxlength="4" placeholder="z. B. AB12" style="text-transform:uppercase">
+      <label class="switch" id="joinSpectatorToggle" style="margin:10px 0 4px;">
+        <span class="switch-text">👀 Nur zuschauen (keine Mitspieler:in)</span>
+        <input type="checkbox" id="joinSpectatorInput">
+        <span class="switch-track"><span class="switch-knob"></span></span>
+      </label>
       <button id="btnJoin" class="primary wide">Beitreten</button>
     </div>
 
@@ -61,6 +66,14 @@
       <button id="btnStart" class="primary">Spiel starten</button>
     </div>
     <p class="hint">Nur der Host (⭐) sieht diese Steuerung.</p>
+
+    <!-- Eigener, klar abgetrennter Bereich fuer Zuschauer:innen (siehe
+         joinAsSpectator) - getrennt von der Spieler:innen-Liste oben, damit
+         nie der Eindruck entsteht, sie wuerden mitspielen. -->
+    <div id="lobbySpectatorsBox" class="hidden">
+      <h3>👀 Zuschauer:innen (<span id="lobbySpectatorCount">0</span>)</h3>
+      <ul id="lobbySpectators" class="playerlist"></ul>
+    </div>
   </div>
 </div>
 
@@ -77,6 +90,12 @@
   <div class="layout">
     <aside class="sidebar">
       <div id="playerList" class="playerlist compact"></div>
+      <!-- Eigener, klar abgetrennter Bereich fuer Zuschauer:innen (siehe
+           joinAsSpectator) - bleibt leer/versteckt, solange niemand zuschaut. -->
+      <div id="spectatorListBox" class="hidden">
+        <h3>👀 Zuschauer:innen (<span id="spectatorCount">0</span>)</h3>
+        <div id="spectatorList" class="playerlist compact"></div>
+      </div>
       <div id="discardPeek" class="panel small"></div>
     </aside>
 
@@ -106,7 +125,7 @@
   <div id="bottomDock" class="bottom-dock">
     <section class="mypanel floating" id="myPanel">
       <div class="mypanel-head">
-        <h3>Meine Figur - Stufe <span id="myLevel"></span></h3>
+        <h3><span id="myPanelLabel">Meine Figur</span> - Stufe <span id="myLevel"></span></h3>
         <span id="myStrength" class="tag"></span>
         <div id="myBadges" class="row gap wrap"></div>
       </div>
@@ -116,7 +135,10 @@
 
     <div id="hand-bar" class="hand-bar">
       <div class="hand-bar-top">
-        <div class="hand-bar-label">Deine Hand</div>
+        <div class="hand-bar-label" id="handBarLabel">Deine Hand</div>
+        <!-- Nur fuer Zuschauer:innen (siehe applySpectatorMode): Auswahl, wessen
+             Hand/Ausruestung oben+hier angezeigt wird. -->
+        <select id="spectateSelect" class="hidden"></select>
         <label class="switch" id="handSortToggle">
           <span class="switch-text">Nach Typ sortieren</span>
           <input type="checkbox" id="handSortInput">

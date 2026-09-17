@@ -64,6 +64,9 @@ function card(id) { return CARDS_BY_ID.get(id) || null; }
 const MIN_PLAYERS = 1; // Munchkin braucht offiziell 3+, aber solo/zu zweit testen soll möglich sein
 const MAX_PLAYERS = 6;
 const MAX_ROOMS = 500;
+// Zuschauer:innen zaehlen NICHT gegen MAX_PLAYERS (sie spielen nicht mit),
+// bekommen aber ein eigenes, grosszuegiges Limit gegen Missbrauch.
+const MAX_SPECTATORS = 30;
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_LEVEL = 10;
 const HAND_LIMIT = 5;
@@ -170,12 +173,47 @@ function newPlayer(name, socketId, isBot) {
   };
 }
 
+// Zuschauer:innen sind KEINE Spieler:innen: kein hand/equipped/level, keine
+// Spielaktionen (act() prueft socket.data.playerId, das Zuschauer-Sockets nie
+// gesetzt bekommen - siehe joinAsSpectator/socket.data.spectatorId). Sie
+// duerfen laut Bugreport per Dropdown IRGENDEINE Hand ansehen, siehe
+// sendSpectatorInfo - deshalb reicht hier Name/Verbindung/Token.
+function newSpectator(name, socketId) {
+  return { id: makeId(), token: makeId(), name, socketId: socketId || null, connected: true };
+}
+
+// Gemeinsame Logik fuer den Zuschauer-Beitritt: sowohl fuer den expliziten
+// "Nur zuschauen"-Schalter (joinAsSpectator) als auch fuer den Fall, dass
+// jemand ganz normal ueber "Beitreten" in einen Raum will, dessen Partie
+// schon laeuft (joinRoom faellt dann hierher zurueck, statt einen Fehler
+// zu zeigen - siehe dort). `auto` steuert nur die Log-Meldung.
+function trySpectatorJoin(room, name, socket, cb, { auto = false } = {}) {
+  if (room.spectators.length >= MAX_SPECTATORS) {
+    return cb({ ok: false, error: 'Gerade zu viele Zuschauer:innen in diesem Raum.' });
+  }
+  name = (name || '').trim().slice(0, 20) || 'Zuschauer:in';
+  const vergeben = room.players.some((p) => p.name.toLowerCase() === name.toLowerCase())
+    || room.spectators.some((s) => s.name.toLowerCase() === name.toLowerCase());
+  if (vergeben) return cb({ ok: false, error: 'Dieser Name ist bereits vergeben.' });
+  const spectator = newSpectator(name, socket.id);
+  room.spectators.push(spectator);
+  socket.join(room.code);
+  socket.data.roomCode = room.code;
+  socket.data.spectatorId = spectator.id;
+  log(room, auto
+    ? `${name} wollte beitreten, aber die Partie läuft schon - schaut jetzt als Zuschauer:in zu.`
+    : `${name} schaut als Zuschauer:in zu.`);
+  cb({ ok: true, code: room.code, spectatorId: spectator.id, token: spectator.token, autoSpectator: auto });
+  broadcastState(room);
+}
+
 function createRoom() {
   const code = makeRoomCode();
   const room = {
     code,
     hostId: null,
     players: [],
+    spectators: [],
     settings: { sets: { base: true, clericalerrors: true, unnaturalaxe: true } },
     phase: 'lobby', // lobby | playing | gameend
     turnIndex: 0,
@@ -515,6 +553,7 @@ function publicState(room) {
     code: room.code,
     phase: room.phase,
     players: room.players.map((p) => publicPlayer(room, p)),
+    spectators: (room.spectators || []).map((s) => ({ id: s.id, name: s.name, connected: s.connected })),
     hostId: room.hostId,
     minPlayers: MIN_PLAYERS,
     maxPlayers: MAX_PLAYERS,
@@ -654,8 +693,19 @@ function broadcastState(room) {
   io.to(room.code).emit('gameState', publicState(room));
   io.to(room.code).emit('cardIndex', ALL_CARDS_MIN);
   room.players.forEach((p) => sendInfoTo(room, p));
+  (room.spectators || []).forEach((s) => sendSpectatorInfo(room, s));
   touchRoom(room);
   scheduleBotActionsIfNeeded(room);
+}
+
+// Zuschauer:innen bekommen (laut Bugreport) ALLE Haende per Dropdown zu sehen,
+// nicht nur die einer Person - deshalb ein eigener Broadcast statt sendInfoTo
+// (das ist strikt privat pro Spieler:in).
+function sendSpectatorInfo(room, spectator) {
+  if (!spectator.socketId) return;
+  const hands = {};
+  room.players.forEach((p) => { hands[p.id] = p.hand; });
+  io.to(spectator.socketId).emit('spectatorInfo', { spectatorId: spectator.id, hands });
 }
 
 // Schlanke, öffentliche Kartentabelle (einmalig an Clients gesendet) - so
@@ -890,6 +940,10 @@ function handleDrawDoor(room, playerId) {
           return;
         }
         room.pendingConsequence = { playerId: opfer.id, kind: 'curse', cardId: id, text: c.text || c.name, autoApplied: null, choice: null,
+          // Anzeige im Spielfeld ("Fluch - X"): wer die Tuerkarte gezogen hat
+          // (bei den meisten Fluechen == das Opfer selbst - der Client zeigt
+          // das nur an, wenn beide auseinanderfallen, z.B. per Umlenkung).
+          casterId: player.id,
           keepPhase: opfer.id !== player.id };
         if (opfer.id !== player.id) room.turnPhase = 'aerger';
         log(room, `Fluch! ${opfer.name} muss die Auswirkung anwenden: "${c.name}".`, [id]);
@@ -1012,6 +1066,8 @@ function handlePlayCurseFromHand(room, playerId, cardId, targetId) {
     room.pendingConsequence = {
       playerId: opfer.id, kind: 'curse', cardId, text: c.text || c.name,
       autoApplied: null, choice: null, keepPhase: true,
+      // Anzeige im Spielfeld ("Fluch - X"): wer den Fluch gespielt hat.
+      casterId: player.id,
     };
     log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${opfer.name}!`, [cardId]);
     autoApplyLossConsequence(room, opfer, [{ name: c.name, text: c.text, cardId }]);
@@ -5571,7 +5627,10 @@ io.on('connection', (socket) => {
         return;
       }
     }
-    if (room.phase !== 'lobby') return cb({ ok: false, error: 'Das Spiel läuft bereits.' });
+    // Die Partie läuft schon: statt einer Fehlermeldung setzen wir die Person
+    // direkt als Zuschauer:in in den Raum - kein Sackgassen-Fehler, sondern
+    // derselbe Weg wie über den expliziten "Nur zuschauen"-Schalter.
+    if (room.phase !== 'lobby') return trySpectatorJoin(room, name, socket, cb, { auto: true });
     if (room.players.length >= MAX_PLAYERS) return cb({ ok: false, error: `Der Raum ist voll (max. ${MAX_PLAYERS}).` });
     name = (name || '').trim().slice(0, 20) || 'Spieler';
     if (room.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
@@ -5588,9 +5647,57 @@ io.on('connection', (socket) => {
     broadcastState(room);
   });
 
+  // Zuschauer:innen: eigener Beitritt (kein Namens-/Platzlimit wie bei
+  // Spielenden, kein room.phase==='lobby'-Zwang - Zuschauen soll auch bei
+  // einer schon laufenden Partie jederzeit moeglich sein), mit demselben
+  // Token-Wiederverbinden wie joinRoom. WICHTIG: socket.data.playerId bleibt
+  // dabei unangetastet (null) - act() (jede Spielaktion) verlangt genau das
+  // Feld, ein Zuschauer-Socket kann also serverseitig gar keine Spielaktion
+  // ausloesen, selbst wenn der Client manipuliert wuerde.
+  onSafe(socket, 'joinAsSpectator', ({ code, name, token }, cb) => {
+    if (isRateLimited(`joinSpectator:${getClientIp(socket)}`, 20, 60 * 1000)) {
+      return cb({ ok: false, error: 'Zu viele Versuche. Bitte kurz warten.' });
+    }
+    code = (code || '').trim().toUpperCase();
+    const room = rooms.get(code);
+    if (!room) return cb({ ok: false, error: 'Diesen Raum gibt es nicht.' });
+
+    if (token) {
+      const existing = room.spectators.find((s) => s.token === token);
+      if (existing) {
+        existing.socketId = socket.id;
+        existing.connected = true;
+        socket.join(room.code);
+        socket.data.roomCode = room.code;
+        socket.data.spectatorId = existing.id;
+        log(room, `${existing.name} schaut wieder als Zuschauer:in zu.`);
+        cb({ ok: true, code: room.code, spectatorId: existing.id, token: existing.token, rejoined: true });
+        broadcastState(room);
+        return;
+      }
+    }
+    trySpectatorJoin(room, name, socket, cb);
+  });
+
   onSafe(socket, 'leaveRoom', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room) return;
+    if (socket.data.spectatorId) {
+      const spec = room.spectators.find((s) => s.id === socket.data.spectatorId);
+      if (spec) {
+        room.spectators = room.spectators.filter((s) => s.id !== spec.id);
+        log(room, `${spec.name} (Zuschauer:in) hat den Raum verlassen.`);
+      }
+      socket.leave(room.code);
+      socket.data.roomCode = null;
+      socket.data.spectatorId = null;
+      if (room.players.length === 0 && room.spectators.length === 0) {
+        if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+        if (room.botTimer) clearTimeout(room.botTimer);
+        rooms.delete(room.code);
+      } else broadcastState(room);
+      return;
+    }
     const player = findPlayer(room, socket.data.playerId);
     if (!player) return;
     if (room.phase === 'lobby') {
@@ -5608,7 +5715,7 @@ io.on('connection', (socket) => {
     socket.leave(room.code);
     socket.data.roomCode = null;
     socket.data.playerId = null;
-    if (room.players.length === 0) {
+    if (room.players.length === 0 && room.spectators.length === 0) {
       // Aufräum-Timer mitnehmen, sonst hält er den Raum noch stundenlang im
       // Speicher, obwohl ihn niemand mehr erreichen kann.
       if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
@@ -5710,6 +5817,15 @@ io.on('connection', (socket) => {
   onSafe(socket, 'disconnect', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room) return;
+    if (socket.data.spectatorId) {
+      const spec = room.spectators.find((s) => s.id === socket.data.spectatorId);
+      if (spec) {
+        spec.connected = false;
+        log(room, `${spec.name} (Zuschauer:in) hat die Verbindung verloren.`);
+        broadcastState(room);
+      }
+      return;
+    }
     const player = findPlayer(room, socket.data.playerId);
     if (!player) return;
     player.connected = false;

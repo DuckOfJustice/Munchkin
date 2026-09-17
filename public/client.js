@@ -56,6 +56,17 @@
   let session = loadSession();
   let sellSelection = new Set();
 
+  // -- Zuschauer:innen --------------------------------------------------
+  // Eine Zuschauer-Person steckt NIE in state.players und bekommt nie
+  // 'yourInfo' (das gibt es nur fuer echte Mitspieler:innen) - myInfo.playerId
+  // bleibt fuer sie also dauerhaft null. Das macht alle bestehenden
+  // "ist das MEINE Aktion"-Pruefungen im Rendering automatisch inert (siehe
+  // isMyTurn/me()); die drei Variablen hier steuern nur die eigens dafuer
+  // gebaute Lese-Ansicht (welche Hand gerade angezeigt wird).
+  let isSpectator = false;
+  let spectateTargetId = null; // wessen Hand/Ausruestung gerade angezeigt wird
+  let spectatorHands = {}; // { [playerId]: cardId[] } - vom Server per spectatorInfo
+
   // Handkarten nach Typ sortieren. Reihenfolge bewusst nach Spielablauf, nicht
   // alphabetisch: erst was man ausspielt (Monster, Fluch), dann was man
   // anlegt (Rasse/Klasse/Gegenstand), dann der Rest.
@@ -126,8 +137,25 @@
     const code = $('codeInput').value.trim().toUpperCase();
     if (!name) return showStartError('Bitte einen Namen eingeben.');
     if (!code) return showStartError('Bitte einen Raum-Code eingeben.');
+    const spectatorInput = $('joinSpectatorInput');
+    if (spectatorInput && spectatorInput.checked) {
+      socket.emit('joinAsSpectator', { code, name }, (res) => {
+        if (!res.ok) return showStartError(res.error);
+        isSpectator = true;
+        saveSession({ code: res.code, spectatorId: res.spectatorId, token: res.token, name, isSpectator: true });
+      });
+      return;
+    }
     socket.emit('joinRoom', { code, name }, (res) => {
       if (!res.ok) return showStartError(res.error);
+      // Die Partie kann inzwischen schon laufen - der Server setzt uns dann
+      // statt eines Fehlers direkt als Zuschauer:in in den Raum
+      // (siehe trySpectatorJoin/autoSpectator in server.js).
+      if (res.autoSpectator) {
+        isSpectator = true;
+        saveSession({ code: res.code, spectatorId: res.spectatorId, token: res.token, name, isSpectator: true });
+        return;
+      }
       saveSession({ code: res.code, playerId: res.playerId, token: res.token, name });
     });
   });
@@ -183,6 +211,14 @@
 
   socket.on('connect', () => {
     if (session && session.code) {
+      if (session.isSpectator) {
+        isSpectator = true;
+        socket.emit('joinAsSpectator', { code: session.code, name: session.name, token: session.token }, (res) => {
+          if (!res.ok) { clearSession(); isSpectator = false; showScreen('start'); return; }
+          saveSession({ code: res.code, spectatorId: res.spectatorId, token: res.token, name: session.name, isSpectator: true });
+        });
+        return;
+      }
       socket.emit('joinRoom', { code: session.code, name: session.name, token: session.token }, (res) => {
         if (!res.ok) { clearSession(); showScreen('start'); return; }
         saveSession({ code: res.code, playerId: res.playerId, token: res.token, name: session.name });
@@ -211,6 +247,10 @@
   socket.on('cardIndex', (idx) => { const first = !Object.keys(cardIndex).length; cardIndex = idx; if (first && state) render(); });
   socket.on('yourInfo', (info) => { if (!changed('yourInfo', info)) return; myInfo = info; if (state) render(); });
   socket.on('gameState', (s) => { if (!changed('gameState', s)) return; state = s; render(); });
+  // Nur fuer Zuschauer:innen (siehe joinAsSpectator/sendSpectatorInfo auf dem
+  // Server) - alle Haende auf einmal, damit das Dropdown ohne Serverfrage
+  // zwischen Spieler:innen umschalten kann.
+  socket.on('spectatorInfo', (info) => { if (!changed('spectatorInfo', info)) return; spectatorHands = info.hands || {}; if (state) render(); });
 
   // ---------------------------------------------------------------------
   // Rendering
@@ -272,6 +312,20 @@
     $('btnAddBot').onclick = () => socket.emit('addBot');
     $('btnStart').onclick = () => socket.emit('startGame');
     $('btnStart').disabled = state.players.length < 1;
+
+    // Eigener, klar abgetrennter Bereich (siehe joinAsSpectator) - bleibt
+    // versteckt, solange niemand zuschaut.
+    const specs = state.spectators || [];
+    $('lobbySpectatorsBox').classList.toggle('hidden', !specs.length);
+    $('lobbySpectatorCount').textContent = specs.length;
+    const specList = $('lobbySpectators');
+    specList.innerHTML = '';
+    specs.forEach((s) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>👀 ${escapeHtml(s.name)}${!s.connected ? ' <span class="tag off">offline</span>' : ''}</span>` +
+        (isSpectator && s.id === session.spectatorId ? '<span class="tag you">Du</span>' : '');
+      specList.appendChild(li);
+    });
   }
 
   // Sequenz-Animationen (Tuer aufdecken, Wuerfel, Beute) laufen nur bei einem
@@ -492,6 +546,7 @@
     playCardPlay();
     playReward();
     renderPlayerList();
+    renderSpectatorList();
     renderDiscardPeek();
     renderReveal();
     renderCombat();
@@ -501,6 +556,7 @@
     renderCardAction();
     renderPhaseActions();
     renderTradeArea();
+    renderSpectateSelect();
     renderMyPanel();
     renderLog();
 
@@ -535,6 +591,28 @@
     const box = $('playerList');
     box.innerHTML = '<h3>Spieler:innen</h3>';
     state.players.forEach((p) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'prow-wrap';
+
+      // Anhaltende Flüche (z.B. HUNGRIGER RUCKSACK) stehen als eigene kleine
+      // Kartenvorschau LINKS neben der Spielerzeile - vorher gab es dafür nur
+      // eine Anzahl ("🌀 Fluch x1") in der Zeile selbst, ohne zu verraten,
+      // WELCHER Fluch das ist.
+      const curses = p.activeCurses || [];
+      if (curses.length) {
+        const curseCol = document.createElement('div');
+        curseCol.className = 'prow-curses';
+        curses.forEach((f) => {
+          const img = document.createElement('img');
+          img.className = 'curseicon'; img.alt = ''; img.src = cardImageUrl(f.cardId);
+          img.title = `${f.name}${f.hinweis ? ` – ${f.hinweis}` : ''}`;
+          img.onerror = () => img.remove();
+          img.onclick = (e) => { e.stopPropagation(); openCardModal(f.cardId); };
+          curseCol.appendChild(img);
+        });
+        wrap.appendChild(curseCol);
+      }
+
       const row = document.createElement('div');
       row.className = 'prow clickable' + (p.id === state.turnPlayerId ? ' active-turn' : '');
       const equipIds = equippedIdsOf(p);
@@ -544,10 +622,20 @@
         (p.id === myInfo.playerId ? '<span class="tag you">Du</span> ' : '') +
         (!p.connected ? '<span class="tag off">offline</span> ' : '') +
         `<span class="tag">Stufe ${p.level}</span> <span class="tag">⚔ ${p.strength}</span>` +
-        (p.activeCurses && p.activeCurses.length ? ` <span class="tag">🌀 Fluch x${p.activeCurses.length}</span>` : '') +
         `</span>`;
       row.title = 'Klicken für Ausrüstung';
       row.addEventListener('click', () => openPlayerModal(p.id));
+
+      // Rasse/Klasse auch von ANDEREN Spieler:innen direkt sichtbar (wie im
+      // eigenen Panel/#myBadges) - vorher musste man dafuer erst das
+      // Spieler-Modal oeffnen. Steht bewusst UEBER der Ausruestungsreihe.
+      const badgeRow = document.createElement('div');
+      badgeRow.className = 'prow-badges';
+      p.races.forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
+      p.classes.forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+      (p.powerGroups || []).forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+      if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badgeRow.appendChild(textNode('Mensch, ohne Klasse'));
+      row.appendChild(badgeRow);
 
       // Kleine Vorschau-Icons der getragenen Gegenstaende direkt in der Zeile
       // (statt nur einer Anzahl) - eigener Klick pro Icon oeffnet die
@@ -570,15 +658,37 @@
       }
       row.appendChild(equipRow);
 
-      // Im Kampf wird nicht gehandelt (siehe darfHandeln im Server).
-      if (p.id !== myInfo.playerId && p.connected && !state.combat) {
+      // Im Kampf wird nicht gehandelt (siehe darfHandeln im Server). Zuschauer:
+      // innen handeln nie mit (myInfo.playerId ist fuer sie ohnehin immer
+      // null, "!== myInfo.playerId" waere sonst fuer JEDE Person wahr).
+      if (!isSpectator && p.id !== myInfo.playerId && p.connected && !state.combat) {
         const tradeBtn = document.createElement('button');
         tradeBtn.className = 'small'; tradeBtn.textContent = '🤝 Handeln';
         tradeBtn.style.marginTop = '6px';
         tradeBtn.onclick = (e) => { e.stopPropagation(); startTradeCompose(p.id); };
         row.appendChild(tradeBtn);
       }
-      box.appendChild(row);
+      wrap.appendChild(row);
+      box.appendChild(wrap);
+    });
+  }
+
+  // Eigener, klar abgetrennter Bereich unter der Spielerliste (siehe
+  // joinAsSpectator) - bleibt versteckt, solange niemand zuschaut.
+  function renderSpectatorList() {
+    const box = $('spectatorListBox');
+    const specs = (state.spectators || []);
+    box.classList.toggle('hidden', !specs.length);
+    if (!specs.length) return;
+    $('spectatorCount').textContent = specs.length;
+    const list = $('spectatorList');
+    list.innerHTML = '';
+    specs.forEach((s) => {
+      const row = document.createElement('div');
+      row.className = 'prow';
+      row.innerHTML = `<span>👀 ${escapeHtml(s.name)}</span>` +
+        `<span>${!s.connected ? '<span class="tag off">offline</span>' : ''}${isSpectator && s.id === session.spectatorId ? '<span class="tag you">Du</span>' : ''}</span>`;
+      list.appendChild(row);
     });
   }
 
@@ -1182,13 +1292,17 @@
       liste.appendChild(smallTag(`${bereit[p.id] ? '✅' : '⏳'} ${p.name}`, bereit[p.id] ? '#2e7d32' : '#777'));
     });
     div.appendChild(liste);
-    const row = document.createElement('div');
-    row.className = 'row gap wrap';
-    row.style.marginTop = '8px';
-    const btn = mkBtn(bereit[myInfo.playerId] ? 'Doch noch nicht bereit' : 'Bereit', () => socket.emit('prepReady', { ready: !bereit[myInfo.playerId] }));
-    if (!bereit[myInfo.playerId]) btn.className = 'primary';
-    row.appendChild(btn);
-    div.appendChild(row);
+    // Zuschauer:innen sind nicht Teil von state.players - fuer sie gibt es
+    // nichts anzulegen/zu bestaetigen, der Knopf waere irrefuehrend.
+    if (me()) {
+      const row = document.createElement('div');
+      row.className = 'row gap wrap';
+      row.style.marginTop = '8px';
+      const btn = mkBtn(bereit[myInfo.playerId] ? 'Doch noch nicht bereit' : 'Bereit', () => socket.emit('prepReady', { ready: !bereit[myInfo.playerId] }));
+      if (!bereit[myInfo.playerId]) btn.className = 'primary';
+      row.appendChild(btn);
+      div.appendChild(row);
+    }
     box.appendChild(div);
   }
 
@@ -1213,9 +1327,15 @@
     const pc = state.pendingConsequence;
     if (!pc) return;
     const player = state.players.find((p) => p.id === pc.playerId);
+    // Bei einem gespielten/umgelenkten Fluch weicht die Person, die ihn
+    // ausgeloest hat, vom Opfer ab - dann zeigen wir das an ("von X verflucht"),
+    // sonst (normaler eigener Tuerzug) waere es nur eine Wiederholung des Namens.
+    const caster = pc.casterId ? state.players.find((p) => p.id === pc.casterId) : null;
     const div = document.createElement('div');
     div.className = 'consequencebox';
     div.innerHTML = `<h3>${pc.kind === 'curse' ? '💀 Fluch' : '☠️ Schlimme Dinge'} - ${escapeHtml(player.name)}</h3>` +
+      (pc.kind === 'curse' && caster && caster.id !== player.id
+        ? `<p class="hint">Verflucht von ${escapeHtml(caster.name)}</p>` : '') +
       `<p>${pc.text ? formatCardText(pc.text) : '(kein Text)'}</p>` +
       (pc.autoApplied ? `<p class="autoconsequence">✅ <b>Automatisch berechnet:</b> ${escapeHtml(pc.autoApplied)}</p>` : '');
     if (pc.cardId) div.appendChild(cardTile(pc.cardId, {}));
@@ -1344,7 +1464,7 @@
     // Phasenaktion an (siehe handleDrawDoor) - dann auch keinen Knopf zeigen.
     if (state.phase === 'gameend' || state.combat || state.pendingConsequence
       || state.pendingCardAction || state.pendingRoll || state.turnPhase === 'vorbereitung') return;
-    if (!isMyTurn()) { box.appendChild(textNode('Warte, bis du an der Reihe bist...')); return; }
+    if (!isMyTurn()) { box.appendChild(textNode(isSpectator ? '👀 Du schaust nur zu - keine eigenen Aktionen.' : 'Warte, bis du an der Reihe bist...')); return; }
 
     if (state.turnPhase === 'tuer' && !state.revealedDoorCard) {
       const btn = document.createElement('button'); btn.className = 'primary phase-btn'; btn.textContent = '🚪 Tür eintreten (Karte aufdecken)';
@@ -1374,9 +1494,36 @@
     }
   }
 
+  // Wessen Ausruestung/Hand gerade in #myPanel/#hand-bar angezeigt wird:
+  // die eigene (me()), oder - als Zuschauer:in - die gerade ausgewaehlte
+  // Person (siehe renderSpectateSelect).
+  function panelTarget() { return isSpectator ? state.players.find((pl) => pl.id === spectateTargetId) : me(); }
+
+  function renderSpectateSelect() {
+    const sel = $('spectateSelect');
+    if (!sel) return;
+    sel.classList.toggle('hidden', !isSpectator);
+    if (!isSpectator) return;
+    // Ziel verloren (Person hat den Raum verlassen) oder noch keins gewaehlt:
+    // auf die erste Person zurueckfallen, statt eine leere Ansicht zu zeigen.
+    if (!spectateTargetId || !state.players.some((pl) => pl.id === spectateTargetId)) {
+      spectateTargetId = state.players.length ? state.players[0].id : null;
+    }
+    const optionsHtml = state.players.map((pl) => `<option value="${pl.id}">${escapeHtml(pl.name)}${pl.isBot ? ' 🤖' : ''}</option>`).join('');
+    if (sel.dataset.opts !== optionsHtml) { sel.innerHTML = optionsHtml; sel.dataset.opts = optionsHtml; }
+    sel.value = spectateTargetId || '';
+    sel.onchange = () => { spectateTargetId = sel.value; renderMyPanel(); };
+  }
+
   function renderMyPanel() {
-    const p = me();
-    if (!p) return;
+    const p = panelTarget();
+    const label = $('myPanelLabel');
+    if (label) label.textContent = isSpectator ? `👀 ${p ? p.name : '...'}` : 'Meine Figur';
+    if (!p) {
+      // Niemand im Raum (noch) oder Zuschauer:in ohne Auswahl - Panel/Hand leeren.
+      ['myLevel', 'myStrength', 'myBadges', 'myEquip', 'myHand'].forEach((id) => { const el = $(id); if (el) el.innerHTML = ''; });
+      return;
+    }
     $('myLevel').textContent = p.level;
     // Im eingeklappten Zustand bleibt nur .mypanel-head sichtbar - die
     // Kampfstaerke gehoert deshalb (wie Stufe und Rasse/Klasse) dort hinein,
@@ -1423,7 +1570,8 @@
         el.onclick = () => openCardModal(cardId);
         // Ablegen ist dieselbe Ausruestungsaenderung wie Anlegen - im Kampf
         // weist der Server sie ab, dann gibt es hier auch keinen Knopf.
-        if (darfAusruesten()) {
+        // Zuschauer:innen aendern grundsaetzlich NIE fremde Ausruestung.
+        if (!isSpectator && darfAusruesten()) {
           const btn = document.createElement('button');
           btn.className = 'small'; btn.textContent = 'ablegen';
           // stopPropagation: sonst oeffnet das Ablegen zugleich die Grossansicht.
@@ -1439,11 +1587,15 @@
     renderHand(p);
   }
 
-  function sortedHand() {
-    if (!handSort) return myInfo.hand;
-    // Kopie: die Reihenfolge in myInfo.hand kommt vom Server und bleibt die
-    // Wahrheit (z.B. fürs Ablegen beim Bot-Zug).
-    return myInfo.hand.slice().sort((a, b) => {
+  // ids: optional - die anzuzeigende Handkarten-Liste. Ohne Angabe die eigene
+  // (myInfo.hand); die Zuschauer-Ansicht (siehe renderHand) uebergibt hier
+  // explizit die gerade ausgewaehlte fremde Hand.
+  function sortedHand(ids) {
+    ids = ids || myInfo.hand;
+    if (!handSort) return ids;
+    // Kopie: die Reihenfolge kommt vom Server und bleibt die Wahrheit (z.B.
+    // fürs Ablegen beim Bot-Zug).
+    return ids.slice().sort((a, b) => {
       const ca = card(a);
       const cb = card(b);
       const ia = HAND_SORT_ORDER.indexOf(ca.category);
@@ -1456,21 +1608,39 @@
   function renderHand(p) {
     const box = $('myHand');
     box.innerHTML = '';
-    // PRIESTER "Auferstehung": nicht an eine einzelne Karte gebunden, also in
-    // einer eigenen Leiste ÜBER der Hand statt als Kachel dazwischen - sie ist
-    // keine Karte und soll auch nicht wie eine aussehen. Welche Stapel gehen,
-    // sagt der Server.
+    const label = $('handBarLabel');
+    if (label) label.textContent = isSpectator ? 'Handkarten von:' : 'Deine Hand';
+    // Verkaufen ist eine Aktion mit der EIGENEN Hand - fuer Zuschauer:innen
+    // ergibt die Leiste keinen Sinn und bleibt versteckt.
+    const sellBar = $('sellBar');
+    if (sellBar) sellBar.closest('.hand-bar-bottom').classList.toggle('hidden', isSpectator);
+
     const powersBox = $('handPowers');
     powersBox.innerHTML = '';
-    (myInfo.resurrectPiles || []).forEach((pile) => {
-      if (state.pendingCardAction || state.pendingRoll) return;
-      const btn = mkBtn(`✝️ Auferstehung statt Tür eintreten: oberste Karte vom ${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel nehmen (kostet 1 Handkarte)`,
-        () => socket.emit('priestResurrect', { pile }));
-      btn.classList.remove('small');
-      powersBox.appendChild(btn);
-    });
+    if (!isSpectator) {
+      // PRIESTER "Auferstehung": nicht an eine einzelne Karte gebunden, also in
+      // einer eigenen Leiste ÜBER der Hand statt als Kachel dazwischen - sie ist
+      // keine Karte und soll auch nicht wie eine aussehen. Welche Stapel gehen,
+      // sagt der Server.
+      (myInfo.resurrectPiles || []).forEach((pile) => {
+        if (state.pendingCardAction || state.pendingRoll) return;
+        const btn = mkBtn(`✝️ Auferstehung statt Tür eintreten: oberste Karte vom ${pile === 'door' ? 'Tür' : 'Schatz'}-Ablagestapel nehmen (kostet 1 Handkarte)`,
+          () => socket.emit('priestResurrect', { pile }));
+        btn.classList.remove('small');
+        powersBox.appendChild(btn);
+      });
+    }
     powersBox.classList.toggle('hidden', !powersBox.children.length);
     if (handSortInput) handSortInput.checked = handSort;
+
+    if (isSpectator) {
+      // Reine Lese-Ansicht: Karten der ausgewaehlten Person, OHNE jede
+      // Aktion (kein Ausspielen/Anlegen/Ablegen/Verkaufen) - siehe
+      // sendSpectatorInfo auf dem Server (alle Haende, nur fuer Zuschauer:innen).
+      const ids = (p && spectatorHands[p.id]) || [];
+      sortedHand(ids).forEach((id) => box.appendChild(cardTile(id, { hand: true })));
+      return;
+    }
     sortedHand().forEach((id) => {
       const tile = cardTile(id, { hand: true });
       tile.querySelector('.ctbody').appendChild(handActionsFor(id, p));
