@@ -2845,6 +2845,13 @@ function curseSuppressesItemBonuses(player) {
   return (player.activeCurses || []).some((f) => f.kind === 'noItemBonusExceptArmor');
 }
 
+// LUSTMONSTER: "in deinem naechsten Kampf werden deine Hand-Gegenstaende
+// nutzlos" - dieselbe Ausblendung, die MONDJUNGFERN im Kampf macht, nur an
+// der Person statt am Monster.
+function curseHidesHandItems(player) {
+  return (player.activeCurses || []).some((f) => f.kind === 'noHandItemBonus');
+}
+
 // HUHN AUF DEINEM KOPF: "-1 auf alle Wuerfe." Gilt fuer jeden Wurf, den die
 // Person selbst macht - deshalb zentral in rollWithWindow, durch das
 // inzwischen alle Wuerfe laufen. Der Wert bleibt bei mindestens 1: ein
@@ -3636,7 +3643,10 @@ function combatTotals(room) {
       // zweite Summe abzuziehen. Sonst ueberleben Kartenanhaenge an der Waffe,
       // konditionale Item-Boni (VORPALE KLINGE, EISRIESE-Verdopplung, ...)
       // und rassenabhaengige Item-Boni (GNOM) den Abzug.
-      const excludeIds = ignoreWeapons ? handItemIds(p) : null;
+      // ignoreWeapons haengt am Monster und gilt fuer beide Seiten gleich,
+      // curseHidesHandItems an der Person - deshalb steht der Ausdruck hier
+      // in der sides-Schleife, wo p bekannt ist.
+      const excludeIds = (ignoreWeapons || curseHidesHandItems(p)) ? handItemIds(p) : null;
       const items = curseSuppressesItemBonuses(p)
         ? ((card(p.equipped.armor) || {}).bonus || 0)
         : equippedBonusSum(p, room, excludeIds) + raceItemBonusSum(p, excludeIds)
@@ -6057,7 +6067,7 @@ module.exports = {
   fluechtenderId, naechsterFluechtling, beendeFluchtphase,
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurse, clearActiveCurseByKind, applyLingeringRule,
-  curseCombatModifier, curseSuppressesItemBonuses,
+  curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,

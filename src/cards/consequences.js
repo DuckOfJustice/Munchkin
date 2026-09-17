@@ -16,22 +16,14 @@ module.exports = (ctx) => {
   const kleineGegenstaendeAnzahl = (player, room) =>
     equippedItemIds(player).filter((id) => !istGrosserGegenstand(room, id)).length;
 
-  // ponytail: LUSTMONSTER und WEIHNACHTSMANN haben bewusst KEINEN Eintrag in
-  // CONSEQUENCE_OVERRIDES - ihr Text faellt durch den generischen Parser
+  // ponytail: WEIHNACHTSMANN hat bewusst KEINEN Eintrag in
+  // CONSEQUENCE_OVERRIDES - sein Text faellt durch den generischen Parser
   // (parseAutoConsequence) und bleibt manuell (siehe tests/auto-consequence.
-  // test.js, "manualOhneOverride"). Beide brauchen einen zugübergreifenden
-  // Zustand am Spieler (gilt erst im naechsten Kampf, oder bis ein Ereignis
-  // eintritt, das ueber diese eine Konsequenz hinausreicht) - genau die
-  // Erweiterung, die das Design bewusst in eine eigene, zuletzt geplante
-  // Welle 3 gelegt hat (siehe docs/superpowers/specs/2026-09-16-unnatural-
-  // axe-monster-design.md §6):
-  //   - LUSTMONSTER: "Verliere eine Stufe ... im naechsten Kampf sind deine
-  //     Hand-Gegenstaende nutzlos." Waere strukturell ein LINGERING_CURSES-
-  //     Eintrag (src/cards/reactions.js) mit kind 'noHandItemBonus' - dieser
-  //     Tracker haengt aber an FLUCH-Karten (handleDrawDoor), nicht an
-  //     Monster-Konsequenzen (autoApplyLossConsequence). Aufruestweg: den
-  //     LINGERING_CURSES-Mechanismus fuer Monster-Badstuffs oeffnen, oder
-  //     einen zweiten, gleich gebauten Tracker daneben.
+  // test.js, "manualOhneOverride"). Er braucht einen zugübergreifenden
+  // Zustand am Spieler (gilt bis ein Ereignis eintritt, das ueber diese eine
+  // Konsequenz hinausreicht) - genau die Erweiterung, die das Design bewusst
+  // in eine eigene, zuletzt geplante Welle 3 gelegt hat (siehe
+  // docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md §6):
   //   - WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... bis du ein
   //     Monster OHNE Hilfe toetest." Aufruestweg: ein Flag am Spieler, das
   //     resolveCombatWin vor jeder Schatzvergabe prueft und beim naechsten
@@ -229,6 +221,15 @@ module.exports = (ctx) => {
       dauer: 'dauerhaft',
       hinweis: 'Besprüht: niemand hilft dir, und dein Goldwert ist halbiert - bis du alle Kleidung und Rüstung abgelegt hast.',
     }),
+    // "Verliere eine Stufe … in deinem nächsten Kampf werden deine
+    // Hand-Gegenstände nutzlos." levelDelta ZIEHT AB - amount: 1 ist der
+    // Stufenverlust.
+    'LUSTMONSTER': () => ({ type: 'combo', actions: [
+      { type: 'levelDelta', amount: 1 },
+      { type: 'lingeringCurse', name: 'LUSTMONSTER', kind: 'noHandItemBonus',
+        dauer: 'naechsterKampf',
+        hinweis: 'Im nächsten Kampf zählen deine Hand-Gegenstände nicht.' },
+    ] }),
 
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
     'ENTIKOR': () => ({

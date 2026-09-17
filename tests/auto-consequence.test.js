@@ -130,13 +130,13 @@ function run() {
   // nur, wie viele Karten OHNE Override durch den Textparser fallen und dort
   // manuell bleiben. Das aendert sich nur, wenn sich parseAutoConsequence
   // selbst aendert - nie durch eine neue Zeile in CONSEQUENCE_OVERRIDES.
-  // Aktuell sind das zwei Karten, deren Text zu komplex fuer den Parser ist
-  // (zugriffsbedingt/anhaltend, siehe die ponytail-Kommentare an den
-  // jeweiligen Monstertabellen): LUSTMONSTER, WEIHNACHTSMANN. RIESENSTINKTIER
-  // hat inzwischen einen kuratierten Override (siehe CONSEQUENCE_OVERRIDES)
-  // und zaehlt deshalb nicht mehr mit.
-  assert.ok(manualOhneOverride >= 2,
-    `Der generische Textparser loest zu viel automatisch (${manualOhneOverride} statt mindestens 2 Karten ohne Override bleiben manuell) - vermutlich eine zu großzügige Regex-Regel; bitte gegen die Kartentexte prüfen`);
+  // Aktuell ist das eine Karte, deren Text zu komplex fuer den Parser ist
+  // (zugriffsbedingt/anhaltend, siehe den ponytail-Kommentar an der
+  // jeweiligen Monstertabelle): WEIHNACHTSMANN. LUSTMONSTER und
+  // RIESENSTINKTIER haben inzwischen einen kuratierten Override (siehe
+  // CONSEQUENCE_OVERRIDES) und zaehlen deshalb nicht mehr mit.
+  assert.ok(manualOhneOverride >= 1,
+    `Der generische Textparser loest zu viel automatisch (${manualOhneOverride} statt mindestens 1 Karte ohne Override bleibt manuell) - vermutlich eine zu großzügige Regex-Regel; bitte gegen die Kartentexte prüfen`);
 }
 
 run();

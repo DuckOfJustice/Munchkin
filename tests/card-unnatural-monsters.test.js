@@ -1013,5 +1013,49 @@ const PRIESTER = findCard('PRIESTER', 'class');
   }
 }
 
+// --- LUSTMONSTER, Schlimme Dinge --------------------------------------------
+// "Verliere eine Stufe … in deinem nächsten Kampf werden deine
+// Hand-Gegenstände nutzlos."
+{
+  const { resolveConsequenceSpec, applyPrimitiveAction, combatTotals } = require('../server.js');
+  const lust = findCard('LUSTMONSTER', 'monster');
+  const waffe = ALL_CARDS.find((c) => c.slotKind === 'hand' && c.handsCost === 1 && (c.bonus || 0) > 0);
+  assert.ok(waffe, 'Testvoraussetzung: einhaendige Waffe mit Bonus vorhanden');
+
+  function mitWaffe() {
+    const p = makePlayer({ level: 5 });
+    const room = makeRoom([p]);
+    p.equipped.hands = [waffe.id, null];
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    return { p, room };
+  }
+
+  // 1. Stufenverlust und Tracker-Eintrag.
+  {
+    const p = makePlayer({ level: 5 });
+    const room = makeRoom([p]);
+    const spec = resolveConsequenceSpec(lust.name, lust.badstuff, p, room);
+    assert.ok(spec, 'das Lustmonster hat jetzt eine kuratierte Konsequenz');
+    applyPrimitiveAction(room, p, spec);
+    assert.strictEqual(p.level, 4, 'eine Stufe weniger (levelDelta zieht ab)');
+    assert.ok(p.activeCurses.some((f) => f.kind === 'noHandItemBonus'),
+      'und die anhaltende Wirkung steht im Tracker');
+    assert.strictEqual(p.activeCurses[0].dauer, 'naechsterKampf',
+      'sie gilt genau fuer den naechsten Kampf');
+  }
+  // 2. Differenzmessung: derselbe Kampf mit und ohne den Eintrag.
+  {
+    const ohne = mitWaffe();
+    const basis = combatTotals(ohne.room).playerStrength;
+    const mit = mitWaffe();
+    mit.p.activeCurses.push({ cardId: null, name: 'LUSTMONSTER', kind: 'noHandItemBonus',
+      amount: 0, dauer: 'naechsterKampf', hinweis: '' });
+    const gemindert = combatTotals(mit.room).playerStrength;
+    assert.strictEqual(basis - gemindert, waffe.bonus,
+      `die Hand-Waffe (+${waffe.bonus}) zaehlt mit der Wirkung nicht mehr`);
+  }
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');
