@@ -6,6 +6,31 @@
 module.exports = (ctx) => {
   const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds } = ctx;
 
+  // "Beendet jeden Fluch." - gemeinsame Vorlage fuer WUNSCHRING und DER
+  // ANDERE RING (gleicher Kartentext, gleiche Mechanik).
+  // Gewaehlt wird nach Wirkungsart (kind), NICHT nach Position in
+  // activeCurses: zwischen dem Oeffnen des Wahldialogs und der Antwort kann
+  // die Liste sich verschieben (clearNextCombatCurses raeumt alle
+  // 'naechsterKampf'-Eintraege ab, sobald ein Kampf endet) - ein
+  // gespeicherter Index zeigt dann auf den falschen Fluch, und der einmalige
+  // Ring waere trotzdem weg.
+  // ponytail: zwei Tracker-Eintraege derselben Wirkungsart enden gemeinsam
+  // (clearActiveCurseByKind filtert nach kind). Fuer eine Karte, die "jeden
+  // Fluch beendet", vertretbar. Aufruestweg: eine eigene Id je Eintrag in
+  // activeCurses und ein Loeschen nach dieser Id.
+  const fluchBeendenSpec = (player) => {
+    const flueche = player.activeCurses || [];
+    if (!flueche.length) return null; // nichts zu beenden
+    const beenden = (f) => ({ type: 'clearCurse', kind: f.kind, name: f.name });
+    if (flueche.length === 1) return beenden(flueche[0]);
+    return {
+      type: 'choice',
+      options: flueche.map((f, i) => ({
+        id: `fluch-${i}`, label: `"${f.name}" beenden`, action: beenden(f),
+      })),
+    };
+  };
+
   const TREASURE_POWER_OVERRIDES = {
     // --- Ziel-Auswahl (Spieler-Picker) ---
     // "Wähle den Spieler aus, von dem du eine Stufe stehlen willst. Du
@@ -97,17 +122,7 @@ module.exports = (ctx) => {
     // "Du kannst ihn auch als Wunschring einsetzen (z.B. um einen Fluch zu
     // beenden) und hinterher abwerfen." Die Flucht-Seite der Karte laeuft
     // ueber GUARANTEED_FLEE_CARDS weiter unten.
-    'DER ANDERE RING': (player) => {
-      const flueche = player.activeCurses || [];
-      if (!flueche.length) return null;
-      if (flueche.length === 1) return { type: 'clearCurse', index: 0 };
-      return {
-        type: 'choice',
-        options: flueche.map((f, i) => ({
-          id: `fluch-${i}`, label: `"${f.name}" beenden`, action: { type: 'clearCurse', index: i },
-        })),
-      };
-    },
+    'DER ANDERE RING': fluchBeendenSpec,
     // "Jederzeit spielbar, ausser im Kampf. Nur einmal einsetzbar. Wirf
     // Gegenstaende im Wert von mindestens 500 Goldstuecken ab und wirf einen
     // Wuerfel." (Die Wuerfeltabelle steht bei 'dungeonCasino' in server.js.)
@@ -131,17 +146,7 @@ module.exports = (ctx) => {
     }),
     // "Beendet jeden Fluch. Jederzeit spielbar. Nur einmal einsetzbar." - mit
     // genau einem aktiven Fluch braucht es keinen Wahldialog dafür.
-    'WUNSCHRING': (player) => {
-      const flueche = player.activeCurses || [];
-      if (!flueche.length) return null; // nichts zu beenden
-      if (flueche.length === 1) return { type: 'clearCurse', index: 0 };
-      return {
-        type: 'choice',
-        options: flueche.map((f, i) => ({
-          id: `fluch-${i}`, label: `"${f.name}" beenden`, action: { type: 'clearCurse', index: i },
-        })),
-      };
-    },
+    'WUNSCHRING': fluchBeendenSpec,
   };
 
   const COMBAT_POTION_OVERRIDES = {

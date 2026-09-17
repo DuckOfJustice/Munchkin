@@ -2044,9 +2044,14 @@ function applyPrimitiveAction(room, player, action) {
     case 'noEffect':
       return 'kein spielmechanischer Effekt';
     // WUNSCHRING: "Beendet jeden Fluch." - siehe TREASURE_POWER_OVERRIDES.
+    // Geloescht wird nach Wirkungsart, nicht nach Index - siehe
+    // fluchBeendenSpec in src/cards/treasures.js. Ist der gewaehlte Fluch
+    // inzwischen von selbst ausgelaufen, sagt die Meldung das ehrlich: die
+    // Karte ist trotzdem verbraucht, und niemand soll glauben, sie haette
+    // gewirkt.
     case 'clearCurse': {
-      const removed = clearActiveCurse(room, player, action.index);
-      return removed ? `Fluch "${removed.name}" beendet` : 'kein Fluch (mehr) vorhanden';
+      if (clearActiveCurseByKind(player, action.kind)) return `Fluch "${action.name}" beendet`;
+      return `Fluch "${action.name}" war schon vorbei - die Karte ist umsonst weg`;
     }
     default:
       return '';
@@ -2833,18 +2838,14 @@ function applyLingeringRule(room, player, cardName, cardId, regel) {
   }
 }
 
-// Rückgabewert statt eigenem log() - die aufrufende Stelle (applyPrimitiveAction
-// 'clearCurse' -> handleUseCardPower/handleResolveCardChoice) loggt bereits
-// einheitlich "X spielt WUNSCHRING: ...", wie bei jeder anderen Sonderkraft.
-function clearActiveCurse(room, player, index) {
-  return (player.activeCurses || []).splice(index, 1)[0] || null;
-}
-
-// Gezieltes Loeschen nach Wirkungsart statt nach Index. Gebraucht von den
-// Eintraegen, die nicht nach fester Dauer enden, sondern wenn eine Bedingung
-// eintritt (Stinktier: alle Kleidung abgelegt; Weihnachtsmann: ein Monster
-// ohne Hilfe getoetet). Rueckgabewert sagt, ob wirklich etwas weg ist - die
-// aufrufende Stelle loggt nur dann.
+// Gezieltes Loeschen nach Wirkungsart - der EINZIGE Weg, einen Eintrag aus
+// activeCurses zu nehmen. Gebraucht von den Eintraegen, die nicht nach fester
+// Dauer enden, sondern wenn eine Bedingung eintritt (Stinktier: alle Kleidung
+// abgelegt; Weihnachtsmann: ein Monster ohne Hilfe getoetet) - und vom
+// WUNSCHRING. Rueckgabewert sagt, ob wirklich etwas weg ist - die aufrufende
+// Stelle loggt nur dann. Eine index-basierte Variante gab es hier bis
+// 2026-09-17; sie ist weg, weil ein gespeicherter Index veraltet, sobald die
+// Liste sich unter einem offenen Wahldialog verschiebt.
 function clearActiveCurseByKind(player, kind) {
   const vorher = (player.activeCurses || []).length;
   if (!vorher) return false;
@@ -6184,7 +6185,7 @@ module.exports = {
   handlePlayReactionCard, handlePassReaction, LAMP_CARDS, lampCardIds, handleUseLamp,
   fluechtenderId, naechsterFluechtling, beendeFluchtphase,
   handleUseCardPower, DOOR_POWER_CARDS,
-  LINGERING_CURSES, addActiveCurse, clearActiveCurse, clearActiveCurseByKind, applyLingeringRule,
+  LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatSchatzSperre,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
