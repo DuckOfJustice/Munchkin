@@ -72,7 +72,7 @@ Zwei Wege standen zur Wahl:
 
   ```js
   'LUSTMONSTER': () => ({ type: 'combo', actions: [
-    { type: 'levelDelta', amount: -1 },
+    { type: 'levelDelta', amount: 1 },   // levelDelta zieht ab: 1 = eine Stufe Verlust
     { type: 'lingeringCurse', kind: 'noHandItemBonus', dauer: 'naechsterKampf',
       hinweis: 'Im nächsten Kampf zählen deine Hand-Gegenstände nicht.' },
   ] })
@@ -257,7 +257,9 @@ Ausdrücklich **nicht** über `FLEE_AUTOMATIC`: das Set macht die Flucht
 
 ### 5.3 Die Schlimmen Dinge
 
-`CONSEQUENCE_OVERRIDES['LUSTMONSTER']` als `combo` aus `levelDelta -1` und dem
+`CONSEQUENCE_OVERRIDES['LUSTMONSTER']` als `combo` aus `levelDelta` mit
+`amount: 1` (das Primitiv *zieht ab*, server.js:1355-1357 — eine negative Zahl
+würde eine Stufe schenken) und dem
 neuen Primitiv `lingeringCurse` mit `kind: 'noHandItemBonus'`,
 `dauer: 'naechsterKampf'`.
 
@@ -310,11 +312,28 @@ im Kampf gibt."*
 
 Die Schlimmen Dinge (2 Stufen verlieren) laufen bereits.
 
-- **Das Angebot:** beim Aufdecken in `handleDrawDoor`, bevor der Kampf
-  beginnt, und nur wenn die aufdeckende Person einen WUNSCHRING auf der Hand
-  oder angelegt hat. Umgesetzt über das vorhandene `openCardChoice` mit zwei
-  Optionen ("Ring geben" / "kämpfen"). Ohne Ring passiert nichts Neues: der
-  Kampf startet wie heute.
+- **Das Angebot:** über die vorhandene Tabelle `COMBAT_START_OPTIONS`
+  (src/cards/passives.js) — genau der Platz für "Statt zu kämpfen …", den
+  MÖCHTEGERN-VAMPIR, LAUFENDE NASE, PIT BULL und PACKRATTE schon nutzen.
+  `handleDrawDoor` fragt sie über `combatStartOptionRule` ab und baut daraus
+  selbst die Zwei-Optionen-Wahl; es ist also nichts am Ziehpfad zu ändern:
+
+  ```js
+  'EISKALTES HÄNDCHEN': {
+    wennErfuellt: (p) => hatWunschring(p),
+    label: 'Einen Wunschring geben (kein Kampf, die Hand wird ein +3-Gegenstand)',
+    action: { type: 'haendchenBesaenftigen' },
+  },
+  ```
+
+  Die dort stehende `ponytail:`-Notiz des Vorgängers ("sprengt die
+  Aktions-Bauform, die Optionen ändern nie die Kategorie der Karte") wird
+  ersetzt: die vier vorhandenen Optionen bestehen **ebenfalls** je aus einem
+  eigenen Primitiv (`wegjagenMitSchatz`, `bribeMonster`, `dropStaffEscape`,
+  `packratteGeschenk`), und `wegjagenMitSchatz` verschiebt die Monsterkarte
+  bereits selbst. Ein neues Primitiv ist hier also der Normalfall der Tabelle,
+  nicht ihr Bruch. Ohne Ring greift `wennErfuellt` nicht und der Kampf startet
+  wie heute.
 - **Die Verwandlung:** Ring auf den Ablagestapel, Monsterkarte in den
   Spezialplatz. Dafür ein Eintrag
   `'EISKALTES HÄNDCHEN': { slot: 'special', bonus: 3 }` in
