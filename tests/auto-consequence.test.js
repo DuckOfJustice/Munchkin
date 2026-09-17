@@ -118,26 +118,39 @@ function run() {
   assert.ok(resolved + choice >= 60, `Abdeckung eingebrochen: nur noch ${resolved + choice} von ${total} automatisch/Wahl (erwartet >= 60)`);
   // Waechter gegen eine zu grosszuegige generische TEXTREGEL
   // (parseAutoConsequence) - NICHT gegen kuratierte Fortschritte in
-  // CONSEQUENCE_OVERRIDES. Frueher zaehlte er ueber ALLE Karten (manual statt
-  // manualOhneOverride) und musste nach jeder neu kuratierten Karte
-  // nachgezogen werden, weil jede kuratierte Automatisierung (egal ob sie
-  // eine Karte automatisch loest ODER bewusst manuell laesst, siehe
-  // GUMMI-GOLEM/VERFLUCHTER GEGENSTAND) den Gesamtwert veraendert. Zuletzt
-  // stand die Schranke exakt auf ihrem eigenen Grenzwert (5 manuell gesamt,
-  // Schranke >= 5) - die naechste kuratierte Karte haette sie rot gefaerbt,
-  // obwohl nichts kaputt war (Review M5).
-  // Kuratierte Eintraege gehoeren schlicht nicht mitgezaehlt: gemessen wird
-  // nur, wie viele Karten OHNE Override durch den Textparser fallen und dort
-  // manuell bleiben. Das aendert sich nur, wenn sich parseAutoConsequence
-  // selbst aendert - nie durch eine neue Zeile in CONSEQUENCE_OVERRIDES.
-  // LUSTMONSTER, RIESENSTINKTIER und jetzt auch WEIHNACHTSMANN haben
-  // inzwischen einen kuratierten Override (siehe CONSEQUENCE_OVERRIDES) und
-  // zaehlen deshalb nicht mehr mit - der Waechter ist damit auf 0 gefallen
-  // und im Moment zahnlos (jeder Wert >= 0 besteht ihn). Die naechste Aufgabe
-  // ersetzt diesen Waechter durch eine echte Schranke; hier nur die Schranke
-  // gesenkt, damit dieser Test nicht faelschlich rot wird.
-  assert.ok(manualOhneOverride >= 0,
-    `Der generische Textparser loest zu viel automatisch (${manualOhneOverride} statt mindestens 0 Karten ohne Override bleibt manuell) - vermutlich eine zu großzügige Regex-Regel; bitte gegen die Kartentexte prüfen`);
+  // CONSEQUENCE_OVERRIDES.
+  //
+  // Frueher war das eine Untergrenze auf der ANZAHL manuell gebliebener
+  // Karten. Diese Zahl ist zweimal an ihrem eigenen Erfolg gescheitert:
+  // erst zaehlte sie kuratierte Karten mit und musste nach jeder Runde
+  // nachgezogen werden; dann zaehlte sie nur noch Karten ohne Override -
+  // aber das waren genau RIESENSTINKTIER, LUSTMONSTER und WEIHNACHTSMANN,
+  // und als die Overrides bekamen, fiel sie auf 0. Eine Untergrenze, deren
+  // Gegenstand verschwinden kann, ist kein Waechter.
+  //
+  // Gemessen wird deshalb direkt die Eigenschaft, um die es geht: diese
+  // Kartentexte DUERFEN vom generischen Parser nicht aufgeloest werden. Sie
+  // nennen Bedingungen, Zeitpunkte oder Zustaende, die eine Textregel nicht
+  // sehen kann - wer sie einfaengt, hat eine zu gierige Regex gebaut.
+  // Kuratierte Overrides sind hier egal: geprueft wird parseAutoConsequence
+  // selbst, nicht der Weg, den die Karte im Spiel nimmt.
+  const PARSER_TABU = [
+    // "bis du ein Monster ohne Hilfe toetest" - ein Zeitpunkt in der Zukunft.
+    'WEIHNACHTSMANN',
+    // "in deinem naechsten Kampf" - eine Wirkung ueber diese Konsequenz hinaus.
+    'LUSTMONSTER',
+    // "bevor du nicht alle getragene Kleidung und Ruestung ablegst" - eine
+    // Bedingung, die an einem Zustand haengt.
+    'RIESENSTINKTIER',
+    // "Wuerfle. Bei 1-3 ..." - ein Wurf, kein fester Effekt.
+    'SCHNECKEN AUF SPEED',
+  ];
+  PARSER_TABU.forEach((name) => {
+    const karte = ALL_CARDS.find((c) => c.name === name);
+    assert.ok(karte, `Testvoraussetzung: Karte "${name}" existiert`);
+    assert.strictEqual(parseAutoConsequence(karte.badstuff || ''), null,
+      `Der generische Textparser loest "${name}" auf, obwohl der Text eine Bedingung/einen Zeitpunkt nennt, die er nicht sehen kann - vermutlich eine zu großzügige Regex-Regel`);
+  });
 }
 
 run();
