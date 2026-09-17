@@ -1414,6 +1414,15 @@ function applyPrimitiveAction(room, player, action) {
     case 'levelUp':
       setLevel(player, player.level + action.amount);
       return `+${action.amount} Stufe(n) (jetzt Stufe ${player.level})`;
+    // Monster-Schlimme-Dinge, die ueber diese eine Konsequenz hinaus
+    // weiterwirken. Landen im selben Tracker wie die anhaltenden Flueche
+    // (activeCurses) - deshalb beendet der WUNSCHRING sie mit, was gewollt
+    // ist: im Spielgefuehl sind es Flueche, und der Ring sagt "beendet jeden
+    // Fluch". Der Name kommt aus der Action, weil die Konsequenz-Funktionen
+    // nur (player, room) sehen und die Monsterkarte selbst nicht kennen.
+    case 'lingeringCurse':
+      applyLingeringRule(room, player, action.name, action.cardId || null, action);
+      return action.hinweis || 'anhaltende Wirkung';
     case 'levelUpAllPriests': {
       const priester = room.players.filter((p) => hasClass(p, 'PRIESTER'));
       if (!priester.length) return 'niemand ist Priester - keine Wirkung';
@@ -2707,6 +2716,13 @@ function curseProtectionItem(player) {
 function addActiveCurse(room, player, cardName, cardId) {
   const regel = LINGERING_CURSES[cardName];
   if (!regel) return;
+  applyLingeringRule(room, player, cardName, cardId, regel);
+}
+
+// Das Eintragen selbst - getrennt vom Nachschlag in LINGERING_CURSES, damit
+// auch Monster-Schlimme-Dinge (Primitiv 'lingeringCurse') denselben Tracker
+// benutzen koennen, ohne eine zweite Tabelle danebenzustellen.
+function applyLingeringRule(room, player, cardName, cardId, regel) {
   // ponytail: defensiv statt eine Invariante vorauszusetzen - ältere
   // Test-Helper/Spielstände ohne activeCurses sollen nicht abstürzen.
   if (!player.activeCurses) player.activeCurses = [];
@@ -2745,6 +2761,18 @@ function addActiveCurse(room, player, cardName, cardId) {
 // einheitlich "X spielt WUNSCHRING: ...", wie bei jeder anderen Sonderkraft.
 function clearActiveCurse(room, player, index) {
   return (player.activeCurses || []).splice(index, 1)[0] || null;
+}
+
+// Gezieltes Loeschen nach Wirkungsart statt nach Index. Gebraucht von den
+// Eintraegen, die nicht nach fester Dauer enden, sondern wenn eine Bedingung
+// eintritt (Stinktier: alle Kleidung abgelegt; Weihnachtsmann: ein Monster
+// ohne Hilfe getoetet). Rueckgabewert sagt, ob wirklich etwas weg ist - die
+// aufrufende Stelle loggt nur dann.
+function clearActiveCurseByKind(player, kind) {
+  const vorher = (player.activeCurses || []).length;
+  if (!vorher) return false;
+  player.activeCurses = player.activeCurses.filter((f) => f.kind !== kind);
+  return player.activeCurses.length < vorher;
 }
 
 // "Nächster Kampf"-Flüche gelten für GENAU den einen folgenden Kampf - egal
@@ -5907,7 +5935,8 @@ module.exports = {
   handlePlayReactionCard, handlePassReaction, LAMP_CARDS, lampCardIds, handleUseLamp,
   fluechtenderId, naechsterFluechtling, beendeFluchtphase,
   handleUseCardPower, DOOR_POWER_CARDS,
-  LINGERING_CURSES, addActiveCurse, clearActiveCurse, curseCombatModifier, curseSuppressesItemBonuses,
+  LINGERING_CURSES, addActiveCurse, clearActiveCurse, clearActiveCurseByKind, applyLingeringRule,
+  curseCombatModifier, curseSuppressesItemBonuses,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,

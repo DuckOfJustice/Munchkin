@@ -703,5 +703,29 @@ const PRIESTER = findCard('PRIESTER', 'class');
   assert.ok(pinataZeile.text.includes('2 von 3'), 'die Zeile nennt die tatsaechliche Zahl');
 }
 
+// --- Primitiv lingeringCurse: Monster-Schlimme-Dinge im Fluch-Tracker -------
+// Der Tracker activeCurses hing bisher nur am Fluch-Ziehpfad (handleDrawDoor
+// -> addActiveCurse -> LINGERING_CURSES). Das Primitiv oeffnet ihn fuer
+// Konsequenzen, ohne eine zweite Tabelle danebenzustellen.
+{
+  const { applyPrimitiveAction, clearActiveCurseByKind } = require('../server.js');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  applyPrimitiveAction(room, p, {
+    type: 'lingeringCurse', name: 'TESTMONSTER', kind: 'noHandItemBonus',
+    dauer: 'naechsterKampf', hinweis: 'Testwirkung.',
+  });
+  assert.strictEqual(p.activeCurses.length, 1, 'das Primitiv traegt genau einen Eintrag ein');
+  assert.strictEqual(p.activeCurses[0].kind, 'noHandItemBonus');
+  assert.strictEqual(p.activeCurses[0].dauer, 'naechsterKampf');
+  assert.strictEqual(p.activeCurses[0].name, 'TESTMONSTER', 'der Name steht fuer die Anzeige mit drin');
+  assert.strictEqual(p.activeCurses[0].hinweis, 'Testwirkung.');
+  // Der WUNSCHRING loescht ueber clearActiveCurse nach INDEX - der Eintrag
+  // muss also ein ganz normaler Tracker-Eintrag sein, kein Sonderfall.
+  assert.strictEqual(clearActiveCurseByKind(p, 'noHandItemBonus'), true, 'gezieltes Loeschen meldet Erfolg');
+  assert.strictEqual(p.activeCurses.length, 0, 'und raeumt den Eintrag weg');
+  assert.strictEqual(clearActiveCurseByKind(p, 'noHandItemBonus'), false, 'ein zweiter Aufruf findet nichts mehr');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');
