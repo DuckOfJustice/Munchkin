@@ -427,10 +427,19 @@ nur mit anderem Ausloeser."
   const stinktier = findCard('RIESENSTINKTIER', 'monster');
   // Eine Ruestung und ein Gegenstand von zusammen mindestens 2000 GS, damit
   // die Halbierung den Stufenaufstieg messbar von 2 auf 1 drueckt.
-  const ruestung = ALL_CARDS.find((c) => c.slotKind === 'armor' && (c.gold || 0) > 0);
-  const teuer = ALL_CARDS.filter((c) => c.category === 'item' && (c.gold || 0) >= 600)
+  // Beide Seiten der Halbierung muessen ueber der 1000er-Schwelle liegen,
+  // sonst faellt handleSellItems in den fruehen Rueckgabezweig und verkauft
+  // GAR NICHTS - der Test waere dann gruen, ohne die Halbierung zu pruefen.
+  // 600 (Ruestung) + 4500 (fuenf teuerste Gegenstaende) = 5100: voll 5
+  // Stufen, halbiert 2550 und damit 2 Stufen.
+  const ruestung = ALL_CARDS.filter((c) => c.slotKind === 'armor' && (c.gold || 0) > 0)
     .sort((a, b) => b.gold - a.gold)[0];
-  assert.ok(ruestung && teuer, 'Testvoraussetzung: Ruestung und teurer Gegenstand vorhanden');
+  const teuerListe = ALL_CARDS.filter((c) => c.category === 'item' && (c.gold || 0) > 0
+    && c.slotKind !== 'armor').sort((a, b) => b.gold - a.gold).slice(0, 5);
+  assert.ok(ruestung && teuerListe.length === 5, 'Testvoraussetzung: Ruestung und fuenf teure Gegenstaende vorhanden');
+  const gesamtGold = (ruestung.gold || 0) + teuerListe.reduce((n, c) => n + c.gold, 0);
+  assert.ok(Math.floor(gesamtGold / 2) >= 1000,
+    'Testvoraussetzung: auch der halbierte Wert liegt ueber der Verkaufsschwelle');
 
   function besprueht() {
     const p = makePlayer({ level: 3 });
@@ -464,15 +473,14 @@ nur mit anderem Ausloeser."
     room.turnPhase = 'kampf';
     room.combat = null;
     room.turnIndex = 0;
-    p.hand.push(teuer.id);
-    const gesamt = (ruestung.gold || 0) + (teuer.gold || 0);
+    teuerListe.forEach((c) => p.hand.push(c.id));
     const vorher = p.level;
-    handleSellItems(room, p.id, [ruestung.id, teuer.id]);
-    const erwartet = Math.floor(Math.floor(gesamt / 2) / 1000);
+    handleSellItems(room, p.id, [ruestung.id].concat(teuerListe.map((c) => c.id)));
+    const erwartet = Math.floor(Math.floor(gesamtGold / 2) / 1000);
     assert.strictEqual(p.level - vorher, erwartet,
-      `halbierter Goldwert: ${gesamt} GS bringen nur ${erwartet} Stufe(n)`);
-    assert.ok(erwartet < Math.floor(gesamt / 1000),
-      'Gegenprobe: ohne Halbierung waeren es mehr Stufen gewesen');
+      `halbierter Goldwert: ${gesamtGold} GS bringen nur ${erwartet} Stufe(n)`);
+    assert.ok(erwartet > 0 && erwartet < Math.floor(gesamtGold / 1000),
+      'Gegenprobe: es wurde wirklich verkauft, aber fuer weniger Stufen als ohne Halbierung');
   }
   // 4. Die Strafe endet, sobald keine Kleidung/Ruestung mehr anliegt.
   {
