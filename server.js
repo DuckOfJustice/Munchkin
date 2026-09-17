@@ -4568,7 +4568,7 @@ function resolveCombatWin(room) {
   // spielerfreundliche Lesart und erspart die Erklaerung, warum ausgerechnet
   // der befreiende Sieg leer ausgeht.
   if (!c.helperId && clearActiveCurseByKind(actor, 'noTreasure')) {
-    log(room, `${actor.name} hat ein Monster ohne Hilfe getoetet und ist von der Stoererliste runter.`);
+    log(room, `${actor.name} hat ein Monster ohne Hilfe getötet und ist von der Störerliste runter.`);
   }
   // MIESER SPIEGEL/GESCHLECHTSUMWANDLUNG gelten nur "im nächsten Kampf" -
   // der ist hiermit vorbei (gewonnen).
@@ -4631,10 +4631,15 @@ function resolveCombatWin(room) {
   // Helfer:in (weniger, wenn weniger Schaetze kommen als versprochen). Der
   // Rest geht wie bisher an die kaempfende Person; darueber hinaus bleibt
   // jede Weitergabe freier Handel.
-  const zusage = helper ? Math.max(0, Math.min(c.helperReward || 0, drawn.length)) : 0;
+  // Eine gesperrte Helfer:in bekommt kein Versprechen eingeloest - die
+  // Zusage wird schlicht auf 0 gesetzt, statt schon gezogene Karten zu
+  // vernichten (das waeren Karten, die dann in keinem Stapel und keiner
+  // Hand mehr existieren). Die Karten bleiben bei der kaempfenden Person,
+  // die sie ohnehin schon gezogen hat.
+  const zusage = (helper && !hatSchatzSperre(helper))
+    ? Math.max(0, Math.min(c.helperReward || 0, drawn.length)) : 0;
   const fuerHelfer = drawn.slice(0, zusage).concat(helperPinataCard ? [helperPinataCard] : []);
   const fuerActor = drawn.slice(zusage).concat(actorPinataCard ? [actorPinataCard] : []);
-  if (helper && hatSchatzSperre(helper)) fuerHelfer.length = 0;
   fuerActor.forEach((id) => actor.hand.push(id));
   actor.lastReward = {
     seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,

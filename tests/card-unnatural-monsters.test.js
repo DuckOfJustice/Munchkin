@@ -1076,6 +1076,21 @@ const PRIESTER = findCard('PRIESTER', 'class');
     return { p, room };
   }
 
+  // Setzt eine beliebige Person (Helfer:in eingeschlossen) auf die
+  // Stoererliste, ueber denselben kuratierten Weg wie aufDerListe.
+  function sperren(room, spieler) {
+    const spec = resolveConsequenceSpec(mann.name, mann.badstuff, spieler, room);
+    applyPrimitiveAction(room, spieler, spec);
+  }
+
+  // Kartenerhaltung ueber alle drei Orte, an denen ein Schatz stecken kann -
+  // beweist, dass beim Sperren keine Karte verschwindet (nicht in keinem
+  // Stapel und keiner Hand mehr existiert).
+  function schatzGesamt(room, spielerListe) {
+    const inHand = spielerListe.reduce((sum, p) => sum + p.hand.length, 0);
+    return room.treasureDeck.length + inHand + room.treasureDiscard.length;
+  }
+
   // 1. Sieg MIT Hilfe: kein Schatz, und die Sperre bleibt stehen.
   {
     const { p, room } = aufDerListe();
@@ -1189,6 +1204,100 @@ const PRIESTER = findCard('PRIESTER', 'class');
     assert.ok(handelsZeile, 'der Handel steht im Verlauf');
     assert.deepStrictEqual(handelsZeile.cardIds, [ORK.id],
       'der Verlauf markiert nur die Karte, die wirklich den Besitzer gewechselt hat');
+  }
+  // 9. Kartenerhaltung bei der Helfer:in-Zusage, alle vier Kombinationen aus
+  //    gesperrt/nicht gesperrt fuer kaempfende Person und Helfer:in. Nummer
+  //    9c ist der eigentliche Fehler: eine gesperrte Helfer:in durfte bisher
+  //    schon gezogene Karten mit in die Sperre reissen (fuerHelfer.length = 0
+  //    nach dem Ziehen statt vorher gar nicht erst zu ziehen).
+  {
+    // 9a. Niemand gesperrt: Regressionswaechter fuer die bestehende Aufteilung.
+    {
+      const p = makePlayer({ level: 5 });
+      const helfer = makePlayer({ id: 'p2', name: 'B' });
+      const room = makeRoom([p, helfer]);
+      room.treasureDeck = schaetze.slice();
+      const gesamtVorher = schatzGesamt(room, [p, helfer]);
+      room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 1, mustFlee: false };
+      resolveCombatWin(room);
+      assert.strictEqual(schatzGesamt(room, [p, helfer]), gesamtVorher,
+        'keine Karte verschwindet (9a, niemand gesperrt)');
+      assert.strictEqual(helfer.hand.length, 1, 'die Helfer:in bekommt die zugesagte Karte (9a)');
+      assert.strictEqual(p.hand.length, ratte.treasureCount - 1,
+        'der Rest geht an die kaempfende Person (9a)');
+    }
+    // 9b. Kaempfende Person gesperrt, Helfer:in nicht: die Zusage wird noch
+    //     eingeloest (das war schon vor diesem Fix-Round korrekt).
+    {
+      const p = makePlayer({ level: 5 });
+      const helfer = makePlayer({ id: 'p2', name: 'B' });
+      const room = makeRoom([p, helfer]);
+      room.treasureDeck = schaetze.slice();
+      sperren(room, p);
+      const gesamtVorher = schatzGesamt(room, [p, helfer]);
+      room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 1, mustFlee: false };
+      resolveCombatWin(room);
+      assert.strictEqual(schatzGesamt(room, [p, helfer]), gesamtVorher,
+        'keine Karte verschwindet (9b, kaempfende Person gesperrt)');
+      assert.strictEqual(p.hand.length, 0, 'die gesperrte kaempfende Person bekommt nichts (9b)');
+      assert.strictEqual(helfer.hand.length, 1,
+        'die Helfer:in bekommt trotzdem die zugesagte Karte (9b)');
+    }
+    // 9c. DER FEHLER: Helfer:in gesperrt, kaempfende Person nicht. Die
+    //     kaempfende Person behaelt alles, was gezogen wurde - keine Karte
+    //     wird vernichtet.
+    {
+      const p = makePlayer({ level: 5 });
+      const helfer = makePlayer({ id: 'p2', name: 'B' });
+      const room = makeRoom([p, helfer]);
+      room.treasureDeck = schaetze.slice();
+      sperren(room, helfer);
+      const gesamtVorher = schatzGesamt(room, [p, helfer]);
+      room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 1, mustFlee: false };
+      resolveCombatWin(room);
+      assert.strictEqual(schatzGesamt(room, [p, helfer]), gesamtVorher,
+        'keine Karte wird vernichtet (9c, Helfer:in gesperrt)');
+      assert.strictEqual(helfer.hand.length, 0,
+        'die gesperrte Helfer:in bekommt ihr Versprechen nicht eingeloest (9c)');
+      assert.strictEqual(p.hand.length, ratte.treasureCount,
+        'die kaempfende Person behaelt alles, was gezogen wurde (9c)');
+    }
+    // 9d. Beide gesperrt: niemand bekommt etwas, der Stapel bleibt unberuehrt.
+    {
+      const p = makePlayer({ level: 5 });
+      const helfer = makePlayer({ id: 'p2', name: 'B' });
+      const room = makeRoom([p, helfer]);
+      room.treasureDeck = schaetze.slice();
+      sperren(room, p);
+      sperren(room, helfer);
+      const deckVorher = room.treasureDeck.length;
+      const gesamtVorher = schatzGesamt(room, [p, helfer]);
+      room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 1, mustFlee: false };
+      resolveCombatWin(room);
+      assert.strictEqual(room.treasureDeck.length, deckVorher,
+        'der Schatzstapel bleibt unberuehrt (9d, beide gesperrt)');
+      assert.strictEqual(schatzGesamt(room, [p, helfer]), gesamtVorher,
+        'keine Karte verschwindet (9d)');
+      assert.strictEqual(p.hand.length, 0, 'niemand bekommt einen Schatz (9d)');
+      assert.strictEqual(helfer.hand.length, 0, 'niemand bekommt einen Schatz (9d)');
+    }
+  }
+  // 10. packratteGeschenk (PACKRATTE): kein Geschenk fuer die gesperrte
+  //     Person, Stapel bleibt unberuehrt.
+  {
+    const { applyPrimitiveAction: applyPrimitive } = require('../server.js');
+    const packratte = findCard('PACKRATTE', 'monster');
+    const { p, room } = aufDerListe();
+    const vorher = room.treasureDeck.length;
+    const desc = applyPrimitive(room, p, { type: 'packratteGeschenk', cardId: packratte.id });
+    assert.strictEqual(p.hand.length, 0, 'kein Geschenk fuer die gesperrte Person');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(!room.pendingCardAction, 'keine Wahl zwischen zwei Schaetzen, die es nie gab');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt ein Geschenk zu behaupten');
   }
 }
 
