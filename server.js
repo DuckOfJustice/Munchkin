@@ -860,13 +860,8 @@ function handleDrawDoor(room, playerId) {
       room.doorDiscard.push(id);
       room.turnPhase = 'aerger';
       // AMAZONE: "Sie erhalten stattdessen 1 Schatz."
-      // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - das Geschenk wird
-      // gar nicht erst gezogen, sonst schrumpft der Stapel fuer ein Geschenk,
-      // das nie ankommt.
-      const gesperrt = hatSchatzSperre(player);
-      const geschenk = gesperrt ? 0 : (MONSTER_REFUSES_TREASURE[c.name] || 0);
-      const gezogen = [];
-      for (let i = 0; i < geschenk; i++) { const t = drawTreasure(room); if (t) gezogen.push(t); }
+      const geschenkSoll = MONSTER_REFUSES_TREASURE[c.name] || 0;
+      const gezogen = zieheSchaetzeFuer(room, player, geschenkSoll);
       gezogen.forEach((tid) => player.hand.push(tid));
       if (gezogen.length) {
         player.lastReward = {
@@ -874,7 +869,7 @@ function handleDrawDoor(room, playerId) {
           cardIds: gezogen, levelsGained: 0, monsterNames: [c.name],
         };
       }
-      const geschenkHinweis = gesperrt && (MONSTER_REFUSES_TREASURE[c.name] || 0)
+      const geschenkHinweis = (geschenkSoll && !gezogen.length && hatSchatzSperre(player))
         ? `, aber ${player.name} steht auf der Störerliste und bekommt nichts`
         : (gezogen.length ? `, laesst aber ${gezogen.length} Schatzkarte(n) da` : '');
       log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter${geschenkHinweis}. Phase 2: Auf Ärger aus sein.`, [id]);
@@ -1314,19 +1309,14 @@ function applyPrimitiveAction(room, player, action) {
     case 'wegjagenMitSchatz': {
       const m = card(action.cardId);
       room.doorDiscard.push(action.cardId);
-      // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - gar nicht erst
-      // ziehen statt gezogen und weggeworfen.
-      const gesperrt = hatSchatzSperre(player);
-      const treasureCount = gesperrt ? 0 : (m.treasureCount || 0);
-      const drawn = [];
-      for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+      const drawn = zieheSchaetzeFuer(room, player, m.treasureCount || 0);
       drawn.forEach((cid) => player.hand.push(cid));
       player.lastReward = {
         seq: (player.lastReward ? player.lastReward.seq : 0) + 1,
         cardIds: drawn, levelsGained: 0, monsterNames: [m.name],
       };
       room.turnPhase = 'aerger';
-      return gesperrt
+      return (!drawn.length && (m.treasureCount || 0) && hatSchatzSperre(player))
         ? `jagt "${m.name}" weg, keine Stufe - ${player.name} steht auf der Störerliste und bekommt keinen Schatz`
         : `jagt "${m.name}" weg, ${drawn.length} Schatzkarte(n), keine Stufe`;
     }
@@ -1337,13 +1327,10 @@ function applyPrimitiveAction(room, player, action) {
       const m = card(action.cardId);
       room.doorDiscard.push(action.cardId);
       room.turnPhase = 'aerger';
-      // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - gar nicht erst
-      // ziehen, sonst schrumpft der Stapel fuer ein Geschenk, das nie ankommt.
       if (hatSchatzSperre(player)) {
         return `"${m.name}" will schenken, aber ${player.name} steht auf der Störerliste und bekommt nichts`;
       }
-      const gezogen = [];
-      for (let i = 0; i < 2; i++) { const t = drawTreasure(room); if (t) gezogen.push(t); }
+      const gezogen = zieheSchaetzeFuer(room, player, 2);
       if (!gezogen.length) return `"${m.name}" zieht weiter - der Schatzstapel ist leer`;
       if (gezogen.length === 1) {
         player.hand.push(gezogen[0]);
@@ -1455,10 +1442,11 @@ function applyPrimitiveAction(room, player, action) {
       return `Priester steigen 1 Stufe auf: ${priester.map((p) => p.name).join(', ')}`;
     }
     case 'drawTreasureN': {
-      const drawn = [];
-      for (let i = 0; i < action.n; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+      const drawn = zieheSchaetzeFuer(room, player, action.n);
       drawn.forEach((id) => player.hand.push(id));
-      return `${drawn.length} Schatzkarte(n) gezogen`;
+      return (!drawn.length && action.n && hatSchatzSperre(player))
+        ? `keine Schatzkarte - ${player.name} steht auf der Störerliste`
+        : `${drawn.length} Schatzkarte(n) gezogen`;
     }
     // EINHEITSGRÖSSE: "Durchsuche den Schatzabwurfstapel, fange dabei oben an,
     // und tausche diese Karte gegen den ersten tragbaren Gegenstand, den du
@@ -1595,12 +1583,10 @@ function applyPrimitiveAction(room, player, action) {
       ids.forEach((id) => discardCard(room, id));
       let extra = '';
       if (ids.length > 1) {
-        // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - gar nicht erst
-        // ziehen statt gezogen und weggeworfen.
         if (hatSchatzSperre(player)) {
           extra = ` - ${player.name} steht auf der Störerliste und bekommt keinen Extraschatz`;
         } else {
-          const t = drawTreasure(room);
+          const [t] = zieheSchaetzeFuer(room, player, 1);
           if (t) { player.hand.push(t); extra = `, +1 Schatz gezogen ("${card(t).name}")`; }
         }
       }
@@ -2884,6 +2870,27 @@ function hatSchatzSperre(player) {
   return !!player && (player.activeCurses || []).some((f) => f.kind === 'noTreasure');
 }
 
+// WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... auch nicht von
+// anderen Spielern." Gesperrte Personen ziehen gar nicht erst - der
+// Stapel darf durch die Sperre nicht schrumpfen. EINZIGER Ort, der fuer
+// eine belohnende Ziehung (Kampfsieg, Geschenk, Bonuszug, ...) direkt
+// drawTreasure() aufrufen darf - jede neue Belohnungsstelle geht ab jetzt
+// hier durch, statt eine eigene hatSchatzSperre-Abfrage zu bauen.
+// ponytail: deckt jede Ziehung ab, bei der EINE Person das Ergebnis
+// bekommt (die ueblichen "ziehe N Schaetze"-Faelle). Deckt NICHT ab: den
+// Erstausteilungs-Zug bei Spielstart (noch keine Flueche moeglich) und
+// UNFASSBAR REICH/schatzTauschen (schon oberhalb ueber fuerActor.length
+// gesperrt - ein Aufruf hier waere die zweite Pruefung fuer dieselbe
+// Person). Fuer eine Ziehung, die auf zwei Personen verteilt wird (Kampf-
+// Hauptausschuettung), gilt die Sperre der Person, fuer die tatsaechlich
+// gezogen wird - siehe resolveCombatWin.
+function zieheSchaetzeFuer(room, player, n) {
+  if (hatSchatzSperre(player)) return [];
+  const drawn = [];
+  for (let i = 0; i < n; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+  return drawn;
+}
+
 // HUHN AUF DEINEM KOPF: "-1 auf alle Wuerfe." Gilt fuer jeden Wurf, den die
 // Person selbst macht - deshalb zentral in rollWithWindow, durch das
 // inzwischen alle Wuerfe laufen. Der Wert bleibt bei mindestens 1: ein
@@ -3835,20 +3842,16 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       else discardMonsterIds(room.doorDiscard, c.monsterIds);
       const drawn = [];
       let actor = null;
-      let gesperrt = false;
       if (action.leavesTreasure) {
         // Schatz wie beim Sieg: an die kämpfende Person, nicht an die, die
         // den Trank gespielt hat (jede:r am Tisch darf ihn einwerfen).
         actor = findPlayer(room, c.actorId) || player;
-        // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - gar nicht erst
-        // ziehen statt gezogen und weggeworfen.
-        gesperrt = hatSchatzSperre(actor);
         // MAHLZEIT! nennt eine feste Zahl, sonst gilt der treasureCount der
         // zurueckgelassenen Monster.
-        const treasureCount = gesperrt ? 0 : (typeof action.fixedTreasures === 'number'
+        const treasureCount = typeof action.fixedTreasures === 'number'
           ? action.fixedTreasures
-          : monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0));
-        for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+          : monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0);
+        drawn.push(...zieheSchaetzeFuer(room, actor, treasureCount));
         drawn.forEach((id) => actor.hand.push(id));
         actor.lastReward = {
           seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
@@ -3859,7 +3862,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       }
       beendeKampfOhneSieg(room, c, action.thenLoot);
       return action.leavesTreasure
-        ? (gesperrt
+        ? (!drawn.length && actor && hatSchatzSperre(actor)
             ? `Kampf gegen ${names} beendet, keine Stufe - ${actor.name} steht auf der Störerliste und bekommt keinen Schatz`
             : `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`)
         : `Kampf gegen ${names} beendet, kein Schatz`;
@@ -3956,25 +3959,29 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
         else room.doorDiscard.push(mId);
       }
       const drawn = [];
+      let actorFuerSchatz = null;
       if (action.leavesTreasure) {
-        const actor = findPlayer(room, c.actorId) || player;
-        for (let i = 0; i < (m.treasureCount || 0); i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
-        drawn.forEach((id) => actor.hand.push(id));
-        actor.lastReward = {
-          seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
+        actorFuerSchatz = findPlayer(room, c.actorId) || player;
+        drawn.push(...zieheSchaetzeFuer(room, actorFuerSchatz, m.treasureCount || 0));
+        actorFuerSchatz.lastReward = {
+          seq: (actorFuerSchatz.lastReward ? actorFuerSchatz.lastReward.seq : 0) + 1,
           cardIds: drawn, levelsGained: 0, monsterNames: [m.name],
         };
+        drawn.forEach((id) => actorFuerSchatz.hand.push(id));
       }
+      const schatzHinweis = (!drawn.length && actorFuerSchatz && (m.treasureCount || 0) && hatSchatzSperre(actorFuerSchatz))
+        ? `, aber ${actorFuerSchatz.name} steht auf der Störerliste und bekommt nichts`
+        : (drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : '');
       // ponytail: der Anteil gespielter Verstaerker (monsterModifier,
       // treasureDelta) bleibt im Kampf, auch wenn er auf dem entfernten
       // Monster lag - genau wie bei ILLUSION. Aufruestweg waere ein
       // monsterModifier pro Monster-ID.
       if (!c.monsterIds.length) {
         beendeKampfOhneSieg(room, c, action.thenLoot);
-        return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : ''}`;
+        return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${schatzHinweis}`;
       }
       refreshCombatReady(room);
-      return `"${m.name}" verschwindet${drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : ''} - der Kampf geht weiter`;
+      return `"${m.name}" verschwindet${schatzHinweis} - der Kampf geht weiter`;
     }
     case 'killMonsterInCombat': {
       const idx = c.monsterIds.findIndex((id) => { const m = card(id); return m && m.name === action.name; });
@@ -4595,8 +4602,7 @@ function resolveCombatWin(room) {
   if (pinata) {
     let gezogen = 0;
     room.players.forEach((p) => {
-      if (hatSchatzSperre(p)) return;
-      const t = drawTreasure(room);
+      const [t] = zieheSchaetzeFuer(room, p, 1);
       if (!t) return;
       gezogen += 1;
       if (p.id === actor.id) { actorPinataCard = t; return; }
@@ -4616,14 +4622,15 @@ function resolveCombatWin(room) {
   // "mindestens 1", deshalb die Untergrenze - aber nur, wenn überhaupt ein
   // Verstärker im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
   const treasureCount = c.treasureDelta ? Math.max(1, baseTreasures + c.treasureDelta) : baseTreasures;
-  const drawn = [];
-  // Gezogen wird nur, was auch ankommt. Steht die kaempfende Person auf der
-  // Stoererliste und gibt es keine Helfer:in, die den zugesagten Teil
-  // bekaeme, bleibt der Stapel unberuehrt.
-  const maxEmpfang = hatSchatzSperre(actor)
-    ? (helper && !hatSchatzSperre(helper) ? Math.min(treasureCount, c.helperReward || 0) : 0)
-    : treasureCount;
-  for (let i = 0; i < maxEmpfang; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+  // Gezogen wird nur, was auch ankommt, und nur fuer die Person, die es
+  // ueberhaupt bekommen kann. Steht die kaempfende Person auf der
+  // Stoererliste, zieht stattdessen die Helfer:in ihren zugesagten Anteil
+  // direkt (zieheSchaetzeFuer greift von selbst, wenn auch sie gesperrt
+  // ist oder es keine Helfer:in gibt) - der Stapel bleibt in beiden
+  // Faellen unberuehrt, wenn niemand etwas bekommen kann.
+  const ziehendFuer = hatSchatzSperre(actor) ? helper : actor;
+  const sollZiehen = hatSchatzSperre(actor) ? Math.min(treasureCount, c.helperReward || 0) : treasureCount;
+  const drawn = ziehendFuer ? zieheSchaetzeFuer(room, ziehendFuer, sollZiehen) : [];
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache
   // (README) etwas zugesagt - hier immer erst alles an die/den Angreifer:in,
   // Weitergabe von Schätzen kann jederzeit frei "gehandelt" werden.
@@ -4823,17 +4830,21 @@ function finishFleeSuccess(room, actor, c) {
   }
   const tuba = equippedItemIds(actor).find((id) => FLEE_TREASURE_ITEMS.has((card(id) || {}).name));
   if (tuba) {
-    const t = drawTreasure(room);
-    if (t) {
-      actor.hand.push(t);
-      // Gleiche Beute-Animation wie nach einem Kampfsieg - privat im yourInfo,
-      // denn die gezogene Karte ist eine Handkarte (kind/quelle steuern nur
-      // die Ueberschrift im Client).
-      actor.lastReward = {
-        seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
-        cardIds: [t], levelsGained: 0, monsterNames: [], kind: 'flucht', quelle: card(tuba).name,
-      };
-      log(room, `${actor.name} nimmt auf dem Weg nach draussen noch 1 verdeckte Schatzkarte mit.`);
+    if (hatSchatzSperre(actor)) {
+      log(room, `${actor.name} koennte wegen "${card(tuba).name}" noch eine Schatzkarte mitnehmen, steht aber auf der Störerliste und bekommt keine.`);
+    } else {
+      const [t] = zieheSchaetzeFuer(room, actor, 1);
+      if (t) {
+        actor.hand.push(t);
+        // Gleiche Beute-Animation wie nach einem Kampfsieg - privat im yourInfo,
+        // denn die gezogene Karte ist eine Handkarte (kind/quelle steuern nur
+        // die Ueberschrift im Client).
+        actor.lastReward = {
+          seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
+          cardIds: [t], levelsGained: 0, monsterNames: [], kind: 'flucht', quelle: card(tuba).name,
+        };
+        log(room, `${actor.name} nimmt auf dem Weg nach draussen noch 1 verdeckte Schatzkarte mit.`);
+      }
     }
   }
   naechsterFluechtling(room, c);

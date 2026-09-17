@@ -1299,6 +1299,52 @@ const PRIESTER = findCard('PRIESTER', 'class');
     assert.ok(!room.pendingCardAction, 'keine Wahl zwischen zwei Schaetzen, die es nie gab');
     assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt ein Geschenk zu behaupten');
   }
+  // 11. Flucht mit TUBA DER VERZAUBERUNG (FLEE_TREASURE_ITEMS): kein Schatz
+  //     fuer eine gesperrte Person, Stapel bleibt unberuehrt. Neu gefunden
+  //     beim Audit fuer den Choke-Point (Fix-Round 3).
+  {
+    const { handleAttemptFlee } = require('../server.js');
+    const tuba = findCard('TUBA DER VERZAUBERUNG', 'item');
+    const { p, room } = aufDerListe();
+    p.equipped.hands = [tuba.id, null];
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: true };
+    const vorher = room.treasureDeck.length;
+    handleAttemptFlee(room, p.id, 9);
+    assert.strictEqual(room.dieRoll.success, true, 'Testvoraussetzung: die Flucht gelingt');
+    assert.strictEqual(p.hand.length, 0, 'die Tuba bringt der gesperrten Person keinen Schatz mit');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(room.logs.some((l) => /Störerliste/.test(l.text)),
+      'der Verlauf ist ehrlich statt einen Schatz zu behaupten');
+  }
+  // 12. drawTreasureN (generische "ziehe N Schaetze"-Primitive, z.B.
+  //     SCHATZHORT!): nichts fuer die gesperrte Person, Stapel bleibt
+  //     unberuehrt. Neu gefunden beim Audit fuer den Choke-Point.
+  {
+    const { applyPrimitiveAction: applyPrimitive } = require('../server.js');
+    const { p, room } = aufDerListe();
+    const vorher = room.treasureDeck.length;
+    const desc = applyPrimitive(room, p, { type: 'drawTreasureN', n: 3 });
+    assert.strictEqual(p.hand.length, 0, 'kein Schatz fuer die gesperrte Person');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt Schaetze zu behaupten');
+  }
+  // 13. removeOneMonster/leavesTreasure (POLLYVERWANDLUNGSTRANK-artig, ein
+  //     Geschwister von endCombatNoLevel): nichts fuer die gesperrte Person,
+  //     Stapel bleibt unberuehrt. Neu gefunden beim Audit fuer den
+  //     Choke-Point.
+  {
+    const { applyCombatPotionAction } = require('../server.js');
+    const { p, room } = aufDerListe();
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    const vorher = room.treasureDeck.length;
+    const desc = applyCombatPotionAction(room, p,
+      { type: 'removeOneMonster', monsterId: ratte.id, leavesTreasure: true }, null);
+    assert.strictEqual(p.hand.length, 0, 'kein Schatz fuer die gesperrte Person');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt einen Schatz zu behaupten');
+  }
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
