@@ -2884,6 +2884,18 @@ function hatSchatzSperre(player) {
 // Person). Fuer eine Ziehung, die auf zwei Personen verteilt wird (Kampf-
 // Hauptausschuettung), gilt die Sperre der Person, fuer die tatsaechlich
 // gezogen wird - siehe resolveCombatWin.
+// Deckt ausserdem NICHT ab: eine Schatzkarte, die OHNE drawTreasure() die
+// Hand wechselt - also nicht gezogen, sondern von einer Person zur
+// anderen bewegt wird. Bekannte Faelle: DIEB "Diebstahl" (stealItemFrom
+// nimmt einen bereits getragenen Schatz-Gegenstand direkt von der
+// bestohlenen Person) und ENTE DER VIELEN SACHEN, Schritt "klauen" (nimmt
+// eine zufaellige Handkarte der naechsten Person, die zufaellig auch ein
+// Schatz sein kann). Beide bewusst ungefixt (Ruling 2026-09-17): seltener
+// als PESTRATTEN/AMAZONE, und ein sauberer Fix braucht ein Audit der
+// gesamten .hand.push(-Flaeche in server.js, nicht nur dieser zwei
+// Stellen. Aufruestweg: diese Flaeche durchsuchen und jede Stelle, die
+// eine Schatzkarte von einer Person zur anderen bewegt, ueber
+// hatSchatzSperre(empfaenger) fuehren (siehe finishTrade als Vorbild).
 function zieheSchaetzeFuer(room, player, n) {
   if (hatSchatzSperre(player)) return [];
   const drawn = [];
