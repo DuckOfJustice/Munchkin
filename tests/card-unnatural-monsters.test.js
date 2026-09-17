@@ -903,11 +903,17 @@ const PRIESTER = findCard('PRIESTER', 'class');
       && Math.floor(summeVorHalbierung / 2) < 1000,
       'Testvoraussetzung: Summe liegt vor der Halbierung ueber, danach unter der Schwelle');
     const vorher = p.level;
+    const logsVorher = room.logs.length;
     handleSellItems(room, p.id, [ruestung.id, kleinesItem.id]);
     assert.strictEqual(p.level, vorher,
       'halbiert unter die Schwelle: kein Stufenaufstieg, der Verkauf scheitert ganz');
     assert.ok(p.hand.includes(kleinesItem.id), 'und der Gegenstand bleibt auf der Hand');
     assert.strictEqual(p.equipped.armor, ruestung.id, 'die Ruestung bleibt angelegt - nichts wurde verkauft');
+    // Die eigentliche Regression: keine Logzeile darf einen Verkauf
+    // behaupten, der wegen der Halbierung gar nicht stattfand.
+    const neueLogs = room.logs.slice(logsVorher);
+    assert.ok(!neueLogs.some((e) => /GS zählen nur/.test(e.text)),
+      'kein Log ueber eine Halbierung, wenn der Verkauf mangels Schwelle gar nicht stattfindet');
   }
 }
 
