@@ -968,6 +968,49 @@ const PRIESTER = findCard('PRIESTER', 'class');
     assert.strictEqual(room.combat && room.combat.mustFlee, true,
       'ohne passende Hilfe hilft auch Stufe 99 nicht - fliehen');
   }
+  // 5. "Unabhaengig von der Kampfstaerke" gilt auch fuer den
+  //    Krieger-Gleichstandssieg - ein Gleichstand ist auch ein Sieg und darf
+  //    ohne passende Hilfe nicht durchgehen.
+  {
+    const KRIEGER = findCard('KRIEGER', 'class');
+    const kaempfer = makePlayer({ id: 'p1', name: 'A', gender: 'm', level: lust.level,
+      classes: [KRIEGER.id] });
+    const room = makeRoom([kaempfer]);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [lust.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    const vorherLevel = kaempfer.level;
+    resolveCombat(room);
+    assert.strictEqual(room.combat && room.combat.mustFlee, true,
+      'Krieger-Gleichstand gewinnt nicht gegen das Lustmonster ohne passende Hilfe');
+    assert.strictEqual(kaempfer.level, vorherLevel,
+      'kein Stufenaufstieg - der Gleichstand wurde nicht als Sieg gewertet');
+  }
+  // 6. Die ALUFOLIE-Notloesung darf bei fehlender Hilfe nicht verbraucht
+  //    werden - sonst zahlt die Person eine Karte fuer einen Sieg, der im
+  //    selben Atemzug wieder in Flucht umschlaegt. ALUFOLIE liegt derzeit in
+  //    keinem Stapel dieses Sets (siehe Kommentar bei TIE_BREAKER_CARD in
+  //    server.js) - fuer den Test wird sie kurzzeitig in CARDS_BY_ID
+  //    eingetragen, damit findTieBreaker sie ueber den echten Pfad findet.
+  {
+    const { CARDS_BY_ID } = require('../server.js');
+    const fakeId = 'TEST_ALUFOLIE_LUSTMONSTER';
+    CARDS_BY_ID.set(fakeId, { id: fakeId, name: 'ALUFOLIE', type: 'treasure' });
+    try {
+      const kaempfer = makePlayer({ id: 'p1', name: 'A', gender: 'm', level: lust.level, hand: [fakeId] });
+      const room = makeRoom([kaempfer]);
+      room.combat = { actorId: 'p1', helperId: null, monsterIds: [lust.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+      resolveCombat(room);
+      assert.strictEqual(room.combat && room.combat.mustFlee, true,
+        'ohne passende Hilfe wird geflohen, auch mit ALUFOLIE auf der Hand');
+      assert.ok(kaempfer.hand.includes(fakeId),
+        'die ALUFOLIE bleibt auf der Hand - sie wird nicht verbraucht');
+      assert.ok(!room.treasureDiscard.includes(fakeId) && !room.doorDiscard.includes(fakeId),
+        'die ALUFOLIE landet in keinem Ablagestapel');
+    } finally {
+      CARDS_BY_ID.delete(fakeId);
+    }
+  }
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

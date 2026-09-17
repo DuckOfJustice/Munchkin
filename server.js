@@ -4470,20 +4470,23 @@ function handleEvaluateCombat(room, playerId) {
 function resolveCombat(room) {
   const c = room.combat;
   const { playerStrength, monsterStrength } = combatTotals(room);
+  // LUSTMONSTER: "sonst kannst du das Lustmonster nicht besiegen". Ohne
+  // passende Hilfe ist der Kampf unabhaengig von der Kampfstaerke verloren -
+  // deshalb ganz oben, vor Krieger-Gleichstand UND ALUFOLIE-Notloesung. Ein
+  // Gleichstand ist auch ein Sieg, und die Notloesung waere sonst umsonst
+  // verbraucht (Karte weg, "zaehlt als Sieg" geloggt, direkt danach doch
+  // geflohen).
+  const lustOhneHilfe = combatHasMonster(room, MONSTER_REQUIRES_OTHER_GENDER) && !passendeHilfe(room);
   // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Greift vor der
   // ALUFOLIE-Notlösung, damit die Karte nicht unnötig verbraucht wird.
-  const warrior = playerStrength === monsterStrength
+  const warrior = !lustOhneHilfe && playerStrength === monsterStrength
     ? combatParticipants(room).find((p) => hasClass(p, 'KRIEGER')) : null;
   if (warrior) {
     log(room, `Gleichstand (${playerStrength} vs. ${monsterStrength}) - ${warrior.name} ist Krieger und gewinnt ihn.`);
     resolveCombatWin(room);
     return;
   }
-  // LUSTMONSTER: "sonst kannst du das Lustmonster nicht besiegen". Ohne
-  // passende Hilfe ist der Kampf unabhaengig von der Kampfstaerke verloren -
-  // deshalb VOR dem Staerkevergleich.
-  const lustOhneHilfe = combatHasMonster(room, MONSTER_REQUIRES_OTHER_GENDER) && !passendeHilfe(room);
-  const tie = playerStrength === monsterStrength ? findTieBreaker(room) : null;
+  const tie = !lustOhneHilfe && playerStrength === monsterStrength ? findTieBreaker(room) : null;
   if (tie) {
     removeFromHand(tie.player, tie.cardId);
     discardCard(room, tie.cardId);
