@@ -1057,5 +1057,62 @@ const PRIESTER = findCard('PRIESTER', 'class');
   }
 }
 
+// --- WEIHNACHTSMANN, Schlimme Dinge -----------------------------------------
+// "Du kommst auf die Störerliste. Du erhältst keine Schatzkarten … auch nicht
+// von anderen Spielern … bis du ein Monster ohne Hilfe tötest."
+{
+  const { resolveConsequenceSpec, applyPrimitiveAction, resolveCombatWin } = require('../server.js');
+  const mann = findCard('WEIHNACHTSMANN', 'monster');
+  const ratte = findCard('PESTRATTEN', 'monster');
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 8).map((c) => c.id);
+
+  function aufDerListe(extra) {
+    const p = makePlayer(Object.assign({ level: 5 }, extra || {}));
+    const room = makeRoom([p]);
+    const spec = resolveConsequenceSpec(mann.name, mann.badstuff, p, room);
+    assert.ok(spec, 'der Weihnachtsmann hat jetzt eine kuratierte Konsequenz');
+    applyPrimitiveAction(room, p, spec);
+    room.treasureDeck = schaetze.slice();
+    return { p, room };
+  }
+
+  // 1. Sieg MIT Hilfe: kein Schatz, und die Sperre bleibt stehen.
+  {
+    const { p, room } = aufDerListe();
+    const helfer = makePlayer({ id: 'p2', name: 'B' });
+    room.players.push(helfer);
+    room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    resolveCombatWin(room);
+    assert.strictEqual(p.hand.length, 0, 'auf der Stoererliste gibt es keinen Schatz');
+    assert.ok(p.activeCurses.some((f) => f.kind === 'noTreasure'),
+      'ein Sieg mit Hilfe loest die Sperre nicht');
+  }
+  // 2. Sieg OHNE Hilfe: die Sperre faellt, und der befreiende Kampf zahlt
+  //    schon aus.
+  {
+    const { p, room } = aufDerListe();
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    resolveCombatWin(room);
+    assert.ok(!p.activeCurses.some((f) => f.kind === 'noTreasure'),
+      'ein Monster ohne Hilfe getoetet - die Sperre ist weg');
+    assert.strictEqual(p.hand.length, ratte.treasureCount,
+      'und der befreiende Kampf zahlt schon aus');
+  }
+  // 3. Gegenprobe: ohne Sperre zahlt derselbe Kampf mit Hilfe normal aus.
+  {
+    const p = makePlayer({ level: 5 });
+    const helfer = makePlayer({ id: 'p2', name: 'B' });
+    const room = makeRoom([p, helfer]);
+    room.treasureDeck = schaetze.slice();
+    room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    resolveCombatWin(room);
+    assert.strictEqual(p.hand.length, ratte.treasureCount,
+      'ohne Sperre gibt es die Schaetze wie immer');
+  }
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

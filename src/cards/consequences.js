@@ -16,18 +16,6 @@ module.exports = (ctx) => {
   const kleineGegenstaendeAnzahl = (player, room) =>
     equippedItemIds(player).filter((id) => !istGrosserGegenstand(room, id)).length;
 
-  // ponytail: WEIHNACHTSMANN hat bewusst KEINEN Eintrag in
-  // CONSEQUENCE_OVERRIDES - sein Text faellt durch den generischen Parser
-  // (parseAutoConsequence) und bleibt manuell (siehe tests/auto-consequence.
-  // test.js, "manualOhneOverride"). Er braucht einen zugübergreifenden
-  // Zustand am Spieler (gilt bis ein Ereignis eintritt, das ueber diese eine
-  // Konsequenz hinausreicht) - genau die Erweiterung, die das Design bewusst
-  // in eine eigene, zuletzt geplante Welle 3 gelegt hat (siehe
-  // docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md §6):
-  //   - WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... bis du ein
-  //     Monster OHNE Hilfe toetest." Aufruestweg: ein Flag am Spieler, das
-  //     resolveCombatWin vor jeder Schatzvergabe prueft und beim naechsten
-  //     hilfsfreien Sieg selbst loescht.
   const CONSEQUENCE_OVERRIDES = {
     // --- Eindeutiger Tod in ungewöhnlicher Formulierung ---
     'BULLROG': () => ({ type: 'death' }), // "Du wirst zu Tode gepeitscht."
@@ -230,6 +218,13 @@ module.exports = (ctx) => {
         dauer: 'naechsterKampf',
         hinweis: 'Im nächsten Kampf zählen deine Hand-Gegenstände nicht.' },
     ] }),
+    // "Du kommst auf die Störerliste. Du erhältst keine Schatzkarten … auch
+    // nicht von anderen Spielern … bis du ein Monster ohne Hilfe tötest."
+    'WEIHNACHTSMANN': () => ({
+      type: 'lingeringCurse', name: 'WEIHNACHTSMANN', kind: 'noTreasure',
+      dauer: 'dauerhaft',
+      hinweis: 'Störerliste: keine Schatzkarten (auch nicht von anderen), bis du ein Monster ohne Hilfe tötest.',
+    }),
 
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
     'ENTIKOR': () => ({

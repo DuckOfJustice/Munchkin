@@ -2852,6 +2852,14 @@ function curseHidesHandItems(player) {
   return (player.activeCurses || []).some((f) => f.kind === 'noHandItemBonus');
 }
 
+// WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... auch nicht von anderen
+// Spielern." Betroffene Karten werden gar nicht erst GEZOGEN statt gezogen
+// und weggeworfen - der Text sagt "du erhaeltst keine", der Stapel soll
+// dadurch nicht schrumpfen.
+function hatSchatzSperre(player) {
+  return !!player && (player.activeCurses || []).some((f) => f.kind === 'noTreasure');
+}
+
 // HUHN AUF DEINEM KOPF: "-1 auf alle Wuerfe." Gilt fuer jeden Wurf, den die
 // Person selbst macht - deshalb zentral in rollWithWindow, durch das
 // inzwischen alle Wuerfe laufen. Der Wert bleibt bei mindestens 1: ein
@@ -4523,6 +4531,14 @@ function resolveCombatWin(room) {
   const c = room.combat;
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
+  // "... bis du ein Monster ohne Hilfe tötest." Die Loeschung steht VOR der
+  // Schatzvergabe: wer die Strafe mit einem hilfsfreien Sieg abschuettelt,
+  // bekommt den Schatz dieses Kampfes schon wieder. Das ist die
+  // spielerfreundliche Lesart und erspart die Erklaerung, warum ausgerechnet
+  // der befreiende Sieg leer ausgeht.
+  if (!c.helperId && clearActiveCurseByKind(actor, 'noTreasure')) {
+    log(room, `${actor.name} hat ein Monster ohne Hilfe getoetet und ist von der Stoererliste runter.`);
+  }
   // MIESER SPIEGEL/GESCHLECHTSUMWANDLUNG gelten nur "im nächsten Kampf" -
   // der ist hiermit vorbei (gewonnen).
   clearNextCombatCurses([actor, helper]);
@@ -4548,6 +4564,7 @@ function resolveCombatWin(room) {
   if (pinata) {
     let gezogen = 0;
     room.players.forEach((p) => {
+      if (hatSchatzSperre(p)) return;
       const t = drawTreasure(room);
       if (!t) return;
       gezogen += 1;
@@ -4569,7 +4586,13 @@ function resolveCombatWin(room) {
   // Verstärker im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
   const treasureCount = c.treasureDelta ? Math.max(1, baseTreasures + c.treasureDelta) : baseTreasures;
   const drawn = [];
-  for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+  // Gezogen wird nur, was auch ankommt. Steht die kaempfende Person auf der
+  // Stoererliste und gibt es keine Helfer:in, die den zugesagten Teil
+  // bekaeme, bleibt der Stapel unberuehrt.
+  const maxEmpfang = hatSchatzSperre(actor)
+    ? (helper && !hatSchatzSperre(helper) ? Math.min(treasureCount, c.helperReward || 0) : 0)
+    : treasureCount;
+  for (let i = 0; i < maxEmpfang; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache
   // (README) etwas zugesagt - hier immer erst alles an die/den Angreifer:in,
   // Weitergabe von Schätzen kann jederzeit frei "gehandelt" werden.
@@ -4580,6 +4603,7 @@ function resolveCombatWin(room) {
   const zusage = helper ? Math.max(0, Math.min(c.helperReward || 0, drawn.length)) : 0;
   const fuerHelfer = drawn.slice(0, zusage).concat(helperPinataCard ? [helperPinataCard] : []);
   const fuerActor = drawn.slice(zusage).concat(actorPinataCard ? [actorPinataCard] : []);
+  if (helper && hatSchatzSperre(helper)) fuerHelfer.length = 0;
   fuerActor.forEach((id) => actor.hand.push(id));
   actor.lastReward = {
     seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
@@ -5512,11 +5536,18 @@ function finishTrade(room, trade, from, to, counterCardIds) {
   // übersprungen; der Rest wird getauscht.
   const offerIds = ownTradeIds(from, trade.offerCardIds);
   const counterIds = ownTradeIds(to, counterCardIds);
-  offerIds.forEach((id) => { takeTradedCard(from, id); clearCheatIfLost(from, id); to.hand.push(id); });
-  counterIds.forEach((id) => { takeTradedCard(to, id); clearCheatIfLost(to, id); from.hand.push(id); });
+  // WEIHNACHTSMANN: "auch nicht von anderen Spielern". Schatzkarten, die an
+  // eine gesperrte Person gingen, bleiben schlicht bei der gebenden Person -
+  // der Handel kommt sonst normal zustande.
+  const ohneGesperrteSchaetze = (ids, empfaenger) => (hatSchatzSperre(empfaenger)
+    ? ids.filter((id) => (card(id) || {}).type !== 'treasure') : ids);
+  const anEmpfaenger = ohneGesperrteSchaetze(offerIds, to);
+  const anGeber = ohneGesperrteSchaetze(counterIds, from);
+  anEmpfaenger.forEach((id) => { takeTradedCard(from, id); clearCheatIfLost(from, id); to.hand.push(id); });
+  anGeber.forEach((id) => { takeTradedCard(to, id); clearCheatIfLost(to, id); from.hand.push(id); });
   const names = (ids) => ids.map((id) => { const c = card(id); return c ? c.name : id; }).join(', ');
-  const offerText = offerIds.length ? `${names(offerIds)} - ${tradeGoldSum(offerIds)} GS` : '(nichts mehr davon verfügbar)';
-  const counterText = counterIds.length ? `${names(counterIds)} - ${tradeGoldSum(counterIds)} GS` : '(nichts zurück)';
+  const offerText = anEmpfaenger.length ? `${names(anEmpfaenger)} - ${tradeGoldSum(anEmpfaenger)} GS` : '(nichts mehr davon verfügbar)';
+  const counterText = anGeber.length ? `${names(anGeber)} - ${tradeGoldSum(anGeber)} GS` : '(nichts zurück)';
   log(room, `Handel: ${from.name} gibt [${offerText}] an ${to.name}, erhält dafür [${counterText}].`, [...offerIds, ...counterIds]);
   touchRoom(room);
 }
@@ -6067,7 +6098,7 @@ module.exports = {
   fluechtenderId, naechsterFluechtling, beendeFluchtphase,
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurse, clearActiveCurseByKind, applyLingeringRule,
-  curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems,
+  curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatSchatzSperre,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
