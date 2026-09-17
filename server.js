@@ -860,7 +860,11 @@ function handleDrawDoor(room, playerId) {
       room.doorDiscard.push(id);
       room.turnPhase = 'aerger';
       // AMAZONE: "Sie erhalten stattdessen 1 Schatz."
-      const geschenk = MONSTER_REFUSES_TREASURE[c.name] || 0;
+      // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - das Geschenk wird
+      // gar nicht erst gezogen, sonst schrumpft der Stapel fuer ein Geschenk,
+      // das nie ankommt.
+      const gesperrt = hatSchatzSperre(player);
+      const geschenk = gesperrt ? 0 : (MONSTER_REFUSES_TREASURE[c.name] || 0);
       const gezogen = [];
       for (let i = 0; i < geschenk; i++) { const t = drawTreasure(room); if (t) gezogen.push(t); }
       gezogen.forEach((tid) => player.hand.push(tid));
@@ -870,7 +874,10 @@ function handleDrawDoor(room, playerId) {
           cardIds: gezogen, levelsGained: 0, monsterNames: [c.name],
         };
       }
-      log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter${gezogen.length ? `, laesst aber ${gezogen.length} Schatzkarte(n) da` : ''}. Phase 2: Auf Ärger aus sein.`, [id]);
+      const geschenkHinweis = gesperrt && (MONSTER_REFUSES_TREASURE[c.name] || 0)
+        ? `, aber ${player.name} steht auf der Störerliste und bekommt nichts`
+        : (gezogen.length ? `, laesst aber ${gezogen.length} Schatzkarte(n) da` : '');
+      log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter${geschenkHinweis}. Phase 2: Auf Ärger aus sein.`, [id]);
     } else if (monsterPassOption(id, player)) {
       // "Kaempfen oder vorbeigehen und winken" - Halblinge bekommen die Wahl
       // gar nicht angeboten (monsterPassOption), die muessen kaempfen.
@@ -1307,15 +1314,21 @@ function applyPrimitiveAction(room, player, action) {
     case 'wegjagenMitSchatz': {
       const m = card(action.cardId);
       room.doorDiscard.push(action.cardId);
+      // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - gar nicht erst
+      // ziehen statt gezogen und weggeworfen.
+      const gesperrt = hatSchatzSperre(player);
+      const treasureCount = gesperrt ? 0 : (m.treasureCount || 0);
       const drawn = [];
-      for (let i = 0; i < (m.treasureCount || 0); i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+      for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
       drawn.forEach((cid) => player.hand.push(cid));
       player.lastReward = {
         seq: (player.lastReward ? player.lastReward.seq : 0) + 1,
         cardIds: drawn, levelsGained: 0, monsterNames: [m.name],
       };
       room.turnPhase = 'aerger';
-      return `jagt "${m.name}" weg, ${drawn.length} Schatzkarte(n), keine Stufe`;
+      return gesperrt
+        ? `jagt "${m.name}" weg, keine Stufe - ${player.name} steht auf der Störerliste und bekommt keinen Schatz`
+        : `jagt "${m.name}" weg, ${drawn.length} Schatzkarte(n), keine Stufe`;
     }
     // PACKRATTE: "Wenn du keine Gegenstaende im Spiel hast, erhaeltst du einen
     // von der Packratte. Ziehe zwei offene Schaetze und waehle einen aus. Du
@@ -1323,9 +1336,14 @@ function applyPrimitiveAction(room, player, action) {
     case 'packratteGeschenk': {
       const m = card(action.cardId);
       room.doorDiscard.push(action.cardId);
+      room.turnPhase = 'aerger';
+      // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - gar nicht erst
+      // ziehen, sonst schrumpft der Stapel fuer ein Geschenk, das nie ankommt.
+      if (hatSchatzSperre(player)) {
+        return `"${m.name}" will schenken, aber ${player.name} steht auf der Störerliste und bekommt nichts`;
+      }
       const gezogen = [];
       for (let i = 0; i < 2; i++) { const t = drawTreasure(room); if (t) gezogen.push(t); }
-      room.turnPhase = 'aerger';
       if (!gezogen.length) return `"${m.name}" zieht weiter - der Schatzstapel ist leer`;
       if (gezogen.length === 1) {
         player.hand.push(gezogen[0]);
@@ -1577,8 +1595,14 @@ function applyPrimitiveAction(room, player, action) {
       ids.forEach((id) => discardCard(room, id));
       let extra = '';
       if (ids.length > 1) {
-        const t = drawTreasure(room);
-        if (t) { player.hand.push(t); extra = `, +1 Schatz gezogen ("${card(t).name}")`; }
+        // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - gar nicht erst
+        // ziehen statt gezogen und weggeworfen.
+        if (hatSchatzSperre(player)) {
+          extra = ` - ${player.name} steht auf der Störerliste und bekommt keinen Extraschatz`;
+        } else {
+          const t = drawTreasure(room);
+          if (t) { player.hand.push(t); extra = `, +1 Schatz gezogen ("${card(t).name}")`; }
+        }
       }
       return `ganze Hand abgelegt (${ids.length} Karte(n))${extra}`;
     }
@@ -3810,15 +3834,20 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       if (action.returnToDoorDeckBottom) [...new Set(c.monsterIds)].forEach((id) => room.doorDeck.unshift(id));
       else discardMonsterIds(room.doorDiscard, c.monsterIds);
       const drawn = [];
+      let actor = null;
+      let gesperrt = false;
       if (action.leavesTreasure) {
         // Schatz wie beim Sieg: an die kämpfende Person, nicht an die, die
         // den Trank gespielt hat (jede:r am Tisch darf ihn einwerfen).
-        const actor = findPlayer(room, c.actorId) || player;
+        actor = findPlayer(room, c.actorId) || player;
+        // WEIHNACHTSMANN: "du erhaeltst keine Schatzkarten" - gar nicht erst
+        // ziehen statt gezogen und weggeworfen.
+        gesperrt = hatSchatzSperre(actor);
         // MAHLZEIT! nennt eine feste Zahl, sonst gilt der treasureCount der
         // zurueckgelassenen Monster.
-        const treasureCount = typeof action.fixedTreasures === 'number'
+        const treasureCount = gesperrt ? 0 : (typeof action.fixedTreasures === 'number'
           ? action.fixedTreasures
-          : monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0);
+          : monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0));
         for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
         drawn.forEach((id) => actor.hand.push(id));
         actor.lastReward = {
@@ -3830,7 +3859,9 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       }
       beendeKampfOhneSieg(room, c, action.thenLoot);
       return action.leavesTreasure
-        ? `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`
+        ? (gesperrt
+            ? `Kampf gegen ${names} beendet, keine Stufe - ${actor.name} steht auf der Störerliste und bekommt keinen Schatz`
+            : `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`)
         : `Kampf gegen ${names} beendet, kein Schatz`;
     }
     case 'doubleStrength': {
@@ -5548,7 +5579,7 @@ function finishTrade(room, trade, from, to, counterCardIds) {
   const names = (ids) => ids.map((id) => { const c = card(id); return c ? c.name : id; }).join(', ');
   const offerText = anEmpfaenger.length ? `${names(anEmpfaenger)} - ${tradeGoldSum(anEmpfaenger)} GS` : '(nichts mehr davon verfügbar)';
   const counterText = anGeber.length ? `${names(anGeber)} - ${tradeGoldSum(anGeber)} GS` : '(nichts zurück)';
-  log(room, `Handel: ${from.name} gibt [${offerText}] an ${to.name}, erhält dafür [${counterText}].`, [...offerIds, ...counterIds]);
+  log(room, `Handel: ${from.name} gibt [${offerText}] an ${to.name}, erhält dafür [${counterText}].`, [...anEmpfaenger, ...anGeber]);
   touchRoom(room);
 }
 

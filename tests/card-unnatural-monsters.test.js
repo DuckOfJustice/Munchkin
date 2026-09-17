@@ -1112,6 +1112,84 @@ const PRIESTER = findCard('PRIESTER', 'class');
     assert.strictEqual(p.hand.length, ratte.treasureCount,
       'ohne Sperre gibt es die Schaetze wie immer');
   }
+  // 4. endCombatNoLevel/leavesTreasure (MAHLZEIT!/Traenke, die den Kampf ohne
+  //    Sieg beenden): nichts fuer die gesperrte Person, UND der Stapel
+  //    schrumpft nicht fuer ein Geschenk, das nie ankommt.
+  {
+    const { applyCombatPotionAction } = require('../server.js');
+    const { p, room } = aufDerListe();
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    const vorher = room.treasureDeck.length;
+    const desc = applyCombatPotionAction(room, p,
+      { type: 'endCombatNoLevel', leavesTreasure: true, fixedTreasures: 2 }, findCard('MAHLZEIT!'));
+    assert.strictEqual(p.hand.length, 0,
+      'auf der Stoererliste gibt es auch beim Trankende keinen Schatz');
+    assert.strictEqual(room.treasureDeck.length, vorher,
+      'der Schatzstapel schrumpft nicht fuer ein Geschenk, das nie ankommt');
+    assert.ok(/Störerliste/.test(desc),
+      'die Meldung nennt ehrlich die Stoererliste statt einen Schatz zu behaupten');
+  }
+  // 5. wegjagenMitSchatz (MÖCHTEGERN-VAMPIR-artig): dieselben zwei Haelften.
+  {
+    const { applyPrimitiveAction: applyPrimitive } = require('../server.js');
+    const { p, room } = aufDerListe();
+    const vorher = room.treasureDeck.length;
+    const desc = applyPrimitive(room, p, { type: 'wegjagenMitSchatz', cardId: ratte.id });
+    assert.strictEqual(p.hand.length, 0, 'kein Schatz fuers Wegjagen auf der Stoererliste');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt einen Schatz zu behaupten');
+  }
+  // 6. MONSTER_REFUSES_TREASURE ueber den echten Aufdeck-Pfad (handleDrawDoor):
+  //    die Pestratten fliehen vor Orks und liessen sonst ihren Schatz da.
+  {
+    const { handleDrawDoor } = require('../server.js');
+    const { p, room } = aufDerListe({ races: [ORK.id] });
+    room.turnPhase = 'tuer';
+    room.doorDeck = [ratte.id];
+    const vorher = room.treasureDeck.length;
+    handleDrawDoor(room, p.id);
+    assert.strictEqual(p.hand.length, 0,
+      'die Pestratten lassen fuer eine gesperrte Person nichts da');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    const zeile = room.logs[room.logs.length - 1].text;
+    assert.ok(/Störerliste/.test(zeile),
+      'der Verlauf ist ehrlich statt einen Schatz zu behaupten');
+  }
+  // 7. discardWholeHandWithBonusDraw (TEDDYBÄR): kein Bonus-Schatz fuer die
+  //    gesperrte Person, Stapel bleibt unberuehrt.
+  {
+    const { applyPrimitiveAction: applyPrimitive } = require('../server.js');
+    const { p, room } = aufDerListe();
+    p.hand = [schaetze[0], schaetze[1]];
+    const vorher = room.treasureDeck.length;
+    const desc = applyPrimitive(room, p, { type: 'discardWholeHandWithBonusDraw' });
+    assert.strictEqual(p.hand.length, 0, 'kein Bonus-Schatz fuer die gesperrte Person');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt einen Bonus-Schatz zu behaupten');
+  }
+  // 8. finishTrade-Filter + Log-Highlight: Schatzkarten an eine gesperrte
+  //    Person bleiben bei der gebenden Person, und der Verlauf markiert nur
+  //    die Karte, die wirklich den Besitzer gewechselt hat.
+  {
+    const { handleProposeTrade, handleRespondTrade } = require('../server.js');
+    const { p, room } = aufDerListe();
+    const geber = makePlayer({ id: 'p2', name: 'B', hand: [schaetze[0], ORK.id] });
+    room.players.push(geber);
+    handleProposeTrade(room, geber.id, p.id, [schaetze[0], ORK.id]);
+    const tradeId = room.trades[0].id;
+    handleRespondTrade(room, p.id, tradeId, true, []);
+    assert.ok(!p.hand.includes(schaetze[0]),
+      'die gesperrte Person bekommt die Schatzkarte aus dem Handel nicht');
+    assert.ok(geber.hand.includes(schaetze[0]),
+      'die Schatzkarte bleibt bei der gebenden Person');
+    assert.ok(p.hand.includes(ORK.id),
+      'Nicht-Schatzkarten wechseln trotzdem den Besitzer');
+    const handelsZeile = room.logs.filter((l) => l.text.startsWith('Handel:')).pop();
+    assert.ok(handelsZeile, 'der Handel steht im Verlauf');
+    assert.deepStrictEqual(handelsZeile.cardIds, [ORK.id],
+      'der Verlauf markiert nur die Karte, die wirklich den Besitzer gewechselt hat');
+  }
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
