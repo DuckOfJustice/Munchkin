@@ -16,19 +16,15 @@ module.exports = (ctx) => {
   const kleineGegenstaendeAnzahl = (player, room) =>
     equippedItemIds(player).filter((id) => !istGrosserGegenstand(room, id)).length;
 
-  // ponytail: RIESENSTINKTIER, LUSTMONSTER und WEIHNACHTSMANN haben bewusst
-  // KEINEN Eintrag in CONSEQUENCE_OVERRIDES - ihr Text faellt durch den
-  // generischen Parser (parseAutoConsequence) und bleibt manuell (siehe
-  // tests/auto-consequence.test.js, "manualOhneOverride"). Alle drei
-  // brauchen einen zugübergreifenden Zustand am Spieler (gilt erst im
-  // naechsten Kampf, oder bis ein Ereignis eintritt, das ueber diese eine
-  // Konsequenz hinausreicht) - genau die Erweiterung, die das Design bewusst
-  // in eine eigene, zuletzt geplante Welle 3 gelegt hat (siehe
-  // docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md §6):
-  //   - RIESENSTINKTIER: "Niemand hilft dir, bis du alle getragene Kleidung
-  //     und Ruestung abgelegt hast. Der Goldwert ist halbiert." Aufruestweg:
-  //     ein Tracker analog zu activeCurses, den handleRequestHelp prueft und
-  //     der sich selbst loescht, sobald equipped leer ist.
+  // ponytail: LUSTMONSTER und WEIHNACHTSMANN haben bewusst KEINEN Eintrag in
+  // CONSEQUENCE_OVERRIDES - ihr Text faellt durch den generischen Parser
+  // (parseAutoConsequence) und bleibt manuell (siehe tests/auto-consequence.
+  // test.js, "manualOhneOverride"). Beide brauchen einen zugübergreifenden
+  // Zustand am Spieler (gilt erst im naechsten Kampf, oder bis ein Ereignis
+  // eintritt, das ueber diese eine Konsequenz hinausreicht) - genau die
+  // Erweiterung, die das Design bewusst in eine eigene, zuletzt geplante
+  // Welle 3 gelegt hat (siehe docs/superpowers/specs/2026-09-16-unnatural-
+  // axe-monster-design.md §6):
   //   - LUSTMONSTER: "Verliere eine Stufe ... im naechsten Kampf sind deine
   //     Hand-Gegenstaende nutzlos." Waere strukturell ein LINGERING_CURSES-
   //     Eintrag (src/cards/reactions.js) mit kind 'noHandItemBonus' - dieser
@@ -223,6 +219,15 @@ module.exports = (ctx) => {
             quelle: 'kleineGegenstaende', cardName: 'PTERODAKTYL',
             prompt: 'Einen kleinen Gegenstand ablegen' } },
       ],
+    }),
+    // "Besprüht! Niemand wird dir im Kampf helfen, bevor du nicht alle
+    // getragene Kleidung und Rüstung ablegst. Der Goldwert ist halbiert."
+    // Beide Wirkungen haengen an EINEM Tracker-Eintrag, weil sie dieselbe
+    // Löschbedingung teilen (siehe stinktierStrafeAktiv in server.js).
+    'RIESENSTINKTIER': () => ({
+      type: 'lingeringCurse', name: 'RIESENSTINKTIER', kind: 'noHelpHalfGold',
+      dauer: 'dauerhaft',
+      hinweis: 'Besprüht: niemand hilft dir, und dein Goldwert ist halbiert - bis du alle Kleidung und Rüstung abgelegt hast.',
     }),
 
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---

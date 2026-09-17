@@ -2328,6 +2328,22 @@ function stinktierSperre(room, playerId) {
   return !combatParticipants(room).some((p) => p.id === playerId);
 }
 
+// Kleidung und Ruestung im Sinne des Stinktiers: Kopf, Ruestung, Schuhe.
+// Hand-Gegenstaende (Waffen, Schilde) sind keine Kleidung.
+const KLEIDUNG_SLOTS = ['head', 'armor', 'feet'];
+
+// "... bevor du nicht alle getragene Kleidung und Rüstung ablegst."
+// ponytail: geprueft beim LESEN, nicht aufgeraeumt an jeder Stelle, an der
+// Ausruestung verschwinden kann (Ablegen, Verkaufen, Fluch, Schlimme Dinge) -
+// eine Pruefstelle statt fuenf, und sie kann nicht vergessen werden, wenn
+// spaeter ein sechster Weg dazukommt.
+function stinktierStrafeAktiv(player) {
+  if (!player || !(player.activeCurses || []).some((f) => f.kind === 'noHelpHalfGold')) return false;
+  if (KLEIDUNG_SLOTS.some((s) => player.equipped[s])) return true;
+  clearActiveCurseByKind(player, 'noHelpHalfGold');
+  return false;
+}
+
 function applyTargetAction(room, actor, target, action) {
   switch (action.type) {
     case 'kartenSperre': {
@@ -4296,6 +4312,11 @@ function handleRequestHelp(room, playerId, targetId, reward) {
     touchRoom(room);
     return;
   }
+  if (stinktierStrafeAktiv(actor)) {
+    log(room, `${actor.name} stinkt noch aus dem Riesenstinktier-Kampf - niemand hilft, solange Kleidung und Rüstung anliegen.`);
+    touchRoom(room);
+    return;
+  }
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
   if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
     log(room, 'Gegen dieses Monster darf niemand helfen.');
@@ -5143,6 +5164,11 @@ function handleUnequipItem(room, playerId, cardId) {
   player.hand.push(cardId);
   const c = card(cardId);
   log(room, `${player.name} legt "${c ? c.name : cardId}" wieder in die Hand.`, [cardId]);
+  // RIESENSTINKTIER-Strafe: derselbe Check wie in handleRequestHelp/
+  // handleSellItems, hier direkt nach dem Ablegen ausgeloest, damit der
+  // Tracker verschwindet, sobald das letzte Kleidungsstueck faellt, statt
+  // erst beim naechsten Hilfegesuch oder Verkauf.
+  stinktierStrafeAktiv(player);
   touchRoom(room);
 }
 
@@ -5189,6 +5215,16 @@ function handleSellItems(room, playerId, cardIds) {
   const halblingBonus = (halblingSaleOpen(player) && values.length)
     ? Math.max.apply(null, values) : 0;
   total += halblingBonus;
+  // RIESENSTINKTIER: "Der Goldwert ist halbiert." Halbiert wird die Endsumme
+  // (nach Alchemisten-Mindestwert und Halbling-Bonus), nicht der einzelne
+  // Gegenstand: der Kartentext nennt eine Eigenschaft der Person, keine der
+  // Gegenstaende - und die Endsumme ist ohnehin die Stelle, an der gerundet
+  // wird.
+  if (stinktierStrafeAktiv(player)) {
+    const voll = total;
+    total = Math.floor(total / 2);
+    log(room, `${player.name} stinkt noch - der Goldwert ist halbiert: ${voll} GS zählen nur ${total} GS.`);
+  }
   if (total < 1000) return;
   if (halblingBonus) player.halblingSaleUsed = true;
   const levels = Math.floor(total / 1000);

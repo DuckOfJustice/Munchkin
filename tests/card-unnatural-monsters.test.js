@@ -800,5 +800,92 @@ const PRIESTER = findCard('PRIESTER', 'class');
   }
 }
 
+// --- RIESENSTINKTIER, Schlimme Dinge ----------------------------------------
+// "Besprüht! Niemand wird dir im Kampf helfen, bevor du nicht alle getragene
+// Kleidung und Rüstung ablegst. Der Goldwert ist halbiert."
+{
+  const { resolveConsequenceSpec, applyPrimitiveAction, handleSellItems,
+    handleUnequipItem, handleRequestHelp } = require('../server.js');
+  const stinktier = findCard('RIESENSTINKTIER', 'monster');
+  // Eine Ruestung und ein Gegenstand von zusammen mindestens 2000 GS, damit
+  // die Halbierung den Stufenaufstieg messbar von 2 auf 1 drueckt.
+  // Beide Seiten der Halbierung muessen ueber der 1000er-Schwelle liegen,
+  // sonst faellt handleSellItems in den fruehen Rueckgabezweig und verkauft
+  // GAR NICHTS - der Test waere dann gruen, ohne die Halbierung zu pruefen.
+  // 600 (Ruestung) + 4500 (fuenf teuerste Gegenstaende) = 5100: voll 5
+  // Stufen, halbiert 2550 und damit 2 Stufen.
+  const ruestung = ALL_CARDS.filter((c) => c.slotKind === 'armor' && (c.gold || 0) > 0)
+    .sort((a, b) => b.gold - a.gold)[0];
+  const teuerListe = ALL_CARDS.filter((c) => c.category === 'item' && (c.gold || 0) > 0
+    && c.slotKind !== 'armor').sort((a, b) => b.gold - a.gold).slice(0, 5);
+  assert.ok(ruestung && teuerListe.length === 5, 'Testvoraussetzung: Ruestung und fuenf teure Gegenstaende vorhanden');
+  const gesamtGold = (ruestung.gold || 0) + teuerListe.reduce((n, c) => n + c.gold, 0);
+  assert.ok(Math.floor(gesamtGold / 2) >= 1000,
+    'Testvoraussetzung: auch der halbierte Wert liegt ueber der Verkaufsschwelle');
+
+  function besprueht() {
+    const p = makePlayer({ level: 3 });
+    const room = makeRoom([p]);
+    p.equipped.armor = ruestung.id;
+    const spec = resolveConsequenceSpec(stinktier.name, stinktier.badstuff, p, room);
+    assert.ok(spec, 'das Stinktier hat jetzt eine kuratierte Konsequenz');
+    applyPrimitiveAction(room, p, spec);
+    return { p, room };
+  }
+
+  // 1. Die Strafe steht im Tracker.
+  {
+    const { p } = besprueht();
+    assert.ok(p.activeCurses.some((f) => f.kind === 'noHelpHalfGold'),
+      'nach dem Besprühen steht die Strafe im Tracker');
+  }
+  // 2. Niemand hilft.
+  {
+    const { p, room } = besprueht();
+    const helfer = makePlayer({ id: 'p2', name: 'B' });
+    room.players.push(helfer);
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    handleRequestHelp(room, p.id, helfer.id, 0);
+    assert.ok(!room.combat.helperPending, 'wer besprueht ist, bekommt keine Hilfe');
+  }
+  // 3. Halber Goldwert: 2 Stufen werden zu 1.
+  {
+    const { p, room } = besprueht();
+    room.turnPhase = 'kampf';
+    room.combat = null;
+    room.turnIndex = 0;
+    teuerListe.forEach((c) => p.hand.push(c.id));
+    const vorher = p.level;
+    handleSellItems(room, p.id, [ruestung.id].concat(teuerListe.map((c) => c.id)));
+    const erwartet = Math.floor(Math.floor(gesamtGold / 2) / 1000);
+    assert.strictEqual(p.level - vorher, erwartet,
+      `halbierter Goldwert: ${gesamtGold} GS bringen nur ${erwartet} Stufe(n)`);
+    assert.ok(erwartet > 0 && erwartet < Math.floor(gesamtGold / 1000),
+      'Gegenprobe: es wurde wirklich verkauft, aber fuer weniger Stufen als ohne Halbierung');
+  }
+  // 4. Die Strafe endet, sobald keine Kleidung/Ruestung mehr anliegt.
+  {
+    const { p, room } = besprueht();
+    room.turnPhase = 'kampf';
+    room.combat = null;
+    handleUnequipItem(room, p.id, ruestung.id);
+    assert.ok(!p.activeCurses.some((f) => f.kind === 'noHelpHalfGold'),
+      'nach dem Ablegen der letzten Ruestung ist die Strafe weg');
+  }
+  // 5. Hand-Gegenstaende zaehlen NICHT als Kleidung - eine Waffe allein
+  //    beendet die Strafe nicht.
+  {
+    const p = makePlayer({ level: 3 });
+    const room = makeRoom([p]);
+    const waffe = ALL_CARDS.find((c) => c.slotKind === 'hand' && c.handsCost === 1);
+    p.equipped.hands = [waffe.id, null];
+    const spec = resolveConsequenceSpec(stinktier.name, stinktier.badstuff, p, room);
+    applyPrimitiveAction(room, p, spec);
+    assert.ok(p.activeCurses.some((f) => f.kind === 'noHelpHalfGold'),
+      'eine Waffe ist keine Kleidung - die Strafe bleibt');
+  }
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');
