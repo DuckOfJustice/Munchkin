@@ -1478,6 +1478,20 @@ function applyPrimitiveAction(room, player, action) {
     case 'lingeringCurse':
       applyLingeringRule(room, player, action.name, action.cardId || null, action);
       return action.hinweis || 'anhaltende Wirkung';
+    // VERFLUCHTER GEGENSTAND: die Id steht am Tracker-Eintrag, nicht in einem
+    // zweiten Feld am Spieler - so verschwindet sie mit dem Eintrag, und der
+    // WUNSCHRING braucht keine Sonderbehandlung.
+    case 'curseItem': {
+      const ziel = card(action.itemId);
+      if (!ziel || !equippedItemIds(player).includes(action.itemId)) return 'der Gegenstand ist nicht mehr angelegt';
+      player.activeCurses = player.activeCurses || [];
+      player.activeCurses.push({
+        cardId: action.cardId || null, name: 'VERFLUCHTER GEGENSTAND', kind: 'cursedItem',
+        itemId: action.itemId, amount: 0, dauer: 'dauerhaft',
+        hinweis: `"${ziel.name}" ist verflucht: keine Kräfte, und du wirst ihn nicht los.`,
+      });
+      return `"${ziel.name}" ist verflucht`;
+    }
     case 'levelUpAllPriests': {
       const priester = room.players.filter((p) => hasClass(p, 'PRIESTER'));
       if (!priester.length) return 'niemand ist Priester - keine Wirkung';
@@ -2098,6 +2112,10 @@ const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
   card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
   resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
   istGrosserGegenstand, getrageneSlotKarte,
+  specialSlotRule,
+  // TREASURE_POWER_OVERRIDES steht in server.js erst weiter unten - als
+  // Funktion durchgereicht, damit die Tabelle zur Aufrufzeit gelesen wird.
+  treasurePowerName: (name) => !!TREASURE_POWER_OVERRIDES[name],
 });
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
@@ -2931,6 +2949,18 @@ function curseSuppressesItemBonuses(player) {
 // der Person statt am Monster.
 function curseHidesHandItems(player) {
   return (player.activeCurses || []).some((f) => f.kind === 'noHandItemBonus');
+}
+
+// Der verfluchte Gegenstand - oder null. Geprueft wird beim LESEN, ob er
+// ueberhaupt noch angelegt ist: "Der Gegenstand kann durch einen anderen Fluch
+// zerstoert werden", und dann endet der Fluch mit ihm (gleiche Bauform wie
+// stinktierStrafeAktiv).
+function cursedItemId(player) {
+  const eintrag = (player.activeCurses || []).find((f) => f.kind === 'cursedItem');
+  if (!eintrag) return null;
+  if (equippedItemIds(player).includes(eintrag.itemId)) return eintrag.itemId;
+  clearActiveCurseByKind(player, 'cursedItem');
+  return null;
 }
 
 // STINKER: "Niemand hilft dir in deinem naechsten Kampf."
@@ -6380,7 +6410,7 @@ module.exports = {
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
-  hatKampfschatzSperre, hatUntotenAngst,
+  hatKampfschatzSperre, hatUntotenAngst, cursedItemId, unequipSlotCard,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,

@@ -5,6 +5,7 @@ const {
   istGrosserGegenstand, addActiveCurse, DOOR_OTHER_AS_CURSE,
   startCombat, handleRequestHelp, handleRespondHelp, resolveCombatWin, resolveCombat,
   UNDEAD_MONSTERS, handlePlayCombatCard,
+  resolveConsequenceSpec, applyPrimitiveAction, cursedItemId, unequipSlotCard,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -267,6 +268,32 @@ function makeRoom(players) {
     'die aengstliche Helfer:in verlaesst den Kampf, sobald er untot wird');
   assert.ok(neueLogs.some((l) => /Todesangst vor Untoten und verl.sst den Kampf/i.test(l.text || l)),
     'der Verlauf nennt den Grund (neue Logzeile vom Aufruf)');
+}
+
+// --- VERFLUCHTER GEGENSTAND: Auswahl ----------------------------------------
+{
+  const mitBonus = ALL_CARDS.filter((x) => x.category === 'item' && (x.bonus || 0) > 0 && x.slotKind);
+  const a = mitBonus.find((x) => x.slotKind === 'head');
+  const b = mitBonus.find((x) => x.slotKind === 'armor');
+  const p = makePlayer({ hand: [a.id, b.id] });
+  const room = makeRoom([p]);
+  handleEquipItem(room, p.id, a.id);
+  handleEquipItem(room, p.id, b.id);
+
+  const spec = resolveConsequenceSpec('VERFLUCHTER GEGENSTAND', '', p, room);
+  assert.strictEqual(spec.type, 'choice', 'das Opfer waehlt selbst');
+  assert.strictEqual(spec.options.length, 2, 'beide Gegenstaende stehen zur Wahl');
+
+  applyPrimitiveAction(room, p, spec.options[0].action);
+  const eintrag = p.activeCurses.find((f) => f.kind === 'cursedItem');
+  assert.ok(eintrag, 'der Fluch steht im Tracker');
+  assert.strictEqual(eintrag.itemId, spec.options[0].action.itemId, 'und merkt sich den Gegenstand');
+  assert.strictEqual(cursedItemId(p), eintrag.itemId, 'cursedItemId liest ihn zurueck');
+
+  // Ist der Gegenstand auf anderem Weg weg (anderer Fluch), raeumt der Leser auf.
+  unequipSlotCard(p, eintrag.itemId);
+  assert.strictEqual(cursedItemId(p), null, 'ohne den Gegenstand endet der Fluch');
+  assert.strictEqual(p.activeCurses.length, 0, 'und der Eintrag verschwindet');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
