@@ -3866,7 +3866,13 @@ function combatTotals(room) {
       // ignoreWeapons haengt am Monster und gilt fuer beide Seiten gleich,
       // curseHidesHandItems an der Person - deshalb steht der Ausdruck hier
       // in der sides-Schleife, wo p bekannt ist.
-      const excludeIds = (ignoreWeapons || curseHidesHandItems(p)) ? handItemIds(p) : null;
+      // Eine Ausschlussmenge fuer drei Gruende: Monster (MONDJUNGFERN),
+      // Person (LUSTMONSTER) und einzelner Gegenstand (VERFLUCHTER
+      // GEGENSTAND, "Er verliert seine Kraefte"). Sie fliegt aus allen drei
+      // Item-Summanden, also samt Kartenanhaengen und Rassenbonus.
+      const excludeIds = new Set();
+      if (ignoreWeapons || curseHidesHandItems(p)) handItemIds(p).forEach((id) => excludeIds.add(id));
+      cursedItemIds(p).forEach((id) => excludeIds.add(id));
       const items = curseSuppressesItemBonuses(p)
         ? ruestungsBonusSumme(p)
         : equippedBonusSum(p, room, excludeIds) + raceItemBonusSum(p, excludeIds)

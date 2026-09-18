@@ -336,5 +336,31 @@ function makeRoom(players) {
   assert.deepStrictEqual([...cursedItemIds(p)], [ruestung.id], 'der zerstoerte nimmt nur seinen eigenen Fluch mit');
 }
 
+// --- VERFLUCHTER GEGENSTAND: die Kraefte zaehlen nicht mehr ------------------
+// "Er verliert seine Kraefte." Geprueft wird die DIFFERENZ der Kampfstaerke,
+// inklusive eines Anhangs am selben Gegenstand: der faellt mit weg, weil der
+// Gegenstand komplett aus der Rechnung fliegt (dieselbe Ausschlussmenge wie
+// bei den MONDJUNGFERN).
+{
+  const monster = findCard('PESTRATTEN', 'monster');
+  const waffe = ALL_CARDS.find((x) => x.category === 'item' && x.slotKind === 'hand'
+    && x.handsCost === 1 && (x.bonus || 0) > 0);
+  const vergiftet = findCard('VERGIFTET');
+  const p = makePlayer({ hand: [waffe.id] });
+  const room = makeRoom([p]);
+  handleEquipItem(room, p.id, waffe.id);
+  room.combat = { actorId: p.id, helperId: null, monsterIds: [monster.id],
+    actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+  const nurWaffe = combatTotals(room).playerStrength;
+
+  room.itemAttachments[waffe.id] = [vergiftet.id];
+  const mitAnhang = combatTotals(room).playerStrength;
+  assert.ok(mitAnhang > nurWaffe, 'Testannahme: der Anhang zaehlt zunaechst mit');
+
+  applyPrimitiveAction(room, p, { type: 'curseItem', itemId: waffe.id, cardId: null });
+  assert.strictEqual(combatTotals(room).playerStrength, nurWaffe - (waffe.bonus || 0),
+    'verflucht zaehlen weder der Gegenstand noch sein Anhang');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');
