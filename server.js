@@ -454,6 +454,23 @@ function equippedBonusSum(player, room, excludeIds) {
   }, 0);
 }
 
+// Die Karte, die einen gedruckten Platz (Kopf/Ruestung/Schuhe) belegt - egal,
+// wo sie wirklich liegt: ein geschummelter Gegenstand liegt auf dem
+// Spezialplatz (siehe handleEquipItem), traegt seinen slotKind aber weiter.
+// EINE Stelle fuer alle, die sonst direkt in player.equipped[slot] schauen.
+function getrageneSlotKarte(player, slot) {
+  return equippedItemIds(player).find((id) => (card(id) || {}).slotKind === slot) || null;
+}
+
+// MIESER SPIEGEL/GEMEINE GHOULE lassen nur Ruestungsboni stehen. Summiert
+// statt eines einzelnen Slots: geschummelt kann eine zweite Ruestung anliegen
+// (siehe getrageneSlotKarte), und beide sind Ruestungsboni.
+function ruestungsBonusSumme(player) {
+  return equippedItemIds(player)
+    .filter((id) => (card(id) || {}).slotKind === 'armor')
+    .reduce((sum, id) => sum + ((card(id) || {}).bonus || 0), 0);
+}
+
 // Machtgruppe Höllenritter, "Höllenritterrüstung": eine im Kampf +5 werte
 // Rüstung, die zugleich als Rüstung UND Kopfbedeckung zählt - laut Karte darf
 // daneben keine andere Rüstung/Kopfbedeckung getragen werden. Statt das
@@ -1558,7 +1575,7 @@ function applyPrimitiveAction(room, player, action) {
         return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
       });
     case 'discardSlot': {
-      const id = player.equipped[action.slot];
+      const id = getrageneSlotKarte(player, action.slot);
       // Gekoppelte Spezialausruestung faellt mit (GNOMEX-ANZUG mit der
       // Ruestung, SCHRECKLICHE SOCKEN mit dem Schuhwerk) - auch dann, wenn der
       // eigentliche Platz gerade leer ist.
@@ -1568,7 +1585,9 @@ function applyPrimitiveAction(room, player, action) {
       gekoppelt.forEach((sid) => { unequipSlotCard(player, sid); discardCard(room, sid); });
       const mit = gekoppelt.length ? ` (mit ${gekoppelt.map((sid) => `"${card(sid).name}"`).join(', ')})` : '';
       if (!id) return gekoppelt.length ? `${slotLabelDe(action.slot)} war leer${mit} abgelegt` : `${slotLabelDe(action.slot)}: nichts getragen`;
-      player.equipped[action.slot] = null;
+      // unequipSlotCard statt player.equipped[slot] = null: die Karte kann
+      // auch geschummelt auf dem Spezialplatz liegen.
+      unequipSlotCard(player, id);
       discardCard(room, id);
       return `${slotLabelDe(action.slot)} "${card(id).name}"${mit} abgelegt`;
     }
@@ -2379,7 +2398,7 @@ const KLEIDUNG_SLOTS = ['head', 'armor', 'feet'];
 // spaeter ein sechster Weg dazukommt.
 function stinktierStrafeAktiv(player) {
   if (!player || !(player.activeCurses || []).some((f) => f.kind === 'noHelpHalfGold')) return false;
-  if (KLEIDUNG_SLOTS.some((s) => player.equipped[s])) return true;
+  if (KLEIDUNG_SLOTS.some((s) => getrageneSlotKarte(player, s))) return true;
   clearActiveCurseByKind(player, 'noHelpHalfGold');
   return false;
 }
@@ -3736,7 +3755,7 @@ function combatTotals(room) {
       // in der sides-Schleife, wo p bekannt ist.
       const excludeIds = (ignoreWeapons || curseHidesHandItems(p)) ? handItemIds(p) : null;
       const items = curseSuppressesItemBonuses(p)
-        ? ((card(p.equipped.armor) || {}).bonus || 0)
+        ? ruestungsBonusSumme(p)
         : equippedBonusSum(p, room, excludeIds) + raceItemBonusSum(p, excludeIds)
           + conditionalItemBonusSum(p, monsters, combatHasUndead(room), excludeIds);
       return sum + p.level + items + hellknightArmorBonus(p)
