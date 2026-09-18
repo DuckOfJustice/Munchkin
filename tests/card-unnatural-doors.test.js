@@ -2,7 +2,7 @@
 const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, combatTotals, handleEquipItem, equippedItemIds,
-  istGrosserGegenstand,
+  istGrosserGegenstand, addActiveCurse, DOOR_OTHER_AS_CURSE,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -53,6 +53,28 @@ function makeRoom(players) {
     return combatTotals(r).playerStrength;
   };
   assert.strictEqual(kampf(room, p) - kampf(raumOhne, ohne), 3, 'sie gibt +3 im Kampf');
+}
+
+// --- Tracker-Eintraege ------------------------------------------------------
+{
+  const faelle = [
+    { name: 'STINKER', kind: 'noHelp', dauer: 'naechsterKampf' },
+    { name: 'NARRENGOLD', kind: 'noCombatTreasure', dauer: 'naechsterKampf' },
+    { name: 'TODESANGST', kind: 'fearUndead', dauer: 'dauerhaft' },
+  ];
+  faelle.forEach(({ name, kind, dauer }) => {
+    const karte = findCard(name);
+    const p = makePlayer({});
+    const room = makeRoom([p]);
+    addActiveCurse(room, p, name, karte.id);
+    const eintrag = p.activeCurses.find((f) => f.kind === kind);
+    assert.ok(eintrag, `${name} traegt ${kind} ein`);
+    assert.strictEqual(eintrag.dauer, dauer, `${name}: Dauer ${dauer}`);
+    assert.ok(eintrag.hinweis, `${name}: Hinweistext fuer die Anzeige`);
+  });
+  // TODESANGST wirkt beim Ziehen und ist aus der Hand spielbar - beides haengt
+  // an derselben Mitgliedschaft (siehe handlePlayCurseFromHand).
+  assert.ok(DOOR_OTHER_AS_CURSE.has('TODESANGST'), 'TODESANGST gilt als Fluch');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

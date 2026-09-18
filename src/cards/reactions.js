@@ -64,6 +64,21 @@ module.exports = () => {
     'ZWERGENBIER': { kind: 'combatMalus', amount: -4, amountFuerRasse: { 'ZWERG': 4 },
       dauer: 'naechsterKampf',
       hinweis: '-4 im nächsten Kampf (Zwerge bekommen stattdessen +4).' },
+    // "Niemand hilft dir in deinem naechsten Kampf." Wer waehrend eines
+    // Kampfes verflucht wird, bekommt den Eintrag fuer DIESEN Kampf: die
+    // Dauer 'naechsterKampf' laeuft am Ende des laufenden Kampfes ab
+    // (clearNextCombatCurses), der Kartentext will genau das.
+    'STINKER': { kind: 'noHelp', dauer: 'naechsterKampf',
+      hinweis: 'Im nächsten Kampf hilft dir niemand.' },
+    // "Du erhaeltst keinen Schatz im naechsten Kampf." Sperrt NUR die
+    // Kampfbeute - nicht jede Schatzkarte (das ist die Stoererliste des
+    // Weihnachtsmanns, kind 'noTreasure').
+    'NARRENGOLD': { kind: 'noCombatTreasure', dauer: 'naechsterKampf',
+      hinweis: 'Im nächsten Kampf gibt es für dich keinen Schatz.' },
+    // "Du hast Angst vor den Untoten." Dauerhaft - der Kartentext nennt kein
+    // Ende, nur der WUNSCHRING beendet ihn.
+    'TODESANGST': { kind: 'fearUndead', dauer: 'dauerhaft',
+      hinweis: 'Angst vor Untoten: du hilfst nicht gegen sie, und gegen Untote hilft dir niemand.' },
   };
 
   // Karten, die einen LAUFENDEN Kampf veraendern. Sie reiten auf der
