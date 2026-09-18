@@ -362,6 +362,9 @@ module.exports = (ctx) => {
     // (LINGERING_CURSES) - kein Sofort-Effekt:
     'ZWERGENBIER': () => null,
     'STINKER': () => null,
+    // TODESANGST wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES) - kein Sofort-Effekt:
+    'TODESANGST': () => null,
     // Braucht Datenpunkte/Mechaniken, die es hier nicht gibt (freie Handel-
     // Reihenfolge, wiederkehrender Rundenend-Hook, neue Kampfauslösung
     // mitten in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-
