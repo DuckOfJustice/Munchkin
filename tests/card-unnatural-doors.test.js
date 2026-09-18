@@ -5,7 +5,7 @@ const {
   istGrosserGegenstand, addActiveCurse, DOOR_OTHER_AS_CURSE,
   startCombat, handleRequestHelp, handleRespondHelp, resolveCombatWin, resolveCombat,
   UNDEAD_MONSTERS, handlePlayCombatCard,
-  resolveConsequenceSpec, applyPrimitiveAction, cursedItemId, unequipSlotCard,
+  resolveConsequenceSpec, applyPrimitiveAction, cursedItemIds, unequipSlotCard,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -288,12 +288,52 @@ function makeRoom(players) {
   const eintrag = p.activeCurses.find((f) => f.kind === 'cursedItem');
   assert.ok(eintrag, 'der Fluch steht im Tracker');
   assert.strictEqual(eintrag.itemId, spec.options[0].action.itemId, 'und merkt sich den Gegenstand');
-  assert.strictEqual(cursedItemId(p), eintrag.itemId, 'cursedItemId liest ihn zurueck');
+  assert.ok(cursedItemIds(p).has(eintrag.itemId), 'cursedItemIds liest ihn zurueck');
 
   // Ist der Gegenstand auf anderem Weg weg (anderer Fluch), raeumt der Leser auf.
   unequipSlotCard(p, eintrag.itemId);
-  assert.strictEqual(cursedItemId(p), null, 'ohne den Gegenstand endet der Fluch');
+  assert.strictEqual(cursedItemIds(p).size, 0, 'ohne den Gegenstand endet der Fluch');
   assert.strictEqual(p.activeCurses.length, 0, 'und der Eintrag verschwindet');
+}
+
+// --- VERFLUCHTER GEGENSTAND: Sonderkraft zaehlt als Fluchziel ---------------
+// "Ein Gegenstand, der dir einen Kampfbonus ODER eine besondere Kraft
+// verleiht." Die SCHUTZSANDALEN geben keinen Bonus, stehen aber in
+// CURSE_PROOF_ITEMS - sie sind also ein gueltiges Ziel.
+{
+  const sandalen = findCard('SCHUTZSANDALEN');
+  assert.strictEqual(sandalen.bonus || 0, 0, 'Testannahme: die Sandalen geben keinen Kampfbonus');
+  const p = makePlayer({ hand: [sandalen.id] });
+  const room = makeRoom([p]);
+  handleEquipItem(room, p.id, sandalen.id);
+  const spec = resolveConsequenceSpec('VERFLUCHTER GEGENSTAND', '', p, room);
+  assert.strictEqual(spec.type, 'curseItem', 'ein Gegenstand mit Sonderkraft ist ein Fluchziel');
+  assert.strictEqual(spec.itemId, sandalen.id, 'und zwar genau dieser');
+}
+
+// --- VERFLUCHTER GEGENSTAND: zwei Fluechen nebeneinander --------------------
+{
+  const kopf = ALL_CARDS.find((x) => x.category === 'item' && x.slotKind === 'head' && (x.bonus || 0) > 0);
+  const ruestung = ALL_CARDS.find((x) => x.category === 'item' && x.slotKind === 'armor' && (x.bonus || 0) > 0);
+  const p = makePlayer({ hand: [kopf.id, ruestung.id] });
+  const room = makeRoom([p]);
+  handleEquipItem(room, p.id, kopf.id);
+  handleEquipItem(room, p.id, ruestung.id);
+
+  applyPrimitiveAction(room, p, { type: 'curseItem', itemId: kopf.id, cardId: null });
+  const zweite = resolveConsequenceSpec('VERFLUCHTER GEGENSTAND', '', p, room);
+  assert.strictEqual(zweite.type, 'curseItem', 'der schon verfluchte Gegenstand faellt aus der Wahl');
+  assert.strictEqual(zweite.itemId, ruestung.id, 'uebrig bleibt der andere');
+  applyPrimitiveAction(room, p, zweite);
+
+  const ids = cursedItemIds(p);
+  assert.strictEqual(ids.size, 2, 'beide Fluechen sind sichtbar');
+  assert.ok(ids.has(kopf.id) && ids.has(ruestung.id), 'und zwar fuer beide Gegenstaende');
+
+  // "Der Gegenstand kann durch einen anderen Fluch zerstoert werden" - dann
+  // endet NUR sein Fluch, der andere bleibt.
+  unequipSlotCard(p, kopf.id);
+  assert.deepStrictEqual([...cursedItemIds(p)], [ruestung.id], 'der zerstoerte nimmt nur seinen eigenen Fluch mit');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

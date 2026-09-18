@@ -8,7 +8,7 @@ module.exports = (ctx) => {
   const {
     card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
     equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
-    getrageneSlotKarte, specialSlotRule, treasurePowerName,
+    getrageneSlotKarte, specialSlotRule, gegenstandHatSonderkraft, cursedItemIds,
   } = ctx;
 
   // "alle kleinen Gegenstaende": die Anzahl steht erst im Moment der
@@ -33,10 +33,13 @@ module.exports = (ctx) => {
     // eine Karte auf der Hand verleiht keine Kraefte. Das Opfer waehlt selbst
     // (Ruling 2026-09-18), bei genau einem Kandidaten ohne Dialog.
     'VERFLUCHTER GEGENSTAND': (player, room, cardId) => {
+      // Schon Verfluchtes faellt raus - sonst bietet die Karte an, denselben
+      // Gegenstand ein zweites Mal zu verfluchen.
+      const schonVerflucht = cursedItemIds(player);
       const kandidaten = equippedItemIds(player).filter((id) => {
         const c = card(id);
-        if (!c) return false;
-        return (c.bonus || 0) > 0 || treasurePowerName(c.name) || !!(specialSlotRule(c) || {}).bonus;
+        if (!c || schonVerflucht.has(id)) return false;
+        return (c.bonus || 0) > 0 || gegenstandHatSonderkraft(c.name) || !!(specialSlotRule(c) || {}).bonus;
       });
       if (!kandidaten.length) return { type: 'noEffect' };
       const aktion = (id) => ({ type: 'curseItem', itemId: id, cardId: cardId || null });

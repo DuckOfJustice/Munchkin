@@ -2113,9 +2113,10 @@ const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
   resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
   istGrosserGegenstand, getrageneSlotKarte,
   specialSlotRule,
-  // TREASURE_POWER_OVERRIDES steht in server.js erst weiter unten - als
-  // Funktion durchgereicht, damit die Tabelle zur Aufrufzeit gelesen wird.
-  treasurePowerName: (name) => !!TREASURE_POWER_OVERRIDES[name],
+  // Beide Tabellen/Funktionen stehen in server.js erst weiter unten - als
+  // Funktion durchgereicht, damit sie zur Aufrufzeit gelesen werden.
+  gegenstandHatSonderkraft: (name) => gegenstandHatSonderkraft(name),
+  cursedItemIds: (player) => cursedItemIds(player),
 });
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
@@ -2951,16 +2952,21 @@ function curseHidesHandItems(player) {
   return (player.activeCurses || []).some((f) => f.kind === 'noHandItemBonus');
 }
 
-// Der verfluchte Gegenstand - oder null. Geprueft wird beim LESEN, ob er
-// ueberhaupt noch angelegt ist: "Der Gegenstand kann durch einen anderen Fluch
-// zerstoert werden", und dann endet der Fluch mit ihm (gleiche Bauform wie
-// stinktierStrafeAktiv).
-function cursedItemId(player) {
-  const eintrag = (player.activeCurses || []).find((f) => f.kind === 'cursedItem');
-  if (!eintrag) return null;
-  if (equippedItemIds(player).includes(eintrag.itemId)) return eintrag.itemId;
-  clearActiveCurseByKind(player, 'cursedItem');
-  return null;
+// Die verfluchten Gegenstaende, die noch angelegt sind. Geprueft wird beim
+// LESEN, ob der Gegenstand ueberhaupt noch getragen wird: "Der Gegenstand kann
+// durch einen anderen Fluch zerstoert werden", und dann endet der Fluch mit
+// ihm (gleiche Bauform wie stinktierStrafeAktiv). Aufgeraeumt wird je Eintrag,
+// nicht nach Wirkungsart - sonst nimmt ein zerstoerter Gegenstand den Fluch
+// eines zweiten mit.
+// Menge statt Einzelwert: die Karte steckt mehrfach im Stapel, und die drei
+// Leser (combatTotals, die Ablege-/Verkaufs-/Handelssperren, die Uebertragung
+// beim Tod) brauchen ohnehin eine Mengenpruefung.
+function cursedItemIds(player) {
+  const flueche = (player && player.activeCurses) || [];
+  if (!flueche.some((f) => f.kind === 'cursedItem')) return new Set();
+  const getragen = equippedItemIds(player);
+  player.activeCurses = flueche.filter((f) => f.kind !== 'cursedItem' || getragen.includes(f.itemId));
+  return new Set(player.activeCurses.filter((f) => f.kind === 'cursedItem').map((f) => f.itemId));
 }
 
 // STINKER: "Niemand hilft dir in deinem naechsten Kampf."
@@ -3031,6 +3037,25 @@ function zieheSchaetzeFuer(room, player, n) {
   const drawn = [];
   for (let i = 0; i < n; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
   return drawn;
+}
+
+// VERFLUCHTER GEGENSTAND: "ein Gegenstand, der dir einen Kampfbonus oder eine
+// besondere Kraft verleiht". Was eine besondere Kraft ist, steht schon in den
+// Dauerwirkungstabellen - eine eigene Liste daneben waere eine zweite Quelle
+// der Wahrheit, die beim naechsten Set auseinanderlaeuft.
+// ponytail: dadurch faellt der Begriff etwas weiter aus als der Kartentext ihn
+// vermutlich meint (ein blosser Weglauf-Bonus zaehlt mit). Enger ginge nur
+// kuratiert, und dann von Hand gepflegt.
+const SONDERKRAFT_TABELLEN = [
+  CURSE_PROOF_ITEMS, GENDER_IMMUNE_ITEMS, BACKSTAB_ITEMS, FLEE_ITEM_BONUS,
+  FLEE_TREASURE_ITEMS, ITEM_CONDITIONAL_BONUS, ITEM_GRANTS_TRAIT, STAFF_ITEMS,
+  FREE_HAND_ITEMS,
+];
+
+function gegenstandHatSonderkraft(name) {
+  return SONDERKRAFT_TABELLEN.some((t) => (t instanceof Set
+    ? t.has(name)
+    : Object.prototype.hasOwnProperty.call(t, name)));
 }
 
 // HUHN AUF DEINEM KOPF: "-1 auf alle Wuerfe." Gilt fuer jeden Wurf, den die
@@ -6410,7 +6435,7 @@ module.exports = {
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
-  hatKampfschatzSperre, hatUntotenAngst, cursedItemId, unequipSlotCard,
+  hatKampfschatzSperre, hatUntotenAngst, cursedItemIds, unequipSlotCard,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
