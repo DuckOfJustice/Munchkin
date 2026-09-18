@@ -603,6 +603,11 @@ module.exports = (ctx) => {
     // sie hat in den Rohdaten weder slotKind noch bonus, deshalb steht der
     // Bonus hier an der Regel (siehe equippedBonusSum).
     'EISKALTES HÄNDCHEN': { slot: 'special', bonus: 3 },
+    // Die Deck-Karte zur besaenftigten Monsterseite: eigener Kartentext
+    // ("Gegenstand, der +3 Bonus um Kampf gibt"), eigener Eintrag. Anders als
+    // bei der Monsterkarte steht der Bonus hier im bonus-Feld der Rohdaten,
+    // deshalb kein `bonus` an der Regel.
+    'EISKALTES HÄNDCHEN (KLEINE FREUNDIN)': { slot: 'special' },
   };
   // Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
   // nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).
