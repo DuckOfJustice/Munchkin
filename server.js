@@ -3618,8 +3618,8 @@ function startCombat(room, actorId, monsterIds, opts) {
     fleeFailed: [],
     fromHand: !!opts.fromHand,
     classDiscards: {}, // "<playerId>:combat"/"<playerId>:flee" -> Anzahl bereits abgeworfener Karten
-    fleeBonus: 0,
-    playedFleeBonus: 0,  // STEAM-CODE: Weglauf-Zuschlag aus gespielten Kampfkarten      // Summe der Flugzauber-Karten
+    fleeBonus: 0,        // Summe der Flugzauber-Karten
+    playedFleeBonus: 0,  // STEAM-CODE: Weglauf-Zuschlag aus gespielten Kampfkarten
     treasureDelta: 0,  // Schatzbonus/-malus gespielter Monster-Verstärker
     // Gespielte Monster-Verstärker. Die meisten wirken nur über ihr
     // bonus-Feld (sofort in monsterModifier), zwei aber über den weiteren
@@ -5345,6 +5345,17 @@ function handleUnequipItem(room, playerId, cardId) {
   const player = findPlayer(room, playerId);
   if (!player) return;
   if (!equippedItemIds(player).includes(cardId)) return;
+  // EISKALTES HAENDCHEN: die besaenftigte Monsterkarte liegt als einzige
+  // Monsterkarte legitim in der Ausruestung (siehe haendchenBesaenftigen).
+  // Zurueck in die Hand darf sie nicht: handleEquipItem weist Monsterkarten
+  // ab, der +3 waere also dauerhaft weg - und aus der Hand liesse sich die
+  // Karte als Monster ausspielen.
+  const unequipKarte = card(cardId);
+  if (unequipKarte && unequipKarte.category === 'monster') {
+    log(room, `${player.name} kann "${unequipKarte.name}" nicht ablegen - die Karte bleibt, wo sie ist.`);
+    touchRoom(room);
+    return;
+  }
   if (!darfAusruesten(room, player)) {
     log(room, `${player.name} kann gerade nichts ablegen - Ausruestung aendert man im eigenen Zug und nicht im Kampf.`);
     touchRoom(room);

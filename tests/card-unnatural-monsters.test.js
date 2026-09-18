@@ -1470,5 +1470,23 @@ const PRIESTER = findCard('PRIESTER', 'class');
   }
 }
 
+// --- EISKALTES HÄNDCHEN: die besaenftigte Karte bleibt liegen ---------------
+// "behalte diese Karte": ablegen wuerde sie in die Hand legen, und von dort
+// kaeme sie nie zurueck (handleEquipItem weist Monsterkarten ab).
+{
+  const { handleDrawDoor, handleResolveCardChoice, handleUnequipItem } = require('../server.js');
+  const haendchen = findCard('EISKALTES HÄNDCHEN', 'monster');
+  const ring = findCard('WUNSCHRING');
+  const p = makePlayer({ hand: [ring.id] });
+  const room = makeRoom([p]);
+  room.turnPhase = 'tuer';
+  room.doorDeck = [haendchen.id];
+  handleDrawDoor(room, p.id);
+  handleResolveCardChoice(room, p.id, room.pendingCardAction.options.find((o) => o.id === 'alt').id);
+  handleUnequipItem(room, p.id, haendchen.id);
+  assert.ok((p.equipped.special || []).includes(haendchen.id), 'die Hand bleibt angelegt');
+  assert.ok(!p.hand.includes(haendchen.id), 'und wandert nicht in die Hand');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-monsters: ok');

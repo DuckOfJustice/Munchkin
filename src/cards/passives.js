@@ -271,12 +271,13 @@ module.exports = (ctx) => {
   const waffenAnzahl = (p) => handItemIds(p).size;
 
   // "Mensch" ist in Munchkin keine Karte, sondern ihr Fehlen: wer keine
-  // Rassenkarte hat, ist Mensch. Geprueft wird durch dieselbe Brille wie alle
-  // anderen Monsterboni - wer FALSCHE OHREN traegt, gilt fuer Monster als Elf
-  // (und wer spaeter den FALSCHEN BART traegt, als Zwerg) und damit nicht als
-  // Mensch.
-  const istMensch = (p) => !['ELF', 'ZWERG', 'HALBLING', 'ORK', 'GNOM']
-    .some((r) => monsterSeesRace(p, r));
+  // Rassenkarte ausliegen hat, ist Mensch - deshalb player.races statt einer
+  // Aufzaehlung der Rassennamen, die ein neues Set stillschweigend veralten
+  // liesse (ORK/GNOM landen ebenfalls in races, siehe TRAIT_DOOR_CARDS).
+  // Dazu die Monsterbrille fuer den einen Gegenstand, der eine Rasse verleiht:
+  // wer FALSCHE OHREN traegt, gilt fuer Monster als Elf und damit nicht als
+  // Mensch (ITEM_GRANTS_TRAIT kennt sonst keine Rasse).
+  const istMensch = (p) => !p.races.length && !monsterSeesRace(p, 'ELF');
 
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
