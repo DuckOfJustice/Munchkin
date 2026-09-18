@@ -6,6 +6,7 @@ const {
   startCombat, handleRequestHelp, handleRespondHelp, resolveCombatWin, resolveCombat,
   UNDEAD_MONSTERS, handlePlayCombatCard,
   resolveConsequenceSpec, applyPrimitiveAction, cursedItemIds, unequipSlotCard,
+  handleUnequipItem, handleSellItems, ownTradeIds, clearActiveCurseByKind,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -360,6 +361,34 @@ function makeRoom(players) {
   applyPrimitiveAction(room, p, { type: 'curseItem', itemId: waffe.id, cardId: null });
   assert.strictEqual(combatTotals(room).playerStrength, nurWaffe - (waffe.bonus || 0),
     'verflucht zaehlen weder der Gegenstand noch sein Anhang');
+}
+
+// --- VERFLUCHTER GEGENSTAND: man wird ihn nicht los ------------------------
+// "Du kannst ihn nicht ablegen oder loswerden, bis der Fluch aufgehoben wird."
+// Drei Wege: ablegen, verkaufen, verschenken/tauschen.
+{
+  const hammer = findCard('GESEGNETER HAMMER VON ST. UUUAAAAH'); // 1200 Gold, Hand
+  const p = makePlayer({ hand: [hammer.id] });
+  const room = makeRoom([p]);
+  room.turnPhase = 'aerger';
+  handleEquipItem(room, p.id, hammer.id);
+  applyPrimitiveAction(room, p, { type: 'curseItem', itemId: hammer.id, cardId: null });
+
+  handleUnequipItem(room, p.id, hammer.id);
+  assert.ok(equippedItemIds(p).includes(hammer.id), 'ablegen geht nicht');
+
+  const stufeVorher = p.level;
+  handleSellItems(room, p.id, [hammer.id]);
+  assert.strictEqual(p.level, stufeVorher, 'verkaufen geht nicht');
+  assert.ok(equippedItemIds(p).includes(hammer.id), 'und der Hammer liegt noch da');
+
+  assert.deepStrictEqual(ownTradeIds(p, [hammer.id]), [], 'handeln geht auch nicht');
+
+  // Gegenprobe: ohne den Fluch geht derselbe Verkauf durch - sonst waere der
+  // Test auch dann gruen, wenn er aus einem anderen Grund scheitert.
+  clearActiveCurseByKind(p, 'cursedItem');
+  handleSellItems(room, p.id, [hammer.id]);
+  assert.ok(p.level > stufeVorher, 'ohne Fluch wird derselbe Gegenstand verkauft');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

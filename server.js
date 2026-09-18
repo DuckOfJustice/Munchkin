@@ -5556,6 +5556,13 @@ function handleUnequipItem(room, playerId, cardId) {
   // ab, der +3 waere also dauerhaft weg - und aus der Hand liesse sich die
   // Karte als Monster ausspielen.
   const unequipKarte = card(cardId);
+  // VERFLUCHTER GEGENSTAND: "Du kannst ihn nicht ablegen oder loswerden, bis
+  // der Fluch aufgehoben wird."
+  if (cursedItemIds(player).has(cardId)) {
+    log(room, `${player.name} wird "${unequipKarte ? unequipKarte.name : cardId}" nicht los - der Fluch hält ihn fest.`);
+    touchRoom(room);
+    return;
+  }
   if (unequipKarte && unequipKarte.category === 'monster') {
     log(room, `${player.name} kann "${unequipKarte.name}" nicht ablegen - die Karte bleibt, wo sie ist.`);
     touchRoom(room);
@@ -5597,6 +5604,17 @@ function handleSellItems(room, playerId, cardIds) {
     return;
   }
   const ids = [...new Set(cardIds)];
+  // VERFLUCHTER GEGENSTAND: der ganze Verkauf wird abgelehnt statt still
+  // gefiltert - dieselbe Entscheidung wie bei der Stoererliste im Handel
+  // (finishTrade): wer eine Auswahl abschickt, soll nicht heimlich weniger
+  // verkaufen als er sieht.
+  const verflucht = cursedItemIds(player);
+  const verfluchtInAuswahl = ids.find((id) => verflucht.has(id));
+  if (verfluchtInAuswahl) {
+    log(room, `${player.name} kann "${(card(verfluchtInAuswahl) || {}).name || verfluchtInAuswahl}" nicht verkaufen - der Gegenstand ist verflucht.`);
+    touchRoom(room);
+    return;
+  }
   let total = 0;
   const removable = [];
   // Machtgruppe Alchemist, "Blei zu Gold": mindestens 300 Goldstücke pro
@@ -5767,7 +5785,11 @@ function tradableCardIds(player) {
 // Fremde IDs auf das reduzieren, was diese Person gerade wirklich besitzt.
 function ownTradeIds(player, ids) {
   const own = tradableCardIds(player);
-  return [...new Set(Array.isArray(ids) ? ids : [])].filter((id) => own.includes(id));
+  // VERFLUCHTER GEGENSTAND: "du kannst ihn nicht ablegen oder loswerden" -
+  // Verschenken und Tauschen sind auch Loswerden.
+  const verflucht = cursedItemIds(player);
+  return [...new Set(Array.isArray(ids) ? ids : [])]
+    .filter((id) => own.includes(id) && !verflucht.has(id));
 }
 
 // Karte aus Hand oder Slot lösen (Slot-Variante wie beim Verkaufen).
@@ -6441,7 +6463,7 @@ module.exports = {
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
-  hatKampfschatzSperre, hatUntotenAngst, cursedItemIds, unequipSlotCard,
+  hatKampfschatzSperre, hatUntotenAngst, cursedItemIds, unequipSlotCard, ownTradeIds,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
