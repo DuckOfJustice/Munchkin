@@ -87,9 +87,11 @@ function makeRoom(players) {
   const room = makeRoom([p, helfer]);
   addActiveCurse(room, p, 'STINKER', stinker.id);
   startCombat(room, p.id, [monster.id], {});
+  const logCountBefore = room.logs.length;
   handleRequestHelp(room, p.id, helfer.id, 0);
   assert.ok(!room.combat.helperPending, 'unter dem Stinker wird gar nicht erst gefragt');
-  assert.ok(room.logs.some((l) => /Stinker/i.test(l.text || l)), 'der Verlauf nennt den Grund');
+  const newLogs = room.logs.slice(logCountBefore);
+  assert.ok(newLogs.some((l) => /hilft niemand/i.test(l.text || l)), 'der Verlauf nennt den Grund (neue Logzeile von der Sperre)');
 
   // Auch der direkte Weg ueber die Zusage ist dicht.
   room.combat.helperPending = { targetId: helfer.id, compelled: false, reward: 0 };
