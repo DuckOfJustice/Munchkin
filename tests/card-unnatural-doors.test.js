@@ -4,7 +4,7 @@ const {
   ALL_CARDS, newEquipped, combatTotals, handleEquipItem, equippedItemIds,
   istGrosserGegenstand, addActiveCurse, DOOR_OTHER_AS_CURSE,
   startCombat, handleRequestHelp, handleRespondHelp, resolveCombatWin, resolveCombat,
-  UNDEAD_MONSTERS,
+  UNDEAD_MONSTERS, handlePlayCombatCard,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -240,6 +240,32 @@ function makeRoom(players) {
   assert.ok(room.combat && room.combat.mustFlee,
     'trotz hoeherer Kampfstaerke muss die aengstliche Person fliehen');
   assert.ok(neueLogs.some((l) => /Todesangst vor den Untoten ist st.rker als jede Waffe/i.test(l.text || l)),
+    'der Verlauf nennt den Grund (neue Logzeile vom Aufruf)');
+}
+
+// --- TODESANGST: Untote treten nachtraeglich in den Kampf -------------------
+{
+  // Ein harmloses (nicht-untotes) Monster startet den Kampf - erst die Karte
+  // UNTOT macht ihn nachtraeglich zu einem gegen Untote.
+  const harmlos = ALL_CARDS.find((x) => x.category === 'monster' && !UNDEAD_MONSTERS.has(x.name));
+  const untotKarte = findCard('UNTOT', 'door_other');
+  const angst = findCard('TODESANGST');
+  const kaempfer = makePlayer({ hand: [untotKarte.id] });
+  const aengstlich = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([kaempfer, aengstlich]);
+  addActiveCurse(room, aengstlich, 'TODESANGST', angst.id);
+  startCombat(room, kaempfer.id, [harmlos.id], {});
+  room.combat.helperId = aengstlich.id;
+  // addActiveCurse hat oben schon eine Logzeile mit dem Kartennamen
+  // geschrieben ("... steht unter dem Fluch \"TODESANGST\"."); ein
+  // Regex-Check auf /Todesangst/i wuerde die treffen statt die eigentliche
+  // Fluchtzeile. Deshalb nur die ab hier neu hinzugekommenen Zeilen pruefen.
+  const logCountBefore = room.logs.length;
+  handlePlayCombatCard(room, kaempfer.id, untotKarte.id);
+  const neueLogs = room.logs.slice(logCountBefore);
+  assert.strictEqual(room.combat.helperId, null,
+    'die aengstliche Helfer:in verlaesst den Kampf, sobald er untot wird');
+  assert.ok(neueLogs.some((l) => /Todesangst vor Untoten und verl.sst den Kampf/i.test(l.text || l)),
     'der Verlauf nennt den Grund (neue Logzeile vom Aufruf)');
 }
 

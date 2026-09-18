@@ -3742,6 +3742,20 @@ function combatSignature(room) {
 function refreshCombatReady(room) {
   const c = room.combat;
   if (!c) return;
+  // TODESANGST: "Wenn Untote in einen Kampf treten, in dem du geholfen hast,
+  // musst du diesen Kampf verlassen (keine Strafe)." Hier statt an jeder
+  // einzelnen Stelle, an der ein Monster oder die Karte UNTOT dazukommt -
+  // refreshCombatReady laeuft nach jeder dieser Aenderungen. Direktes Setzen
+  // von c.helperId statt eines erneuten Aufrufs dieser Funktion, damit keine
+  // Rekursion entsteht.
+  if (c.helperId && combatHasUndead(room)) {
+    const helfer = findPlayer(room, c.helperId);
+    if (hatUntotenAngst(helfer)) {
+      c.helperId = null;
+      c.helperReward = 0;
+      log(room, `${helfer.name} hat Todesangst vor Untoten und verlässt den Kampf - ohne Strafe.`);
+    }
+  }
   const sig = combatSignature(room);
   if (c.readySignature !== sig) {
     c.ready = {};
@@ -4305,6 +4319,11 @@ function handlePlayCombatCard(room, playerId, cardId) {
     room.doorDiscard.push(cardId);
     log(room, `${player.name} spielt "${c.name}" im Kampf (${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster${zusatzText}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
     announceCardPlay(room, player, cardId, `${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster`);
+    // Fehlte bisher hier: ein Monsterverstaerker kann die Kampfstaerke UND
+    // (durch die Karte UNTOT) den Untot-Status aendern - beides muss den
+    // Bereit-Status zuruecksetzen bzw. TODESANGST auswerten (siehe
+    // refreshCombatReady).
+    refreshCombatReady(room);
     touchRoom(room);
     return;
   }
