@@ -4667,22 +4667,27 @@ function resolveCombat(room) {
   // verbraucht (Karte weg, "zaehlt als Sieg" geloggt, direkt danach doch
   // geflohen).
   const lustOhneHilfe = combatHasMonster(room, MONSTER_REQUIRES_OTHER_GENDER) && !passendeHilfe(room);
+  // TODESANGST: "Du musst Weglaufen, selbst wenn du das Monster besiegen
+  // koenntest." Gleiche Bauform wie lustOhneHilfe - die Kampfstaerke spielt
+  // keine Rolle mehr, also vor Krieger-Gleichstand und ALUFOLIE.
+  const angstVorUntoten = combatHasUndead(room) && hatUntotenAngst(findPlayer(room, c.actorId));
+  const kampfVerloren = lustOhneHilfe || angstVorUntoten;
   // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Greift vor der
   // ALUFOLIE-Notlösung, damit die Karte nicht unnötig verbraucht wird.
-  const warrior = !lustOhneHilfe && playerStrength === monsterStrength
+  const warrior = !kampfVerloren && playerStrength === monsterStrength
     ? combatParticipants(room).find((p) => hasClass(p, 'KRIEGER')) : null;
   if (warrior) {
     log(room, `Gleichstand (${playerStrength} vs. ${monsterStrength}) - ${warrior.name} ist Krieger und gewinnt ihn.`);
     resolveCombatWin(room);
     return;
   }
-  const tie = !lustOhneHilfe && playerStrength === monsterStrength ? findTieBreaker(room) : null;
+  const tie = !kampfVerloren && playerStrength === monsterStrength ? findTieBreaker(room) : null;
   if (tie) {
     removeFromHand(tie.player, tie.cardId);
     discardCard(room, tie.cardId);
     log(room, `${tie.player.name} setzt "${TIE_BREAKER_CARD}" ein: Gleichstand (${playerStrength} vs. ${monsterStrength}) zählt als Sieg.`, [tie.cardId]);
   }
-  if (!lustOhneHilfe && (playerStrength > monsterStrength || tie)) {
+  if (!kampfVerloren && (playerStrength > monsterStrength || tie)) {
     resolveCombatWin(room);
   } else {
     c.mustFlee = true;
@@ -4692,9 +4697,11 @@ function resolveCombat(room) {
     c.fleeFailed = [];
     const wer = combatParticipants(room).length > 1
       ? ` Jede:r läuft einzeln weg (${combatParticipants(room).map((p) => p.name).join(', ')}).` : '';
-    log(room, lustOhneHilfe
-      ? `Ohne Hilfe eines Charakters des anderen Geschlechts ist das Lustmonster nicht zu besiegen. Fliehen nötig!${wer}`
-      : `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`);
+    log(room, angstVorUntoten
+      ? `Die Todesangst vor den Untoten ist stärker als jede Waffe. Fliehen nötig!${wer}`
+      : (lustOhneHilfe
+        ? `Ohne Hilfe eines Charakters des anderen Geschlechts ist das Lustmonster nicht zu besiegen. Fliehen nötig!${wer}`
+        : `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`));
     touchRoom(room);
   }
 }

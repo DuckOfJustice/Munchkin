@@ -3,7 +3,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, combatTotals, handleEquipItem, equippedItemIds,
   istGrosserGegenstand, addActiveCurse, DOOR_OTHER_AS_CURSE,
-  startCombat, handleRequestHelp, handleRespondHelp, resolveCombatWin,
+  startCombat, handleRequestHelp, handleRespondHelp, resolveCombatWin, resolveCombat,
   UNDEAD_MONSTERS,
 } = require('../server.js');
 
@@ -216,6 +216,31 @@ function makeRoom(players) {
   startCombat(room2, aengstlich.id, [untot.id], {});
   handleRequestHelp(room2, aengstlich.id, kaempfer.id, 0);
   assert.ok(!room2.combat.helperPending, 'gegen Untote hilft der aengstlichen Person niemand');
+}
+
+// --- TODESANGST: der eigene Kampf gegen Untote ------------------------------
+{
+  // Eng ueber UNDEAD_MONSTERS gesucht statt per Namens-Regex - die Reihenfolge
+  // in ALL_CARDS soll nicht ueber den Testfall entscheiden.
+  const untot = ALL_CARDS.find((x) => x.category === 'monster' && UNDEAD_MONSTERS.has(x.name));
+  const angst = findCard('TODESANGST');
+  const p = makePlayer({ level: 10 }); // klar staerker als das Monster
+  const room = makeRoom([p]);
+  addActiveCurse(room, p, 'TODESANGST', angst.id);
+  startCombat(room, p.id, [untot.id], {});
+  // addActiveCurse schreibt beim Verfluchen selbst eine Logzeile mit dem
+  // Kartennamen ("... steht unter dem Fluch \"TODESANGST\"."), die ein
+  // Regex-Check auf /Todesangst/i schon vor der eigentlichen Pruefung
+  // treffen wuerde. Deshalb nur die ab hier neu hinzugekommenen Zeilen
+  // pruefen, und zwar auf den Wortlaut der Fluchtzeile statt auf den
+  // Kartennamen.
+  const logCountBefore = room.logs.length;
+  resolveCombat(room);
+  const neueLogs = room.logs.slice(logCountBefore);
+  assert.ok(room.combat && room.combat.mustFlee,
+    'trotz hoeherer Kampfstaerke muss die aengstliche Person fliehen');
+  assert.ok(neueLogs.some((l) => /Todesangst vor den Untoten ist st.rker als jede Waffe/i.test(l.text || l)),
+    'der Verlauf nennt den Grund (neue Logzeile vom Aufruf)');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
