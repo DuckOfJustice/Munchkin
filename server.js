@@ -2938,6 +2938,12 @@ function hatHilfeSperre(player) {
   return (player.activeCurses || []).some((f) => f.kind === 'noHelp');
 }
 
+// TODESANGST: "Du hilfst niemandem, die Untoten zu bekaempfen ... Wenn du
+// gegen Untote kaempfst, wird dir niemand helfen!"
+function hatUntotenAngst(player) {
+  return !!player && (player.activeCurses || []).some((f) => f.kind === 'fearUndead');
+}
+
 // WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... auch nicht von anderen
 // Spielern." Betroffene Karten werden gar nicht erst GEZOGEN statt gezogen
 // und weggeworfen - der Text sagt "du erhaeltst keine", der Stapel soll
@@ -4507,6 +4513,11 @@ function handleRequestHelp(room, playerId, targetId, reward) {
     touchRoom(room);
     return;
   }
+  if (hatUntotenAngst(actor) && combatHasUndead(room)) {
+    log(room, `${actor.name} kämpft gegen Untote - die Todesangst schreckt jede Hilfe ab.`);
+    touchRoom(room);
+    return;
+  }
   // KNIESCHÜTZER DER VERLOCKUNG: "Kein Spieler mit einer höheren Stufe als du
   // darf deine Bitte ablehnen ... beizustehen." Die Karte bleibt beim
   // Anfragen auf der Hand (treasure_other, nicht anlegbar) - "das Fragen nach
@@ -4535,6 +4546,12 @@ function handleRespondHelp(room, playerId, accept) {
     const bittsteller = findPlayer(room, c.actorId);
     if (bittsteller && hatHilfeSperre(bittsteller)) {
       log(room, `${target.name} kann ${bittsteller.name} nicht helfen - der Stinker hält alle fern.`);
+      c.helperPending = null;
+      touchRoom(room);
+      return;
+    }
+    if (hatUntotenAngst(target) && combatHasUndead(room)) {
+      log(room, `${target.name} hat Todesangst vor Untoten und hilft hier nicht.`);
       c.helperPending = null;
       touchRoom(room);
       return;
@@ -6337,7 +6354,7 @@ module.exports = {
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
-  hatKampfschatzSperre,
+  hatKampfschatzSperre, hatUntotenAngst,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,

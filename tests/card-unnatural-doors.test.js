@@ -4,6 +4,7 @@ const {
   ALL_CARDS, newEquipped, combatTotals, handleEquipItem, equippedItemIds,
   istGrosserGegenstand, addActiveCurse, DOOR_OTHER_AS_CURSE,
   startCombat, handleRequestHelp, handleRespondHelp, resolveCombatWin,
+  UNDEAD_MONSTERS,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -193,6 +194,28 @@ function makeRoom(players) {
   const siegLog = neueLogs.find((l) => /besiegt/.test(l.text || l));
   assert.ok(siegLog, 'die Sieges-Logzeile existiert (neue Logzeile vom Aufruf)');
   assert.ok(/\b0 Schatzkarte\(n\) gezogen/.test(siegLog.text || siegLog), `Logzeile nennt die tatsaechliche (Null-)Anzahl statt treasureCount: "${siegLog.text}"`);
+}
+
+// --- TODESANGST: Hilfe gegen Untote -----------------------------------------
+{
+  // Eng ueber UNDEAD_MONSTERS gesucht statt per Namens-Regex - die Reihenfolge
+  // in ALL_CARDS soll nicht ueber den Testfall entscheiden.
+  const untot = ALL_CARDS.find((x) => x.category === 'monster' && UNDEAD_MONSTERS.has(x.name));
+  const angst = findCard('TODESANGST');
+  const kaempfer = makePlayer({});
+  const aengstlich = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([kaempfer, aengstlich]);
+  addActiveCurse(room, aengstlich, 'TODESANGST', angst.id);
+  startCombat(room, kaempfer.id, [untot.id], {});
+  room.combat.helperPending = { targetId: aengstlich.id, compelled: false, reward: 0 };
+  handleRespondHelp(room, aengstlich.id, true);
+  assert.strictEqual(room.combat.helperId, null, 'gegen Untote sagt die Angst nicht zu');
+
+  // Andersherum: wer selbst Angst hat, bekommt gegen Untote keine Hilfe.
+  const room2 = makeRoom([aengstlich, kaempfer]);
+  startCombat(room2, aengstlich.id, [untot.id], {});
+  handleRequestHelp(room2, aengstlich.id, kaempfer.id, 0);
+  assert.ok(!room2.combat.helperPending, 'gegen Untote hilft der aengstlichen Person niemand');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
