@@ -458,6 +458,9 @@ function equippedBonusSum(player, room, excludeIds) {
 // wo sie wirklich liegt: ein geschummelter Gegenstand liegt auf dem
 // Spezialplatz (siehe handleEquipItem), traegt seinen slotKind aber weiter.
 // EINE Stelle fuer alle, die sonst direkt in player.equipped[slot] schauen.
+// Liegen zwei Karten desselben slotKind an (nur geschummelt moeglich), gewinnt
+// die auf dem gedruckten Platz: equippedItemIds liefert Kopf/Ruestung/Schuhe
+// vor dem Spezialplatz. "Ruestung verlieren" nimmt also die echte zuerst.
 function getrageneSlotKarte(player, slot) {
   return equippedItemIds(player).find((id) => (card(id) || {}).slotKind === slot) || null;
 }
@@ -2094,7 +2097,7 @@ const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
   card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
   resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
-  istGrosserGegenstand,
+  istGrosserGegenstand, getrageneSlotKarte,
 });
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;

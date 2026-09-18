@@ -8,6 +8,7 @@ const {
   ALL_CARDS, handleEquipItem, handlePlayCheat, equippedItemIds, newEquipped,
   handleSellItems, handleUnequipItem, handleRequestHelp, handleRespondHelp,
   resolveCombatWin, MAX_LEVEL, applyPrimitiveAction, startCombat, combatTotals,
+  CONSEQUENCE_OVERRIDES,
 } = require('../server.js');
 
 function byName(name) {
@@ -90,6 +91,14 @@ function done(room) {
   assert.ok(equippedItemIds(p).includes(schwert.id), 'geschummelt geht es trotz voller Haende');
   assert.ok((p.equipped.special || []).includes(schwert.id), 'und zwar auf dem Spezialplatz');
   assert.deepStrictEqual(p.equipped.hands, [hand1.id, hand2.id], 'die belegten Haende bleiben unangetastet');
+
+  // Gegenprobe: der Schummel-Zweig darf die normale Platzpruefung nicht
+  // generell aushebeln - eine zweite Waffe ohne eigenen Anhang bleibt liegen.
+  const hand3 = ALL_CARDS.find((x) => x.slotKind === 'hand' && x.handsCost === 1
+    && ![hand1.id, hand2.id].includes(x.id));
+  p.hand.push(hand3.id);
+  handleEquipItem(room, p.id, hand3.id);
+  assert.ok(p.hand.includes(hand3.id), 'ohne eigenen Anhang gilt die Platzpruefung weiter');
   done(room);
 }
 
@@ -147,6 +156,33 @@ function mitGeschummelterRuestung(extra) {
   assert.ok(!equippedItemIds(p).includes(zweite.id), 'die geschummelte Ruestung ist abgelegt');
   assert.ok(room.treasureDiscard.includes(zweite.id), 'und liegt im Ablagestapel');
   done(room);
+}
+
+// 2d) Auch die Schlimmen Dinge, die nach einem getragenen Platz FRAGEN,
+// muessen die geschummelte Karte sehen - sonst waehlen sie den falschen Zweig
+// (ÜBERBÄR zieht eine Stufe ab, obwohl eine Ruestung anliegt).
+{
+  const schummeln = byName('SCHUMMELN!');
+  // Je eine Karte pro Platz, die ohne Schummeln nicht anlegbar waere, weil
+  // der Platz schon belegt ist.
+  const plaetze = [
+    { slot: 'armor', karte: 'ÜBERBÄR', erwartet: 'noEffect' },
+    { slot: 'head', karte: 'FEDERFEIND', erwartet: 'discardSlot' },
+    { slot: 'feet', karte: 'SABBERNDER SCHLEIM', erwartet: 'discardSlot' },
+    { slot: 'feet', karte: 'QUANTEN', erwartet: 'discardSlot' },
+  ];
+  plaetze.forEach(({ slot, karte, erwartet }) => {
+    const ding = ALL_CARDS.find((x) => x.slotKind === slot);
+    const p = makePlayer('a', { hand: [ding.id, schummeln.id] });
+    const room = makeRoom([p]);
+    handlePlayCheat(room, p.id, schummeln.id, ding.id);
+    handleEquipItem(room, p.id, ding.id);
+    assert.ok((p.equipped.special || []).includes(ding.id), `${karte}: geschummelt angelegt`);
+    const spec = CONSEQUENCE_OVERRIDES[karte](p, room);
+    assert.strictEqual(spec.type, erwartet,
+      `${karte} muss den geschummelten ${slot}-Gegenstand sehen`);
+    done(room);
+  });
 }
 
 // 3) Der Anhang gilt nur fuer GENAU EINEN Gegenstand

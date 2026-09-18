@@ -127,7 +127,11 @@ function run() {
   assert.strictEqual(twoClassSpec.type, 'choice', 'mit 2 Klassen (Super Munchkin): echte Wahl, welche abgelegt wird');
   assert.strictEqual(twoClassSpec.options.length, 2);
 
-  assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer({ equipped: { head: null, armor: null, feet: 'boots', hands: [null, null] } })), { type: 'discardSlot', slot: 'feet' });
+  // Echte Kartenid noetig: die Bedingung fragt inzwischen nach dem slotKind der
+  // getragenen Karte (getrageneSlotKarte), nicht nur danach, ob der Platz
+  // belegt ist - sonst uebersieht sie geschummelte Gegenstaende.
+  const schuhe = findCard('ARSCHTRITT-STIEFEL');
+  assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer({ equipped: { head: null, armor: null, feet: schuhe.id, hands: [null, null] } })), { type: 'discardSlot', slot: 'feet' });
   assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer()), { type: 'noEffect' }, 'ohne Schuhwerk: kein Effekt');
 
   // -------------------------------------------------------------------

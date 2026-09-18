@@ -8,6 +8,7 @@ module.exports = (ctx) => {
   const {
     card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
     equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
+    getrageneSlotKarte,
   } = ctx;
 
   // "alle kleinen Gegenstaende": die Anzahl steht erst im Moment der
@@ -68,9 +69,13 @@ module.exports = (ctx) => {
     'FUNGUS': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 2 : 1 }),
 
     // --- Bedingt auf aktuellen Ausrüstungszustand (zum Zeitpunkt der Konsequenz bekannt) ---
-    'FEDERFEIND': (player) => (player.equipped.head ? { type: 'discardSlot', slot: 'head' } : { type: 'levelDelta', amount: 2 }),
-    'SABBERNDER SCHLEIM': (player) => (player.equipped.feet ? { type: 'discardSlot', slot: 'feet' } : { type: 'levelDelta', amount: 1 }),
-    'ÜBERBÄR': (player) => (player.equipped.armor ? { type: 'noEffect' } : { type: 'levelDelta', amount: 1 }),
+    // getrageneSlotKarte statt player.equipped[slot]: ein geschummelter
+    // Gegenstand liegt auf dem Spezialplatz, wird aber getragen (server.js) -
+    // sonst fragt die Bedingung am selben Gegenstand vorbei, den das
+    // anschliessende discardSlot sehr wohl findet.
+    'FEDERFEIND': (player) => (getrageneSlotKarte(player, 'head') ? { type: 'discardSlot', slot: 'head' } : { type: 'levelDelta', amount: 2 }),
+    'SABBERNDER SCHLEIM': (player) => (getrageneSlotKarte(player, 'feet') ? { type: 'discardSlot', slot: 'feet' } : { type: 'levelDelta', amount: 1 }),
+    'ÜBERBÄR': (player) => (getrageneSlotKarte(player, 'armor') ? { type: 'noEffect' } : { type: 'levelDelta', amount: 1 }),
     'GESICHTSSAUGER': () => ({ type: 'combo', actions: [{ type: 'discardSlot', slot: 'head' }, { type: 'levelDelta', amount: 1 }] }),
 
     // --- Würfelbasiert ---
@@ -300,7 +305,7 @@ module.exports = (ctx) => {
     'RASSE WECHSELN': () => ({ type: 'replaceTraitFromDiscard', arrField: 'races', capField: 'raceCapCard', category: 'race', label: 'Rasse' }),
     // "Du darfst kein Schuhwerk tragen. Wenn du gerade Schuhwerk trägst, wird
     // es zerstört ...":
-    'QUANTEN': (player) => (player.equipped.feet ? { type: 'discardSlot', slot: 'feet' } : { type: 'noEffect' }),
+    'QUANTEN': (player) => (getrageneSlotKarte(player, 'feet') ? { type: 'discardSlot', slot: 'feet' } : { type: 'noEffect' }),
     'REGELN DER NEUAUFLAGE': () => ({ type: 'levelDeltaAllPlayers', amount: 1 }), // Wunschring-Sonderfall bleibt manuell
     // "Du kannst keine Gegenstände tragen, die mehr als eine Hand benötigen." -
     // Dauereffekt, den dieser Server (wie andere Dauer-Mali) nicht mechanisch
