@@ -3,6 +3,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, combatTotals, handleEquipItem, equippedItemIds,
   istGrosserGegenstand, addActiveCurse, DOOR_OTHER_AS_CURSE,
+  startCombat, handleRequestHelp, handleRespondHelp,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -75,6 +76,25 @@ function makeRoom(players) {
   // TODESANGST wirkt beim Ziehen und ist aus der Hand spielbar - beides haengt
   // an derselben Mitgliedschaft (siehe handlePlayCurseFromHand).
   assert.ok(DOOR_OTHER_AS_CURSE.has('TODESANGST'), 'TODESANGST gilt als Fluch');
+}
+
+// --- STINKER: niemand hilft -------------------------------------------------
+{
+  const monster = ALL_CARDS.find((x) => x.category === 'monster');
+  const stinker = findCard('STINKER');
+  const p = makePlayer({});
+  const helfer = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([p, helfer]);
+  addActiveCurse(room, p, 'STINKER', stinker.id);
+  startCombat(room, p.id, [monster.id], {});
+  handleRequestHelp(room, p.id, helfer.id, 0);
+  assert.ok(!room.combat.helperPending, 'unter dem Stinker wird gar nicht erst gefragt');
+  assert.ok(room.logs.some((l) => /Stinker/i.test(l.text || l)), 'der Verlauf nennt den Grund');
+
+  // Auch der direkte Weg ueber die Zusage ist dicht.
+  room.combat.helperPending = { targetId: helfer.id, compelled: false, reward: 0 };
+  handleRespondHelp(room, helfer.id, true);
+  assert.strictEqual(room.combat.helperId, null, 'die Zusage kommt nicht zustande');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

@@ -2910,6 +2910,11 @@ function curseHidesHandItems(player) {
   return (player.activeCurses || []).some((f) => f.kind === 'noHandItemBonus');
 }
 
+// STINKER: "Niemand hilft dir in deinem naechsten Kampf."
+function hatHilfeSperre(player) {
+  return (player.activeCurses || []).some((f) => f.kind === 'noHelp');
+}
+
 // WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... auch nicht von anderen
 // Spielern." Betroffene Karten werden gar nicht erst GEZOGEN statt gezogen
 // und weggeworfen - der Text sagt "du erhaeltst keine", der Stapel soll
@@ -4467,6 +4472,11 @@ function handleRequestHelp(room, playerId, targetId, reward) {
     touchRoom(room);
     return;
   }
+  if (hatHilfeSperre(actor)) {
+    log(room, `${actor.name} stinkt - in diesem Kampf hilft niemand.`);
+    touchRoom(room);
+    return;
+  }
   // KNIESCHÜTZER DER VERLOCKUNG: "Kein Spieler mit einer höheren Stufe als du
   // darf deine Bitte ablehnen ... beizustehen." Die Karte bleibt beim
   // Anfragen auf der Hand (treasure_other, nicht anlegbar) - "das Fragen nach
@@ -4492,6 +4502,13 @@ function handleRespondHelp(room, playerId, accept) {
     accept = true;
   }
   if (accept) {
+    const bittsteller = findPlayer(room, c.actorId);
+    if (bittsteller && hatHilfeSperre(bittsteller)) {
+      log(room, `${target.name} kann ${bittsteller.name} nicht helfen - der Stinker hält alle fern.`);
+      c.helperPending = null;
+      touchRoom(room);
+      return;
+    }
     // LUSTMONSTER: die Zusage kommt nicht zustande, wenn das Geschlecht nicht
     // passt. Bewusst hier und nicht in handleRequestHelp: das Fragen bleibt
     // erlaubt, nur das Zustandekommen nicht - so sieht der Tisch im Verlauf,
@@ -6267,7 +6284,7 @@ module.exports = {
   fluechtenderId, naechsterFluechtling, beendeFluchtphase,
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
-  curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatSchatzSperre,
+  curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
