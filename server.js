@@ -5185,13 +5185,19 @@ function handleEquipItem(room, playerId, cardId) {
   }
   // SCHUMMELN!: "Diesen Gegenstand kannst du nun legal einsetzen, auch wenn
   // das normalerweise nicht erlaubt wäre" - hebt fuer GENAU DIESEN Gegenstand
-  // die Anlege-Regeln auf (siehe handlePlayCheat). Bewusst nur fuer die
-  // Gross-Gegenstand- und Rassen-Sperre umgesetzt: die Slot-Belegung
-  // (Kopf/Ruestung/Schuhe/Haende) ist hier je Spieler:in ein fester Platz
-  // (kein Array), ein zweiter Gegenstand im selben Slot wuerde den ersten
-  // stillschweigend verdraengen statt ihn abzulegen - dafuer muesste das
-  // Ausruestungsmodell erst auf Arrays je Slot umgestellt werden.
-  // ponytail: Slot-Belegung/Handzahl bleiben deshalb hart, Ausbauweg s.o.
+  // die Anlege-Regeln auf (siehe handlePlayCheat): Gross-Gegenstand-Sperre,
+  // Rassen-Sperre und - Ruling 2026-09-18 - auch der belegte Platz. Der
+  // geschummelte Gegenstand landet dafuer auf dem Spezialplatz statt in
+  // seinem gedruckten Slot (siehe unten): der Spezialplatz ist ein
+  // Sammelbereich, verdraengt also nichts und braucht keine belegten
+  // Haende. Zaehlt trotzdem ueberall mit, weil equippedItemIds ihn
+  // einschliesst - auch als Waffe (handItemIds liest slotKind, nicht den
+  // Platz).
+  // ponytail: dadurch sieht eine geschummelte Ruestung nicht mehr in
+  // player.equipped.armor - wer dort direkt hineinliest (MIESER SPIEGEL,
+  // Stinktier-Kleidung, "Ruestung verlieren"), greift daneben. Bewusst so:
+  // die Alternative waere ein Array je Slot, also das ganze
+  // Ausruestungsmodell.
   const geschummelt = player.attachments && player.attachments.cheatedItemId === cardId;
   if (!geschummelt && istGrosserGegenstand(room, cardId) && !canCarryAnotherBigItem(player, room)) {
     log(room, `${player.name} kann "${c.name}" nicht anlegen - Grosser Gegenstand, und es wird bereits einer getragen (nur Zwerge duerfen mehrere).`);
@@ -5240,7 +5246,9 @@ function handleEquipItem(room, playerId, cardId) {
     return;
   }
   if (c.category !== 'item') return;
-  if (c.slotKind === 'head') { if (player.equipped.head) return; removeFromHand(player, cardId); player.equipped.head = cardId; }
+  // Geschummelt: ab auf den Spezialplatz, ohne Slot- und Handzahl-Pruefung.
+  if (geschummelt) { removeFromHand(player, cardId); player.equipped.special = [...specialSlotCards(player, 'special'), cardId]; }
+  else if (c.slotKind === 'head') { if (player.equipped.head) return; removeFromHand(player, cardId); player.equipped.head = cardId; }
   else if (c.slotKind === 'armor') { if (player.equipped.armor) return; removeFromHand(player, cardId); player.equipped.armor = cardId; }
   else if (c.slotKind === 'feet') { if (player.equipped.feet) return; removeFromHand(player, cardId); player.equipped.feet = cardId; }
   else if (c.slotKind === 'hand') {
@@ -5256,7 +5264,9 @@ function handleEquipItem(room, playerId, cardId) {
   // FREUD'SCHEN SLIPPER: das Geschlecht beim Ausspielen merken - beim Verlust
   // entscheidet es ueber die -5-Strafe (siehe pruefeSlipperVerlust).
   if (GENDER_IMMUNE_ITEMS.has(c.name)) player.genderBeiSlippern = player.gender;
-  log(room, `${player.name} legt "${c.name}" an.`, [cardId]);
+  log(room, geschummelt
+    ? `${player.name} legt "${c.name}" geschummelt an (Spezialausrüstung - die Platzregeln gelten dafür nicht).`
+    : `${player.name} legt "${c.name}" an.`, [cardId]);
   touchRoom(room);
 }
 

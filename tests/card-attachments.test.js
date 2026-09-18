@@ -67,6 +67,32 @@ function done(room) {
   done(room);
 }
 
+// 2b) Geschummelt geht auch bei belegtem Platz: beide Haende voll, trotzdem
+// laesst sich eine zweihaendige Waffe anlegen - sie landet auf dem
+// Spezialplatz und verdraengt nichts (Ruling 2026-09-18).
+{
+  const schwert = byName('KETTENSÄGE DER BLUTIGEN ZERSTÜCKELUNG'); // braucht zwei Haende
+  const schummeln = byName('SCHUMMELN!');
+  const hand1 = ALL_CARDS.find((x) => x.slotKind === 'hand' && x.handsCost === 1);
+  const hand2 = ALL_CARDS.find((x) => x.slotKind === 'hand' && x.handsCost === 1 && x.id !== hand1.id);
+  const p = makePlayer('a', { hand: [hand1.id, hand2.id, schwert.id, schummeln.id] });
+  const room = makeRoom([p]);
+  handleEquipItem(room, p.id, hand1.id);
+  handleEquipItem(room, p.id, hand2.id);
+  assert.strictEqual(p.equipped.hands.filter(Boolean).length, 2, 'beide Haende sind belegt');
+
+  // Ohne Schummeln bleibt die dritte Waffe liegen.
+  handleEquipItem(room, p.id, schwert.id);
+  assert.ok(p.hand.includes(schwert.id), 'ohne Schummeln passt nichts mehr in die Haende');
+
+  handlePlayCheat(room, p.id, schummeln.id, schwert.id);
+  handleEquipItem(room, p.id, schwert.id);
+  assert.ok(equippedItemIds(p).includes(schwert.id), 'geschummelt geht es trotz voller Haende');
+  assert.ok((p.equipped.special || []).includes(schwert.id), 'und zwar auf dem Spezialplatz');
+  assert.deepStrictEqual(p.equipped.hands, [hand1.id, hand2.id], 'die belegten Haende bleiben unangetastet');
+  done(room);
+}
+
 // 3) Der Anhang gilt nur fuer GENAU EINEN Gegenstand
 {
   const fels = byName('RIESIGER FELS');
