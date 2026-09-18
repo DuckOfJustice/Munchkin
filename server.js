@@ -2946,6 +2946,13 @@ function hatSchatzSperre(player) {
   return !!player && (player.activeCurses || []).some((f) => f.kind === 'noTreasure');
 }
 
+// NARRENGOLD: "Du erhaeltst keinen Schatz im naechsten Kampf." Nur die
+// Kampfbeute - anders als die Stoererliste (hatSchatzSperre), die JEDE
+// Schatzkarte sperrt und deshalb in zieheSchaetzeFuer sitzt.
+function hatKampfschatzSperre(player) {
+  return !!player && (player.activeCurses || []).some((f) => f.kind === 'noCombatTreasure');
+}
+
 // WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... auch nicht von
 // anderen Spielern." Gesperrte Personen ziehen gar nicht erst - der
 // Stapel darf durch die Sperre nicht schrumpfen. EINZIGER Ort, der fuer
@@ -4687,6 +4694,11 @@ function resolveCombatWin(room) {
   if (!c.helperId && clearActiveCurseByKind(actor, 'noTreasure')) {
     log(room, `${actor.name} hat ein Monster ohne Hilfe getötet und ist von der Störerliste runter.`);
   }
+  // NARRENGOLD ("kein Schatz im naechsten Kampf") traegt dauer:'naechsterKampf'
+  // und faellt damit gleich unten bei clearNextCombatCurses weg - DIESER Kampf
+  // ist ja "der naechste". Der Sperrstatus muss deshalb VOR der Loeschung
+  // festgehalten werden, sonst zieht die Person trotz Fluch ihre Beute.
+  const actorGesperrt = hatSchatzSperre(actor) || hatKampfschatzSperre(actor);
   // MIESER SPIEGEL/GESCHLECHTSUMWANDLUNG gelten nur "im nächsten Kampf" -
   // der ist hiermit vorbei (gewonnen).
   clearNextCombatCurses([actor, helper]);
@@ -4745,8 +4757,8 @@ function resolveCombatWin(room) {
   // direkt (zieheSchaetzeFuer greift von selbst, wenn auch sie gesperrt
   // ist oder es keine Helfer:in gibt) - der Stapel bleibt in beiden
   // Faellen unberuehrt, wenn niemand etwas bekommen kann.
-  const ziehendFuer = hatSchatzSperre(actor) ? helper : actor;
-  const sollZiehen = hatSchatzSperre(actor) ? Math.min(treasureCount, c.helperReward || 0) : treasureCount;
+  const ziehendFuer = actorGesperrt ? helper : actor;
+  const sollZiehen = actorGesperrt ? Math.min(treasureCount, c.helperReward || 0) : treasureCount;
   const drawn = ziehendFuer ? zieheSchaetzeFuer(room, ziehendFuer, sollZiehen) : [];
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache
   // (README) etwas zugesagt - hier immer erst alles an die/den Angreifer:in,
@@ -6308,6 +6320,7 @@ module.exports = {
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
+  hatKampfschatzSperre,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,

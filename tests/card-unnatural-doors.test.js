@@ -3,7 +3,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, combatTotals, handleEquipItem, equippedItemIds,
   istGrosserGegenstand, addActiveCurse, DOOR_OTHER_AS_CURSE,
-  startCombat, handleRequestHelp, handleRespondHelp,
+  startCombat, handleRequestHelp, handleRespondHelp, resolveCombatWin,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -117,6 +117,40 @@ function makeRoom(players) {
   assert.strictEqual(room.combat.helperId, null, 'die Helfer:in zieht sich straffrei zurueck');
   assert.ok(!room.combat.monsterIds.includes(nase.id), 'die Laufende Nase fluechtet sofort');
   assert.ok(room.treasureDeck.length < stapelVorher, 'und laesst ihren Schatz da');
+}
+
+// --- NARRENGOLD -------------------------------------------------------------
+{
+  const monster = ALL_CARDS.find((x) => x.category === 'monster' && (x.treasureCount || 0) > 0);
+  const narrengold = findCard('NARRENGOLD');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  room.treasureDeck = ALL_CARDS.filter((x) => x.type === 'treasure').slice(0, 5).map((x) => x.id);
+  const stapelVorher = room.treasureDeck.length;
+  addActiveCurse(room, p, 'NARRENGOLD', narrengold.id);
+  startCombat(room, p.id, [monster.id], {});
+  resolveCombatWin(room);
+  assert.strictEqual(p.hand.length, 0, 'kein Schatz aus diesem Kampf');
+  assert.strictEqual(room.treasureDeck.length, stapelVorher, 'der Stapel schrumpft nicht');
+  assert.ok(p.level > 5, 'die Stufe gibt es trotzdem');
+}
+
+// Die Zusage an die Helfer:in bleibt bestehen - der Fluch haengt an der
+// kaempfenden Person, der Anspruch der Helfer:in ist ihr eigener.
+{
+  const monster = ALL_CARDS.find((x) => x.category === 'monster' && (x.treasureCount || 0) > 0);
+  const narrengold = findCard('NARRENGOLD');
+  const p = makePlayer({});
+  const helfer = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([p, helfer]);
+  room.treasureDeck = ALL_CARDS.filter((x) => x.type === 'treasure').slice(0, 5).map((x) => x.id);
+  addActiveCurse(room, p, 'NARRENGOLD', narrengold.id);
+  startCombat(room, p.id, [monster.id], {});
+  room.combat.helperId = helfer.id;
+  room.combat.helperReward = 1;
+  resolveCombatWin(room);
+  assert.strictEqual(p.hand.length, 0, 'die kaempfende Person bekommt nichts');
+  assert.strictEqual(helfer.hand.length, 1, 'die zugesagte Karte bekommt die Helfer:in trotzdem');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
