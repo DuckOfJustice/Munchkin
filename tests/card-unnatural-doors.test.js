@@ -153,5 +153,47 @@ function makeRoom(players) {
   assert.strictEqual(helfer.hand.length, 1, 'die zugesagte Karte bekommt die Helfer:in trotzdem');
 }
 
+// NARRENGOLDs Text ist rollenunabhaengig: "Du erhaeltst keinen Schatz im
+// naechsten Kampf" trifft die Person, nicht nur die Rolle "kaempfend". Traegt
+// die Helfer:in den Fluch selbst, bekommt sie ihre Zusage nicht - und wenn
+// die kaempfende Person zusaetzlich gesperrt ist, darf fuer die Zusage auch
+// gar nicht erst gezogen werden (sonst schrumpft der Stapel fuer niemanden).
+{
+  const monster = ALL_CARDS.find((x) => x.category === 'monster' && (x.treasureCount || 0) > 0);
+  const narrengold = findCard('NARRENGOLD');
+  const p = makePlayer({});
+  const helfer = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([p, helfer]);
+  room.treasureDeck = ALL_CARDS.filter((x) => x.type === 'treasure').slice(0, 5).map((x) => x.id);
+  const stapelVorher = room.treasureDeck.length;
+  addActiveCurse(room, p, 'NARRENGOLD', narrengold.id);
+  addActiveCurse(room, helfer, 'NARRENGOLD', narrengold.id);
+  startCombat(room, p.id, [monster.id], {});
+  room.combat.helperId = helfer.id;
+  room.combat.helperReward = 1;
+  resolveCombatWin(room);
+  assert.strictEqual(p.hand.length, 0, 'die kaempfende Person bleibt gesperrt');
+  assert.strictEqual(helfer.hand.length, 0, 'die eigens verfluchte Helfer:in bekommt die Zusage nicht');
+  assert.strictEqual(room.treasureDeck.length, stapelVorher, 'der Stapel schrumpft nicht um ihren Anteil');
+}
+
+// Die Sieges-Logzeile darf keine Schatzkarten behaupten, die real niemand
+// bekommen hat - ein gesperrter Solo-Sieg zieht 0, nicht treasureCount.
+{
+  const monster = ALL_CARDS.find((x) => x.category === 'monster' && (x.treasureCount || 0) > 0);
+  const narrengold = findCard('NARRENGOLD');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  room.treasureDeck = ALL_CARDS.filter((x) => x.type === 'treasure').slice(0, 5).map((x) => x.id);
+  addActiveCurse(room, p, 'NARRENGOLD', narrengold.id);
+  startCombat(room, p.id, [monster.id], {});
+  const logCountBefore = room.logs.length;
+  resolveCombatWin(room);
+  const neueLogs = room.logs.slice(logCountBefore);
+  const siegLog = neueLogs.find((l) => /besiegt/.test(l.text || l));
+  assert.ok(siegLog, 'die Sieges-Logzeile existiert (neue Logzeile vom Aufruf)');
+  assert.ok(/\b0 Schatzkarte\(n\) gezogen/.test(siegLog.text || siegLog), `Logzeile nennt die tatsaechliche (Null-)Anzahl statt treasureCount: "${siegLog.text}"`);
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');

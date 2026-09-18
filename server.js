@@ -4698,7 +4698,13 @@ function resolveCombatWin(room) {
   // und faellt damit gleich unten bei clearNextCombatCurses weg - DIESER Kampf
   // ist ja "der naechste". Der Sperrstatus muss deshalb VOR der Loeschung
   // festgehalten werden, sonst zieht die Person trotz Fluch ihre Beute.
+  // Dieselbe Vorwegnahme gilt fuer die Helfer:in - NARRENGOLDs Text ("Du
+  // erhaeltst keinen Schatz im naechsten Kampf") ist rollenunabhaengig und
+  // trifft auch eine selbst verfluchte Helfer:in, nicht nur die kaempfende
+  // Person (hatSchatzSperre(null)/hatKampfschatzSperre(null) liefern false,
+  // helperGesperrt ist also auch ohne Helfer:in sicher).
   const actorGesperrt = hatSchatzSperre(actor) || hatKampfschatzSperre(actor);
+  const helperGesperrt = hatSchatzSperre(helper) || hatKampfschatzSperre(helper);
   // MIESER SPIEGEL/GESCHLECHTSUMWANDLUNG gelten nur "im nächsten Kampf" -
   // der ist hiermit vorbei (gewonnen).
   clearNextCombatCurses([actor, helper]);
@@ -4753,12 +4759,19 @@ function resolveCombatWin(room) {
   const treasureCount = c.treasureDelta ? Math.max(1, baseTreasures + c.treasureDelta) : baseTreasures;
   // Gezogen wird nur, was auch ankommt, und nur fuer die Person, die es
   // ueberhaupt bekommen kann. Steht die kaempfende Person auf der
-  // Stoererliste, zieht stattdessen die Helfer:in ihren zugesagten Anteil
-  // direkt (zieheSchaetzeFuer greift von selbst, wenn auch sie gesperrt
-  // ist oder es keine Helfer:in gibt) - der Stapel bleibt in beiden
-  // Faellen unberuehrt, wenn niemand etwas bekommen kann.
-  const ziehendFuer = actorGesperrt ? helper : actor;
-  const sollZiehen = actorGesperrt ? Math.min(treasureCount, c.helperReward || 0) : treasureCount;
+  // Stoererliste (oder unter NARRENGOLD), zieht stattdessen die Helfer:in
+  // ihren zugesagten Anteil direkt - aber nur, wenn NICHT auch sie selbst
+  // gesperrt ist (helferKannZiehen). zieheSchaetzeFuer kennt nur die
+  // Stoererliste, nicht NARRENGOLD - die Pruefung gehoert deshalb hierher,
+  // an die Aufrufstelle, statt in den Choke-Point (der auch Geschenke und
+  // Bonuszuege abdeckt, die NARRENGOLD nicht sperrt). Sind beide gesperrt,
+  // wird gar nicht erst gezogen - der Stapel bleibt unberuehrt, wenn
+  // niemand etwas bekommen kann.
+  const helferKannZiehen = helper && !helperGesperrt;
+  const ziehendFuer = actorGesperrt ? (helferKannZiehen ? helper : null) : actor;
+  const sollZiehen = actorGesperrt
+    ? (helferKannZiehen ? Math.min(treasureCount, c.helperReward || 0) : 0)
+    : treasureCount;
   const drawn = ziehendFuer ? zieheSchaetzeFuer(room, ziehendFuer, sollZiehen) : [];
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache
   // (README) etwas zugesagt - hier immer erst alles an die/den Angreifer:in,
@@ -4772,7 +4785,7 @@ function resolveCombatWin(room) {
   // vernichten (das waeren Karten, die dann in keinem Stapel und keiner
   // Hand mehr existieren). Die Karten bleiben bei der kaempfenden Person,
   // die sie ohnehin schon gezogen hat.
-  const zusage = (helper && !hatSchatzSperre(helper))
+  const zusage = helferKannZiehen
     ? Math.max(0, Math.min(c.helperReward || 0, drawn.length)) : 0;
   const fuerHelfer = drawn.slice(0, zusage).concat(helperPinataCard ? [helperPinataCard] : []);
   const fuerActor = drawn.slice(zusage).concat(actorPinataCard ? [actorPinataCard] : []);
@@ -4820,10 +4833,14 @@ function resolveCombatWin(room) {
     });
   }
   discardMonsterIds(room.doorDiscard, c.monsterIds);
-  // treasureCount zaehlt nur die reguläre Beute - die Piñata-Karte der
-  // kaempfenden Person kommt (falls gezogen) obendrauf, sonst meldet die
-  // Zeile faelschlich "0 Schatzkarte(n)", obwohl eine Karte in der Hand liegt.
-  const gemeldeteSchaetze = treasureCount + (actorPinataCard ? 1 : 0);
+  // Gemeldet wird, was tatsaechlich in einer Hand gelandet ist (inkl.
+  // Piñata-Zuschlag) - nicht treasureCount. Unter NARRENGOLD (oder der
+  // Stoererliste kombiniert mit Helfer:in) zieht die kaempfende Person
+  // real weniger oder nichts; treasureCount waere dann eine falsche Zahl
+  // ohne genannten Grund. fuerActor/fuerHelfer bilden immer die Summe der
+  // tatsaechlich verteilten Kampfbeute (drawn, aufgeteilt per Zusage, plus
+  // je eigener Piñata-Karte).
+  const gemeldeteSchaetze = fuerActor.length + fuerHelfer.length;
   log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${gemeldeteSchaetze} Schatzkarte(n) gezogen.`, c.monsterIds);
   if (extras.levels) log(room, `Kartenbonus: +${extras.levels} zusätzliche Stufe(n).`);
   if (extras.treasures) log(room, `Kartenbonus: +${extras.treasures} zusätzliche(r) Schatz.`);
