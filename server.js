@@ -2094,6 +2094,19 @@ function applyPrimitiveAction(room, player, action) {
     // Karte ist trotzdem verbraucht, und niemand soll glauben, sie haette
     // gewirkt.
     case 'clearCurse': {
+      // Mit itemId (VERFLUCHTER GEGENSTAND) endet GENAU dieser Eintrag - sonst
+      // befreite ein Ring zwei verfluchte Gegenstaende auf einmal, weil
+      // clearActiveCurseByKind nach Wirkungsart filtert.
+      if (action.itemId) {
+        const vorher = (player.activeCurses || []).length;
+        player.activeCurses = (player.activeCurses || [])
+          .filter((f) => !(f.kind === action.kind && f.itemId === action.itemId));
+        if (player.activeCurses.length < vorher) {
+          const ziel = card(action.itemId);
+          return `Fluch "${action.name}" auf "${ziel ? ziel.name : action.itemId}" beendet`;
+        }
+        return `Fluch "${action.name}" war schon vorbei - die Karte ist umsonst weg`;
+      }
       if (clearActiveCurseByKind(player, action.kind)) return `Fluch "${action.name}" beendet`;
       return `Fluch "${action.name}" war schon vorbei - die Karte ist umsonst weg`;
     }

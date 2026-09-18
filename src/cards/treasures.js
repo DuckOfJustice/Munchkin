@@ -21,12 +21,21 @@ module.exports = (ctx) => {
   const fluchBeendenSpec = (player) => {
     const flueche = player.activeCurses || [];
     if (!flueche.length) return null; // nichts zu beenden
-    const beenden = (f) => ({ type: 'clearCurse', kind: f.kind, name: f.name });
+    // itemId wandert mit, wo es eine gibt (VERFLUCHTER GEGENSTAND): sonst
+    // sind zwei Gegenstandsfluechen weder unterscheidbar noch einzeln zu
+    // beenden - beide heissen gleich.
+    const beenden = (f) => (f.itemId
+      ? { type: 'clearCurse', kind: f.kind, name: f.name, itemId: f.itemId }
+      : { type: 'clearCurse', kind: f.kind, name: f.name });
     if (flueche.length === 1) return beenden(flueche[0]);
     return {
       type: 'choice',
       options: flueche.map((f, i) => ({
-        id: `fluch-${i}`, label: `"${f.name}" beenden`, action: beenden(f),
+        id: `fluch-${i}`,
+        label: f.itemId && card(f.itemId)
+          ? `"${f.name}" auf "${card(f.itemId).name}" beenden`
+          : `"${f.name}" beenden`,
+        action: beenden(f),
       })),
     };
   };

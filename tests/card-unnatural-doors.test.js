@@ -7,7 +7,7 @@ const {
   UNDEAD_MONSTERS, handlePlayCombatCard,
   resolveConsequenceSpec, applyPrimitiveAction, cursedItemIds, unequipSlotCard,
   handleUnequipItem, handleSellItems, ownTradeIds, clearActiveCurseByKind,
-  handleResolveCardCardChoice,
+  handleResolveCardCardChoice, TREASURE_POWER_OVERRIDES,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -415,6 +415,32 @@ function makeRoom(players) {
   // Der Erbe haelt die Karte auf der HAND - der Fluch darf dabei nicht als
   // verwaist weggeraeumt werden, sonst waere die Uebertragung wirkungslos.
   assert.ok(cursedItemIds(erbe).has(waffe.id), 'und er ueberlebt das naechste Lesen');
+}
+
+// --- WUNSCHRING gegen zwei Gegenstandsfluechen ------------------------------
+// Mit zwei verfluchten Gegenstaenden muss der Ring unterscheidbare Optionen
+// anbieten ("VERFLUCHTER GEGENSTAND beenden" zweimal waere Raten) und darf nur
+// den GEWAEHLTEN Fluch beenden - nicht beide auf einmal.
+{
+  const kopf = ALL_CARDS.find((x) => x.category === 'item' && x.slotKind === 'head' && (x.bonus || 0) > 0);
+  const ruestung = ALL_CARDS.find((x) => x.category === 'item' && x.slotKind === 'armor' && (x.bonus || 0) > 0);
+  const p = makePlayer({ hand: [kopf.id, ruestung.id] });
+  const room = makeRoom([p]);
+  handleEquipItem(room, p.id, kopf.id);
+  handleEquipItem(room, p.id, ruestung.id);
+  applyPrimitiveAction(room, p, { type: 'curseItem', itemId: kopf.id, cardId: null });
+  applyPrimitiveAction(room, p, { type: 'curseItem', itemId: ruestung.id, cardId: null });
+
+  const spec = TREASURE_POWER_OVERRIDES['WUNSCHRING'](p, room);
+  assert.strictEqual(spec.type, 'choice', 'zwei Fluechen, also eine Wahl');
+  const labels = spec.options.map((o) => o.label);
+  assert.strictEqual(new Set(labels).size, 2, 'die Optionen sind unterscheidbar');
+  assert.ok(labels.some((l) => l.includes(kopf.name)), 'und nennen den betroffenen Gegenstand');
+
+  const fuerKopf = spec.options.find((o) => o.label.includes(kopf.name));
+  applyPrimitiveAction(room, p, fuerKopf.action);
+  assert.deepStrictEqual([...cursedItemIds(p)], [ruestung.id],
+    'nur der gewaehlte Fluch endet, der andere bleibt');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
