@@ -7,6 +7,7 @@ const {
   UNDEAD_MONSTERS, handlePlayCombatCard,
   resolveConsequenceSpec, applyPrimitiveAction, cursedItemIds, unequipSlotCard,
   handleUnequipItem, handleSellItems, ownTradeIds, clearActiveCurseByKind,
+  handleResolveCardCardChoice,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -389,6 +390,31 @@ function makeRoom(players) {
   clearActiveCurseByKind(p, 'cursedItem');
   handleSellItems(room, p.id, [hammer.id]);
   assert.ok(p.level > stufeVorher, 'ohne Fluch wird derselbe Gegenstand verkauft');
+}
+
+// --- VERFLUCHTER GEGENSTAND: Uebertragung beim Pluendern --------------------
+// "Wenn du stirbst, wird der Fluch auf den uebertragen, der ihn von deinem
+// Koerper entfernt. Eine grosse Hilfe."
+{
+  const waffe = ALL_CARDS.find((x) => x.category === 'item' && x.slotKind === 'hand' && (x.bonus || 0) > 0);
+  const opfer = makePlayer({ hand: [waffe.id] });
+  const erbe = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([opfer, erbe]);
+  handleEquipItem(room, opfer.id, waffe.id);
+  applyPrimitiveAction(room, opfer, { type: 'curseItem', itemId: waffe.id, cardId: null });
+
+  room.pendingCardAction = { playerId: erbe.id, cardName: 'Leiche plündern', kind: 'chooseCard',
+    prompt: 'Eine Karte nehmen', candidateIds: [waffe.id], takeFrom: opfer.id };
+  handleResolveCardCardChoice(room, erbe.id, waffe.id);
+
+  assert.ok(erbe.hand.includes(waffe.id), 'die Karte ist beim Erben');
+  assert.strictEqual(opfer.activeCurses.length, 0, 'das Opfer ist den Fluch los');
+  const uebernommen = (erbe.activeCurses || []).find((f) => f.kind === 'cursedItem');
+  assert.ok(uebernommen, 'der Erbe hat ihn jetzt');
+  assert.strictEqual(uebernommen.itemId, waffe.id, 'und zwar fuer dieselbe Karte');
+  // Der Erbe haelt die Karte auf der HAND - der Fluch darf dabei nicht als
+  // verwaist weggeraeumt werden, sonst waere die Uebertragung wirkungslos.
+  assert.ok(cursedItemIds(erbe).has(waffe.id), 'und er ueberlebt das naechste Lesen');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

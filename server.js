@@ -2614,10 +2614,22 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
       touchRoom(room);
       return;
     }
+    // VERFLUCHTER GEGENSTAND: "wenn du stirbst, wird der Fluch auf den
+    // uebertragen, der ihn von deinem Koerper entfernt." Der Eintrag wird
+    // gelesen, BEVOR die Karte das Opfer verlaesst - danach raeumt
+    // cursedItemIds ihn als verwaist weg.
+    const verfluchtEintrag = (opfer.activeCurses || [])
+      .find((f) => f.kind === 'cursedItem' && f.itemId === chosenCardId);
     if (opfer.hand.includes(chosenCardId)) removeFromHand(opfer, chosenCardId);
     else unequipSlotCard(opfer, chosenCardId);
     clearCheatIfLost(opfer, chosenCardId);
     player.hand.push(chosenCardId);
+    if (verfluchtEintrag) {
+      opfer.activeCurses = (opfer.activeCurses || []).filter((f) => f !== verfluchtEintrag);
+      player.activeCurses = player.activeCurses || [];
+      player.activeCurses.push(Object.assign({}, verfluchtEintrag));
+      log(room, `Der Fluch auf "${chosen ? chosen.name : chosenCardId}" geht auf ${player.name} über - eine große Hilfe.`);
+    }
     log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" von ${opfer.name} genommen.`, [chosenCardId]);
   } else if (pa.giveTo) {
     // ENTE DER VIELEN SACHEN: Gegenstueck zu takeFrom - die eigene Wahl geht
@@ -2964,8 +2976,13 @@ function curseHidesHandItems(player) {
 function cursedItemIds(player) {
   const flueche = (player && player.activeCurses) || [];
   if (!flueche.some((f) => f.kind === 'cursedItem')) return new Set();
-  const getragen = equippedItemIds(player);
-  player.activeCurses = flueche.filter((f) => f.kind !== 'cursedItem' || getragen.includes(f.itemId));
+  // Massstab ist der BESITZ, nicht das Tragen: beim Pluendern einer Leiche
+  // wandert der Fluch mit der Karte auf die HAND der erbenden Person
+  // ("wenn du stirbst, wird der Fluch auf den uebertragen, der ihn von deinem
+  // Koerper entfernt") - am Tragen gemessen waere er sofort wieder weg.
+  // Ist die Karte ganz fort (abgelegt, zerstoert), endet der Fluch mit ihr.
+  const besitz = [...player.hand, ...equippedItemIds(player)];
+  player.activeCurses = flueche.filter((f) => f.kind !== 'cursedItem' || besitz.includes(f.itemId));
   return new Set(player.activeCurses.filter((f) => f.kind === 'cursedItem').map((f) => f.itemId));
 }
 
