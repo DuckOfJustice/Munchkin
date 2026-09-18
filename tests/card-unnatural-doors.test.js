@@ -99,5 +99,25 @@ function makeRoom(players) {
   assert.strictEqual(room.combat.helperId, null, 'die Zusage kommt nicht zustande');
 }
 
+// --- STINKER mitten im Kampf ------------------------------------------------
+{
+  const monster = ALL_CARDS.find((x) => x.category === 'monster' && x.name !== 'LAUFENDE NASE');
+  const nase = findCard('LAUFENDE NASE', 'monster');
+  const stinker = findCard('STINKER');
+  const p = makePlayer({});
+  const helfer = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([p, helfer]);
+  room.treasureDeck = ALL_CARDS.filter((x) => x.type === 'treasure').slice(0, 5).map((x) => x.id);
+  startCombat(room, p.id, [monster.id, nase.id], {});
+  room.combat.helperId = helfer.id;
+  const stapelVorher = room.treasureDeck.length;
+
+  addActiveCurse(room, p, 'STINKER', stinker.id);
+
+  assert.strictEqual(room.combat.helperId, null, 'die Helfer:in zieht sich straffrei zurueck');
+  assert.ok(!room.combat.monsterIds.includes(nase.id), 'die Laufende Nase fluechtet sofort');
+  assert.ok(room.treasureDeck.length < stapelVorher, 'und laesst ihren Schatz da');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');

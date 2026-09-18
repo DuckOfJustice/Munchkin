@@ -2866,6 +2866,29 @@ function applyLingeringRule(room, player, cardName, cardId, regel) {
       log(room, `"${g.name}" braucht zwei Haende - ${player.name} legt ihn zurueck auf die Hand.`, [id]);
     });
   }
+  // STINKER: "Wenn dir in dem Moment, in dem diese Karte ausgespielt wird,
+  // jemand in einem Kampf hilft, zieht er sich straffrei zurueck ... (Aber
+  // wenn Laufende Nase oder sein Schatten im Kampf sind, fluechten sie sofort
+  // und hinterlassen ihren Schatz.)" Beides nur fuer den Kampf, in dem die
+  // verfluchte Person gerade steckt - sonst waere es ein Angriff auf einen
+  // fremden Kampf.
+  if (regel.kind === 'noHelp' && room.combat
+    && combatParticipants(room).some((p) => p.id === player.id)) {
+    if (room.combat.helperId) {
+      const weg = findPlayer(room, room.combat.helperId);
+      room.combat.helperId = null;
+      room.combat.helperReward = 0;
+      log(room, `${weg ? weg.name : 'Die Helfer:in'} zieht sich straffrei zurück - niemand bleibt neben dem Gestank.`);
+      refreshCombatReady(room);
+    }
+    const NASEN = new Set(['LAUFENDE NASE', 'DIE SCHATTENNASE']);
+    [...room.combat.monsterIds].forEach((mid) => {
+      const m = card(mid);
+      if (!m || !NASEN.has(m.name)) return;
+      log(room, `"${m.name}" hält den Gestank nicht aus, flüchtet und lässt den Schatz da.`, [mid]);
+      applyCombatPotionAction(room, player, { type: 'removeOneMonster', leavesTreasure: true, monsterId: mid, name: m.name }, null);
+    });
+  }
 }
 
 // Gezieltes Loeschen nach Wirkungsart - der EINZIGE Weg, einen Eintrag aus
