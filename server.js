@@ -4157,18 +4157,14 @@ function handlePlayCombatCard(room, playerId, cardId) {
   // der Kartentext nennt. Alles andere ist gesperrt - ausdruecklich auch
   // KUMPEL, ILLUSION, HILF MIR und ÜBERFALLTRANK: es sind Karten, die "fuer
   // oder gegen dich" wirken, und die Karte nimmt sie nicht aus.
-  if (stinktierSperre(room, playerId)) {
-    const stinktierKarte = card(cardId);
-    const erlaubt = stinktierKarte
-      && (stinktierKarte.name === 'WANDERNDES MONSTER' || isMonsterEnhancerCard(stinktierKarte));
-    if (!erlaubt) {
-      log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - nur Wandernde Monster und Monsterverstärker gehen durch.`);
-      touchRoom(room);
-      return;
-    }
-  }
   const c = card(cardId);
   if (!c) return;
+  if (stinktierSperre(room, playerId)
+    && !(c.name === 'WANDERNDES MONSTER' || isMonsterEnhancerCard(c))) {
+    log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - nur Wandernde Monster und Monsterverstärker gehen durch.`);
+    touchRoom(room);
+    return;
+  }
   // COMBAT_REACTION_CARDS (Kumpel, Wanderndes Monster, Illusion, Hilf mir,
   // Ueberfalltrank): sie greifen selbst in monsterIds/actorId ein statt nur
   // einen Zahlenwert zu addieren - deshalb vor der Verstaerker-/Trank-Logik.
@@ -4435,14 +4431,17 @@ function handleRequestHelp(room, playerId, targetId, reward) {
     touchRoom(room);
     return;
   }
-  if (stinktierStrafeAktiv(actor)) {
-    log(room, `${actor.name} stinkt noch aus dem Riesenstinktier-Kampf - niemand hilft, solange Kleidung und Rüstung anliegen.`);
+  // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
+  // Steht VOR der Stinktier-Strafe: was das Monster im Kampf verbietet, ist
+  // der naeherliegende Grund - sonst bekaeme eine besprühte Person am
+  // Pavillon die Meldung, sie solle ihre Kleidung ablegen.
+  if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
+    log(room, 'Gegen dieses Monster darf niemand helfen.');
     touchRoom(room);
     return;
   }
-  // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
-  if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
-    log(room, 'Gegen dieses Monster darf niemand helfen.');
+  if (stinktierStrafeAktiv(actor)) {
+    log(room, `${actor.name} stinkt noch aus dem Riesenstinktier-Kampf - niemand hilft, solange Kleidung und Rüstung anliegen.`);
     touchRoom(room);
     return;
   }
@@ -4663,9 +4662,16 @@ function resolveCombatWin(room) {
         monsterNames: monsters.map((m) => m.name),
       };
     });
+    // Wer nichts bekommt, bekommt aus einem von zwei Gruenden nichts:
+    // Stoererliste (zieheSchaetzeFuer zieht gar nicht) oder leerer
+    // Schatzstapel. Die Zeile nennt den Grund, der wirklich zutrifft.
+    const gesperrt = room.players.filter(hatSchatzSperre).length;
+    const grund = !gesperrt ? 'der Schatzstapel reicht nicht für alle'
+      : (gezogen + gesperrt === room.players.length ? 'die Störerliste lässt nicht alle mitziehen'
+        : 'Störerliste und Schatzstapel lassen nicht alle mitziehen');
     log(room, gezogen === room.players.length
       ? `Die Piñata platzt - jede:r am Tisch zieht 1 Schatzkarte.`
-      : `Die Piñata platzt - der Schatzstapel reicht nur für ${gezogen} von ${room.players.length} Personen, die je 1 Schatzkarte ziehen.`);
+      : `Die Piñata platzt - ${grund}: nur ${gezogen} von ${room.players.length} Personen ziehen je 1 Schatzkarte.`);
   }
   // Monster-Verstärker aus dem Kampf zählen mit; BABY sagt ausdrücklich
   // "mindestens 1", deshalb die Untergrenze - aber nur, wenn überhaupt ein
@@ -5408,6 +5414,10 @@ function handleSellItems(room, playerId, cardIds) {
   // die Halbierung aber erst NACH der Schwelle (wie der Halbling-Bonus),
   // sonst behauptet die Logzeile einen Verkauf, der gar nicht stattfand.
   const vollVorHalbierung = total;
+  // Ruling 2026-09-17: wer sein LETZTES Kleidungsstueck verkauft, verkauft es
+  // noch halbiert - der Check laeuft vor dem Entfernen. Absicht: die Strafe
+  // endet, wenn die Kleidung ABGELEGT ist, und beim Verkauf liegt sie beim
+  // Preisvergleich noch an.
   const besprueht = stinktierStrafeAktiv(player);
   if (besprueht) total = Math.floor(total / 2);
   if (total < 1000) return;
