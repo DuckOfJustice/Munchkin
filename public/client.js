@@ -55,6 +55,9 @@
   let myInfo = { playerId: null, hand: [] };
   let session = loadSession();
   let sellSelection = new Set();
+  // "Schicksalhafte Karten" (Unnatural-Axe-Set): Checkboxen zum Abwerfen
+  // mehrerer Handkarten in einem Rutsch, siehe multiCardSelection-Aktion.
+  let multiSelection = new Set();
 
   // -- Zuschauer:innen --------------------------------------------------
   // Eine Zuschauer-Person steckt NIE in state.players und bekommt nie
@@ -2238,20 +2241,3 @@
     const lc = $('lobbyCode'); if (lc) lc.setAttribute('aria-label', 'Raum-Code');
   })();
 })();
-
-  function updateMultiSelectionBar() {
-    for (const id of Array.from(multiSelection)) {
-      if (!myInfo.hand.includes(id)) multiSelection.delete(id);
-    }
-    const count = multiSelection.size;
-    const multiSum = multiSelectionSum;
-    if (multiSum) multiSum.textContent = count + (count === 1 ? ' Karte' : ' Karten') + ' ausgewählt';
-    const btnD = btnMultiDoor;
-    const btnT = btnMultiTreasure;
-    if (btnD) {
-      btnD.onclick = () => { socket.emit('resolveMultiCardSelection', { cardIds: Array.from(multiSelection), deck: 'door' }); multiSelection.clear(); updateMultiSelectionBar(); };
-    }
-    if (btnT) {
-      btnT.onclick = () => { socket.emit('resolveMultiCardSelection', { cardIds: Array.from(multiSelection), deck: 'treasure' }); multiSelection.clear(); updateMultiSelectionBar(); };
-    }
-  }
