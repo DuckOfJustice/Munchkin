@@ -566,22 +566,24 @@ module.exports = (ctx) => {
     // etwas Untotes steht - das schliesst die Verstaerkerkarte UNTOT ein
     // ("Das Monster zaehlt jetzt als Untoter fuer alle Zwecke").
     'GHOULPEITSCHE': (player, monsters, untot) => (untot ? 3 : 0),
-    // "+2 Bonus für Frauen" - anders als GEILER HELM/SCHÄDELHELM KEIN Zusatz
-    // zu einem Grundbonus: der gedruckte Wert (2) ist der GESAMTE Bonus, den
-    // es nur für Frauen gibt. equippedBonusSum zaehlt den gedruckten Bonus
-    // dieser Karte deshalb bewusst NICHT mit (siehe GENDER_ONLY_BONUS_ITEMS) -
-    // sonst bekaemen auch Maenner faelschlich +2.
+    // "+2 Bonus für Frauen" - Zusatz zum Grundbonus (+2), Frauen also +4.
+    // (2026-09-19: dieses Verhalten war schon richtig - anders als
+    // STACHELIGER GENITALSCHONER bewusst NICHT in GENDER_ONLY_BONUS_ITEMS.)
     'SÜSSER SCHULTERDRACHE': (player) => (istGeschlecht(player, 'w') ? 2 : 0),
-    // "+2 Bonus für Männer" - gleiche Bauform wie SÜSSER SCHULTERDRACHE.
+    // "+2 Bonus für Männer" - anders als SÜSSER SCHULTERDRACHE KEIN Zusatz zu
+    // einem Grundbonus: der gedruckte Wert (2) ist der GESAMTE Bonus, den es
+    // nur fuer Maenner gibt. equippedBonusSum zaehlt den gedruckten Bonus
+    // dieser Karte deshalb bewusst NICHT mit (siehe GENDER_ONLY_BONUS_ITEMS) -
+    // sonst bekaemen auch Frauen faelschlich +2.
     'STACHELIGER GENITALSCHONER': (player) => (istGeschlecht(player, 'm') ? 2 : 0),
   };
 
   // Gegenstaende, deren GESAMTER Kampfbonus an eine Bedingung geknuepft ist
-  // (kein "Grundbonus + Zusatz" wie bei GEILER HELM), siehe ITEM_CONDITIONAL_BONUS
-  // oben. equippedBonusSum ignoriert den gedruckten bonus-Wert dieser Karten
-  // komplett - der volle Bonus kommt ausschliesslich ueber
-  // ITEM_CONDITIONAL_BONUS/conditionalItemBonusSum, je nach Bedingung.
-  const GENDER_ONLY_BONUS_ITEMS = new Set(['SÜSSER SCHULTERDRACHE', 'STACHELIGER GENITALSCHONER']);
+  // (kein "Grundbonus + Zusatz" wie bei GEILER HELM/SÜSSER SCHULTERDRACHE),
+  // siehe ITEM_CONDITIONAL_BONUS oben. equippedBonusSum ignoriert den
+  // gedruckten bonus-Wert dieser Karten komplett - der volle Bonus kommt
+  // ausschliesslich ueber ITEM_CONDITIONAL_BONUS/conditionalItemBonusSum.
+  const GENDER_ONLY_BONUS_ITEMS = new Set(['STACHELIGER GENITALSCHONER']);
 
   // Karten, die angelegt werden, aber auf keinen der klassischen Plaetze
   // gehoeren: Kartenname -> Platz in player.equipped (plus optionale
@@ -635,6 +637,12 @@ module.exports = (ctx) => {
     'SÜSSER SCHULTERDRACHE': { slot: 'special' },
     'STACHELIGER GENITALSCHONER': { slot: 'special' },
     'FALSCHER BART': { slot: 'special' },
+    // LUSTIGES SCHWERT: in den Rohdaten als normale 1-Hand-Waffe eingetragen,
+    // soll aber wie SINGENDES & TANZENDES SCHWERT als Spezialausruestung
+    // angelegt werden - blockiert also keine Hand (Ruling 2026-09-19). Zaehlt
+    // trotzdem als Waffe: handItemIds liest bei Spezialplatz-Karten weiterhin
+    // slotKind, und das steht in den Rohdaten unveraendert auf 'hand'.
+    'LUSTIGES SCHWERT': { slot: 'special' },
   };
   // Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
   // nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).

@@ -1433,7 +1433,7 @@ function applyPrimitiveAction(room, player, action) {
       oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
       const remaining = oldContext.cardsToSort;
       const options = remaining.map(id => ({ id, label: card(id).name + ' (' + card(id).category + ')', action: { type: 'findeEineKarteSort2', cardId: id, context: oldContext } }));
-      openCardChoice(room, player, 'FINDE_EINE_KARTE_SORT2', options);
+      openCardChoice(room, player, 'Finde eine Karte - 2. Karte wählen', options);
       // Prevent finishCardAction from clearing pendingCardAction
       pa.keepPending = true;
       return 'wählt 1. Karte für ganz oben';
@@ -1444,8 +1444,12 @@ function applyPrimitiveAction(room, player, action) {
       oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
       const lastId = oldContext.cardsToSort[0];
       oldContext.sortedCards.push(lastId);
-      // Put them back on deck in reverse order (so index 0 is on top)
-      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.unshift(id));
+      // Zurueck aufs Deck: drawDoor() zieht per pop() vom ENDE des Arrays
+      // (Ende = oben). sortedCards ist [1. Wahl, 2. Wahl, Rest] - umgekehrt
+      // gepusht landet die 1. Wahl ganz am Ende = ganz oben, wird also zuerst
+      // gezogen. (Bugreport 2026-09-19: unshift setzte sie zuvor ans Ende des
+      // Arrays, das per pop() aber das UNTERE Ende des Stapels ist.)
+      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.push(id));
       return 'wählt 2. Karte, 3. ergibt sich automatisch. Stapel sortiert!';
     }
     // Entscheidung bei Monstern mit Vorbeigeh-Option (BEKIFFTER GOLEM).
@@ -2611,7 +2615,7 @@ function applyTargetAction(room, actor, target, action) {
       oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
       const remaining = oldContext.cardsToSort;
       const options = remaining.map(id => ({ id, label: card(id).name + ' (' + card(id).category + ')', action: { type: 'findeEineKarteSort2', cardId: id, context: oldContext } }));
-      openCardChoice(room, player, 'FINDE_EINE_KARTE_SORT2', options);
+      openCardChoice(room, player, 'Finde eine Karte - 2. Karte wählen', options);
       // Prevent finishCardAction from clearing pendingCardAction
       pa.keepPending = true;
       return 'wählt 1. Karte für ganz oben';
@@ -2622,8 +2626,12 @@ function applyTargetAction(room, actor, target, action) {
       oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
       const lastId = oldContext.cardsToSort[0];
       oldContext.sortedCards.push(lastId);
-      // Put them back on deck in reverse order (so index 0 is on top)
-      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.unshift(id));
+      // Zurueck aufs Deck: drawDoor() zieht per pop() vom ENDE des Arrays
+      // (Ende = oben). sortedCards ist [1. Wahl, 2. Wahl, Rest] - umgekehrt
+      // gepusht landet die 1. Wahl ganz am Ende = ganz oben, wird also zuerst
+      // gezogen. (Bugreport 2026-09-19: unshift setzte sie zuvor ans Ende des
+      // Arrays, das per pop() aber das UNTERE Ende des Stapels ist.)
+      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.push(id));
       return 'wählt 2. Karte, 3. ergibt sich automatisch. Stapel sortiert!';
     }
     case 'kartenSperre': {
@@ -2728,14 +2736,21 @@ function handleUseCardPower(room, playerId, cardId) {
   }
   if (spec.type === 'findeEineKarte') {
     if (room.doorDeck.length < 3) {
+      // Der Nachschub wird VORN angehaengt: drawDoor() zieht per pop() vom
+      // ENDE des Arrays (das Ende ist "oben"/als naechstes dran) - die paar
+      // verbliebenen alten Karten sollen also oben bleiben, der frisch
+      // gemischte Ablagestapel wird darunter (=vorn im Array) angehaengt.
       room.doorDeck = shuffle(room.doorDiscard).concat(room.doorDeck);
       room.doorDiscard = [];
     }
-    const top3 = room.doorDeck.splice(0, 3);
-    room.pendingCardAction = { kind: 'choice', context: { cardsToSort: top3, sortedCards: [] } };
+    // "Die drei NAECHSTEN Tuerkarten des Decks" = die als naechstes gezogen
+    // werden, also die letzten drei Eintraege des Arrays (siehe drawDoor:
+    // pop() vom Ende). Bugreport 2026-09-19: splice(0, 3) griff bisher die
+    // UNTERSTEN drei Karten ab, nicht die obersten.
+    const top3 = room.doorDeck.splice(-3, 3);
     const initialContext = { cardsToSort: top3, sortedCards: [] };
     const options = top3.map(id => ({ id, label: `${card(id).name} (${card(id).category})`, action: { type: 'findeEineKarteSort1', cardId: id, context: initialContext } }));
-    openCardChoice(room, player, 'FINDE_EINE_KARTE_SORT1', options);
+    openCardChoice(room, player, 'Finde eine Karte - oberste Karte wählen', options);
     log(room, `${player.name} spielt "${c.name}" und sortiert die obersten Türkarten.`, [cardId]);
     touchRoom(room);
     return;
@@ -4156,6 +4171,16 @@ function combatTotals(room) {
 // der Server anzeigen kann, ohne die Kartendaten selbst neu auszuwerten.
 function combatConditionalBonusFields(room) {
   const c = room.combat;
+  // FEIGHEITSTRANK/mustFlee: fleeQueue/fleeingId werden von fluechtenderId()
+  // nur LAZY beim ersten Aufruf gesetzt. Bisher passierte dieser erste
+  // Aufruf oft erst in scheduleBotActionsIfNeeded - und das laeuft in
+  // broadcastState() ERST NACH dem gameState-Emit. Der allererste State nach
+  // "muss weglaufen" hatte also fleeingId: undefined, und wenn die
+  // fluechtende Person ein Mensch war (kein Bot), gab es danach nie wieder
+  // einen Broadcast, der es nachtraegt -> Softlock (Bugreport 2026-09-19).
+  // Fix: hier eager aufrufen, bevor der Kampf serialisiert wird, damit
+  // fleeingId schon im ALLERERSTEN "mustFlee"-State stimmt.
+  fluechtenderId(room);
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   const monsters = c.monsterIds.map(card);
@@ -4297,7 +4322,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
       const remaining = oldContext.cardsToSort;
       const options = remaining.map(id => ({ id, label: card(id).name + ' (' + card(id).category + ')', action: { type: 'findeEineKarteSort2', cardId: id, context: oldContext } }));
-      openCardChoice(room, player, 'FINDE_EINE_KARTE_SORT2', options);
+      openCardChoice(room, player, 'Finde eine Karte - 2. Karte wählen', options);
       // Prevent finishCardAction from clearing pendingCardAction
       pa.keepPending = true;
       return 'wählt 1. Karte für ganz oben';
@@ -4308,8 +4333,12 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
       const lastId = oldContext.cardsToSort[0];
       oldContext.sortedCards.push(lastId);
-      // Put them back on deck in reverse order (so index 0 is on top)
-      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.unshift(id));
+      // Zurueck aufs Deck: drawDoor() zieht per pop() vom ENDE des Arrays
+      // (Ende = oben). sortedCards ist [1. Wahl, 2. Wahl, Rest] - umgekehrt
+      // gepusht landet die 1. Wahl ganz am Ende = ganz oben, wird also zuerst
+      // gezogen. (Bugreport 2026-09-19: unshift setzte sie zuvor ans Ende des
+      // Arrays, das per pop() aber das UNTERE Ende des Stapels ist.)
+      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.push(id));
       return 'wählt 2. Karte, 3. ergibt sich automatisch. Stapel sortiert!';
     }
     case 'forceFlee': {

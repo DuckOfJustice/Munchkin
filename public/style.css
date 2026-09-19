@@ -348,6 +348,17 @@ button.wide { width: 100%; }
 }
 .mypanel.floating #myBadges { flex-shrink: 0; }
 .mypanel.floating .row.gap.wrap { justify-content: flex-start; }
+/* Anhaltende Flueche (siehe curseTags/#myCurses): eigene, volle Zeile unter
+   dem Titel/Rasse/Klasse-Kopf statt mit ihm zu verschmelzen - vorher liefen
+   teils satzlange Fluch-Hinweise mit der Stufe/Klasse in einer
+   flex-wrap-Zeile durcheinander und liefen optisch aus dem Panel heraus.
+   Der rote Ton markiert die Zeile klar als Warnung. */
+.mypanel.floating .curses-row {
+  flex-basis: 100%; align-items: center;
+  background: rgba(217, 83, 79, 0.16); border: 1px solid rgba(217, 83, 79, 0.4);
+  border-radius: 8px; padding: 6px 10px; margin-top: 2px;
+}
+.mypanel.floating .curses-row .hint { color: var(--text); font-size: 0.88em; }
 /* Die Ausruestungs-Slots duerfen (anders als Titel/Abzeichen) nie umbrechen -
    sonst waechst die Leiste bei 6 Slots + langen Kartennamen unkontrolliert in
    die Hoehe. Stattdessen scrollt diese eine Reihe bei Bedarf seitlich, die

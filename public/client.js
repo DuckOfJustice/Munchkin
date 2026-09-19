@@ -1451,12 +1451,30 @@
     if (pa.kind === 'choice') {
       div.innerHTML = `<h3>✨ "${escapeHtml(pa.cardName)}" - Wahl</h3>`;
       const row = document.createElement('div');
-      row.className = 'row gap wrap';
-      pa.options.forEach((opt) => {
-        const btn = mkBtn(opt.label, () => socket.emit('resolveCardChoice', { optionId: opt.id }));
-        btn.className = 'primary';
-        row.appendChild(btn);
-      });
+      // Zeigt jede Option als volle Kachel statt als reinen Text-Knopf, wenn
+      // ALLE Options-Ids echte Karten sind (z.B. FINDE EINE KARTE, FLOHMARKT)
+      // - man sieht dann tatsaechlich, welche Karte man waehlt, statt nur
+      // "NAME (kategorie)" als Knopftext zu lesen (Bugreport 2026-09-19).
+      // Gemischte Listen (z.B. mit einer "keine Karte"-Option) behalten die
+      // schlichten Text-Knoepfe, weil sich dafuer keine Kachel zeichnen laesst.
+      const alleEchtenKarten = pa.options.length > 0 && pa.options.every((o) => !!cardIndex[o.id]);
+      if (alleEchtenKarten) {
+        row.className = 'cardgrid';
+        pa.options.forEach((opt) => {
+          const tile = cardTile(opt.id, {});
+          const btn = mkBtn('Wählen', () => socket.emit('resolveCardChoice', { optionId: opt.id }));
+          btn.className = 'primary';
+          tile.querySelector('.ctbody').appendChild(btn);
+          row.appendChild(tile);
+        });
+      } else {
+        row.className = 'row gap wrap';
+        pa.options.forEach((opt) => {
+          const btn = mkBtn(opt.label, () => socket.emit('resolveCardChoice', { optionId: opt.id }));
+          btn.className = 'primary';
+          row.appendChild(btn);
+        });
+      }
       div.appendChild(row);
     } else if (pa.kind === 'targetPlayer') {
       div.innerHTML = `<h3>✨ "${escapeHtml(pa.cardName)}" - ${escapeHtml(pa.prompt || 'Ziel wählen')}</h3>`;
@@ -1591,7 +1609,9 @@
     if (label) label.textContent = isSpectator ? `👀 ${p ? p.name : '...'}` : 'Meine Figur';
     if (!p) {
       // Niemand im Raum (noch) oder Zuschauer:in ohne Auswahl - Panel/Hand leeren.
-      ['myLevel', 'myStrength', 'myBadges', 'myEquip', 'myHand'].forEach((id) => { const el = $(id); if (el) el.innerHTML = ''; });
+      ['myLevel', 'myStrength', 'myBadges', 'myCurses', 'myEquip', 'myHand'].forEach((id) => { const el = $(id); if (el) el.innerHTML = ''; });
+      const curses = $('myCurses');
+      if (curses) curses.classList.add('hidden');
       return;
     }
     $('myLevel').textContent = p.level;
@@ -1610,7 +1630,16 @@
     if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)', p.raceCapCard));
     if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)', p.classCapCard));
     if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)', p.powerGroupCapCard));
-    curseTags(p, badges);
+
+    // Anhaltende Flueche bekommen eine eigene Zeile (siehe #myCurses in
+    // index.html) statt zusammen mit Stufe/Rasse/Klasse in einer Zeile zu
+    // laufen - nur sichtbar, solange tatsaechlich ein Fluch aktiv ist.
+    const curses = $('myCurses');
+    if (curses) {
+      curses.innerHTML = '';
+      curseTags(p, curses);
+      curses.classList.toggle('hidden', !(p.activeCurses || []).length);
+    }
 
     const equip = $('myEquip');
     equip.innerHTML = '';

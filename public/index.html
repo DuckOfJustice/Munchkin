@@ -137,6 +137,12 @@
         <span id="myStrength" class="tag"></span>
         <div id="myBadges" class="row gap wrap"></div>
       </div>
+      <!-- Eigene, rot getoente Zeile NUR fuer anhaltende Flueche (siehe
+           curseTags) - vorher liefen die (teils satzlangen) Fluch-Hinweise
+           zusammen mit Stufe/Rasse/Klasse in einer Zeile durcheinander und
+           liefen optisch aus dem Panel heraus. Bleibt komplett versteckt,
+           solange niemand verflucht ist (siehe renderMyPanel). -->
+      <div id="myCurses" class="row gap wrap curses-row hidden"></div>
       <div id="myEquip" class="row gap wrap"></div>
       <button id="myPanelToggle" class="ghost small mypanel-toggle" title="Ausrüstung ein-/ausklappen">▾</button>
     </section>

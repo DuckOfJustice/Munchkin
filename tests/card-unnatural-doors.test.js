@@ -13,7 +13,7 @@ const {
   fleeModifierParts, monsterRefusesTarget, monsterSeesRace, hasRace,
   handleAttachCard, attachmentBonusSum,
   handleThiefSteal, handleThiefBackstab, handlePlayCurseFromHand,
-  handleUseClassCombatDiscard, baseStrength
+  handleUseClassCombatDiscard, baseStrength, handItemIds
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -647,35 +647,47 @@ function makeRoom(players) {
 
 {
   // Test: FINDE EINE KARTE
+  // "Schau dir die drei NAECHSTEN Tuerkarten an" = die als naechstes gezogen
+  // werden. drawDoor() zieht per pop() vom ENDE des doorDeck-Arrays - das
+  // Ende ist also "oben". Bugreport 2026-09-19: die Karte griff bisher die
+  // UNTERSTEN drei Karten ab (splice(0,3)) statt der obersten, und legte sie
+  // per unshift() auch wieder unten an.
   const p1 = makePlayer('P1');
   const room = makeRoom([p1]);
   const cardId = findCard('FINDE EINE KARTE').id;
   p1.hand.push(cardId);
-  
+
   const c1 = findCard('GEMEINE GHOULE').id;
   const c2 = findCard('WUNSCHRING').id;
   const c3 = findCard('TOD').id;
-  room.doorDeck = [c1, c2, c3, findCard('TOD').id];
-  
+  const bottomFiller = findCard('TOD').id;
+  // bottomFiller liegt UNTER den drei zur Wahl stehenden Karten (vorn im
+  // Array) und darf von der Aktion nicht angefasst werden.
+  room.doorDeck = [bottomFiller, c1, c2, c3];
+
   handleUseCardPower(room, p1.id, cardId);
   assert.strictEqual(room.pendingCardAction.kind, 'choice');
   assert.strictEqual(room.pendingCardAction.options.length, 3);
-  
+
   // Waehle c2 fuer ganz oben
   const opt1 = room.pendingCardAction.options.find(o => o.id === c2).id;
   handleResolveCardChoice(room, p1.id, opt1);
   assert.strictEqual(room.pendingCardAction.kind, 'choice', 'Noch nicht fertig, zweite Wahl');
   assert.strictEqual(room.pendingCardAction.options.length, 2);
-  
+
   // Waehle c3 fuer als zweites
   const opt2 = room.pendingCardAction.options.find(o => o.id === c3).id;
   handleResolveCardChoice(room, p1.id, opt2);
-  
-  // Fertig! Die Reihenfolge auf dem Deck muss jetzt sein: c2, c3, c1 (da c1 uebrig blieb)
+
+  // Fertig! Von oben (=Ende des Arrays, wird zuerst gezogen) nach unten muss
+  // jetzt gelten: c2, c3, c1 (c1 blieb uebrig) - und bottomFiller bleibt ganz
+  // unten (vorn im Array) unangetastet liegen.
   assert.strictEqual(room.pendingCardAction, null, 'Aktion beendet');
-  assert.strictEqual(room.doorDeck[0], c2);
-  assert.strictEqual(room.doorDeck[1], c3);
-  assert.strictEqual(room.doorDeck[2], c1);
+  assert.strictEqual(room.doorDeck.length, 4, 'kein Kartenverlust');
+  assert.strictEqual(room.doorDeck[0], bottomFiller, 'die unberuehrte Karte bleibt ganz unten liegen');
+  assert.strictEqual(room.doorDeck[room.doorDeck.length - 1], c2, 'ganz oben (wird als naechstes gezogen)');
+  assert.strictEqual(room.doorDeck[room.doorDeck.length - 2], c3, 'als zweites');
+  assert.strictEqual(room.doorDeck[room.doorDeck.length - 3], c1, 'als drittes (automatisch uebrig geblieben)');
 }
 
 // --- WELLE A SCHÄTZE: Platzlose Gegenstände ---
@@ -685,7 +697,7 @@ function makeRoom(players) {
   const namen = [
     'BEGLEITER', 'FÜRCHTERLICHE FALSCHE ZÄHNE', 'GANZ HEILIGES BUCH',
     'TASCHE MIT KRÄHENFÜSSEN', 'SÜSSER SCHULTERDRACHE',
-    'STACHELIGER GENITALSCHONER', 'FALSCHER BART',
+    'STACHELIGER GENITALSCHONER', 'FALSCHER BART', 'LUSTIGES SCHWERT',
   ];
   for (const name of namen) {
     const c = findCard(name);
@@ -695,12 +707,29 @@ function makeRoom(players) {
   }
 }
 
+// LUSTIGES SCHWERT: in den Rohdaten eine normale 1-Hand-Waffe, soll aber wie
+// SINGENDES & TANZENDES SCHWERT als Spezialausruestung angelegt werden und
+// blockiert damit KEINE Hand (Ruling 2026-09-19, Bugreport: liess sich mit
+// beiden Haenden belegt nicht mehr anlegen).
+{
+  const p1 = makePlayer('P1');
+  const room = makeRoom([p1]);
+  const hammer = findCard('GESEGNETER HAMMER VON ST. UUUAAAAH');
+  const schwert = findCard('LUSTIGES SCHWERT');
+  p1.hand.push(hammer.id, schwert.id);
+  handleEquipItem(room, p1.id, hammer.id);
+  assert.ok(p1.equipped.hands.every((h) => h === hammer.id), 'Testannahme: beide Haende sind vom Hammer belegt');
+  handleEquipItem(room, p1.id, schwert.id); // OHNE Schummeln!
+  assert.ok(equippedItemIds(p1).includes(schwert.id), 'Lustiges Schwert ist trotz voller Hände anlegbar');
+  assert.ok(p1.equipped.special.includes(schwert.id), 'liegt auf dem Spezialplatz');
+  assert.ok(p1.equipped.hands.every((h) => h === hammer.id), 'der Hammer bleibt unangetastet in beiden Händen');
+  assert.ok(handItemIds(p1).has(schwert.id), 'zaehlt trotzdem als Waffe (slotKind bleibt hand)');
+}
+
 // --- WELLE A SCHÄTZE: Bedingte Kampfboni ---
-// Der gedruckte Bonus (2) ist bei diesen beiden Karten der GESAMTE Bonus,
-// nur fuer das genannte Geschlecht - kein "Grundbonus + Zusatz" wie bei
-// GEILER HELM/SCHÄDELHELM. Das falsche Geschlecht bekommt also 0, nicht den
-// gedruckten Wert (Bugreport 2026-09-19: Schulterdrache gab den Bonus vorher
-// an alle, unabhaengig vom Geschlecht).
+// SÜSSER SCHULTERDRACHE: additiv wie GEILER HELM/SCHÄDELHELM - Grundbonus
+// (+2) gilt fuer alle, Frauen bekommen den Frauen-Bonus (+2) obendrauf, also
+// insgesamt +4. Bestaetigt korrekt am 2026-09-19 (nicht aendern!).
 {
   const p1 = makePlayer({ id: 'p1', name: 'Frau', gender: 'w' });
   const room = makeRoom([p1]);
@@ -710,8 +739,8 @@ function makeRoom(players) {
   const monster = findCard('LAHMER GOBLIN');
   startCombat(room, p1.id, [monster.id], { fromHand: false });
   const t1 = combatTotals(room);
-  // Frau: Stufe 5 + Frauen-Bonus 2 = 7 (kein zusaetzlicher Grundbonus)
-  assert.strictEqual(t1.playerStrength, 7, 'Schulterdrache gibt Frauen +2');
+  // Frau: Stufe 5 + Drache Basis 2 + Frauen-Bonus 2 = 9
+  assert.strictEqual(t1.playerStrength, 9, 'Schulterdrache +4 für Frauen');
   room.combat = null;
 }
 {
@@ -723,10 +752,12 @@ function makeRoom(players) {
   const monster = findCard('LAHMER GOBLIN');
   startCombat(room, p1.id, [monster.id], { fromHand: false });
   const t1 = combatTotals(room);
-  // Mann: Stufe 5 + 0 = 5 - kein Bonus fuer das falsche Geschlecht.
-  assert.strictEqual(t1.playerStrength, 5, 'Schulterdrache gibt Männern keinen Bonus');
+  // Mann: Stufe 5 + Drache Basis 2 (gilt fuer alle) = 7
+  assert.strictEqual(t1.playerStrength, 7, 'Schulterdrache gibt Männern den Grundbonus +2');
   room.combat = null;
 }
+// STACHELIGER GENITALSCHONER: anders als Schulterdrache KEIN Grundbonus fuer
+// alle - der gedruckte Wert (2) ist der gesamte Bonus, nur fuer Maenner.
 {
   const p1 = makePlayer({ id: 'p1', name: 'Mann', gender: 'm' });
   const room = makeRoom([p1]);
