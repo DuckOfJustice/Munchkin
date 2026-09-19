@@ -450,7 +450,13 @@ function equippedBonusSum(player, room, excludeIds) {
     // Rueckfall auf den Bonus der Spezialplatz-Regel: das EISKALTE HÄNDCHEN
     // ist eine Monsterkarte und nennt in den Rohdaten selbst keinen Bonus.
     const regelBonus = (specialSlotRule(c) || {}).bonus || 0;
-    return sum + (c && c.bonus ? c.bonus : regelBonus) + attachmentBonusSum(room, id);
+    // GENDER_ONLY_BONUS_ITEMS (SÜSSER SCHULTERDRACHE, STACHELIGER
+    // GENITALSCHONER): ihr gedruckter Bonus gilt NICHT unconditioniert -
+    // er kommt ausschliesslich ueber ITEM_CONDITIONAL_BONUS
+    // (conditionalItemBonusSum), je nach Geschlecht. Sonst bekaeme das
+    // falsche Geschlecht faelschlich den vollen Bonus mit.
+    const grundBonus = (c && GENDER_ONLY_BONUS_ITEMS.has(c.name)) ? 0 : (c && c.bonus ? c.bonus : regelBonus);
+    return sum + grundBonus + attachmentBonusSum(room, id);
   }, 0);
 }
 
@@ -502,7 +508,13 @@ function raceItemBonusSum(player, excludeIds) {
 }
 
 function baseStrength(player, room) {
-  return player.level + equippedBonusSum(player, room) + raceItemBonusSum(player) + hellknightArmorBonus(player);
+  // VERFLUCHTER GEGENSTAND: "Er verliert seine Kraefte" gilt dauerhaft, nicht
+  // nur waehrend combatTotals rechnet - sonst zeigt die staendig sichtbare
+  // Kampfstaerke (Spielerliste, "Meine Figur") den verfluchten Bonus weiter
+  // an, obwohl er im eigentlichen Kampf schon korrekt rausfliegt (siehe
+  // combatTotals/excludeIds).
+  const excludeIds = cursedItemIds(player);
+  return player.level + equippedBonusSum(player, room, excludeIds) + raceItemBonusSum(player, excludeIds) + hellknightArmorBonus(player);
 }
 
 // ITEM_CONDITIONAL_BONUS: siehe src/cards/passives.js (dort zusammen mit den
@@ -3048,6 +3060,7 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
+  GENDER_ONLY_BONUS_ITEMS,
 } = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
@@ -4147,6 +4160,20 @@ function combatConditionalBonusFields(room) {
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   const monsters = c.monsterIds.map(card);
   const totals = combatTotals(room);
+  // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Dieselbe Bedingung wie
+  // in resolveCombat (dort tatsaechlich entscheidend), hier nur zur ANZEIGE:
+  // der Client zeigt die eigene Kampfstaerke bei Gleichstand normalerweise
+  // rot ("verloren") an - fuer eine Kriegerin/einen Krieger ist ein
+  // Gleichstand aber ein Sieg, also nicht rot. Die anderen Verlust-Zwaenge
+  // (LUSTMONSTER ohne Hilfe, TODESANGST, KRAKZILLA-Schwert) gehen vor, genau
+  // wie bei der echten Auswertung.
+  const lustOhneHilfe = combatHasMonster(room, MONSTER_REQUIRES_OTHER_GENDER) && !passendeHilfe(room);
+  const angstVorUntoten = combatHasUndead(room) && hatUntotenAngst(actor);
+  const krakzillaSchwertZwang = monsters.some((m) => m && m.name === 'KRAKZILLA')
+    && equippedItemIds(actor).some((id) => (card(id) || {}).name === 'ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT');
+  const kampfVerloren = lustOhneHilfe || angstVorUntoten || krakzillaSchwertZwang;
+  const warriorTieWins = !kampfVerloren && totals.playerStrength === totals.monsterStrength
+    && combatParticipants(room).some((p) => hasClass(p, 'KRIEGER'));
   return {
     actorConditionalBonus: conditionalItemBonusSum(actor, monsters, combatHasUndead(room)),
     helperConditionalBonus: helper ? conditionalItemBonusSum(helper, monsters, combatHasUndead(room)) : 0,
@@ -4163,6 +4190,7 @@ function combatConditionalBonusFields(room) {
     ignoresBonuses: combatHasMonster(room, MONSTER_IGNORES_BONUSES),
     forbidsHelp: combatHasMonster(room, MONSTER_FORBIDS_HELP),
     autoKilledMonsters: monsters.filter((m) => monsterAutoKilled(m, [actor, helper].filter(Boolean))).map((m) => m.name),
+    warriorTieWins,
   };
 }
 

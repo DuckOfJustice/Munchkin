@@ -1068,9 +1068,16 @@
     const ichFliehe = c.fleeingId === myInfo.playerId;
     const iAmHelper = c.helperId === myInfo.playerId;
 
+    // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Der Server sagt uns
+    // ueber c.warriorTieWins, ob genau dieser Fall vorliegt (inkl. der
+    // Verlust-Zwaenge wie LUSTMONSTER/TODESANGST, die auch bei Kriegern
+    // vorgehen) - dann zaehlt Gleichstand als Sieg und die Zahl darf nicht
+    // rot ("verloren") aussehen.
+    const geradeGewonnen = playerStrength > monsterStrength
+      || (playerStrength === monsterStrength && c.warriorTieWins);
     const strengthRow = document.createElement('div');
     strengthRow.className = 'strengthrow';
-    strengthRow.innerHTML = `<div>Ihr: <span class="${playerStrength > monsterStrength ? 'strengthgood' : 'strengthbad'}">${playerStrength}</span></div>` +
+    strengthRow.innerHTML = `<div>Ihr: <span class="${geradeGewonnen ? 'strengthgood' : 'strengthbad'}">${playerStrength}</span></div>` +
       `<div class="vs">vs.</div><div>Monster: <b>${monsterStrength}</b></div>`;
     div.appendChild(strengthRow);
 

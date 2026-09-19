@@ -13,7 +13,7 @@ const {
   fleeModifierParts, monsterRefusesTarget, monsterSeesRace, hasRace,
   handleAttachCard, attachmentBonusSum,
   handleThiefSteal, handleThiefBackstab, handlePlayCurseFromHand,
-  handleUseClassCombatDiscard
+  handleUseClassCombatDiscard, baseStrength
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -370,6 +370,23 @@ function makeRoom(players) {
     'verflucht zaehlen weder der Gegenstand noch sein Anhang');
 }
 
+// --- VERFLUCHTER GEGENSTAND: auch AUSSERHALB des Kampfes keine Kraft mehr --
+// Bugreport 2026-09-19: der verfluchte Gegenstand gab weiterhin seinen Bonus
+// - nicht im Kampf (das prueft der Test oben bereits korrekt), sondern in der
+// staendig sichtbaren Kampfstaerke (Spielerliste/"Meine Figur"), die
+// baseStrength() liefert und die frueher keine Flueche ausschloss.
+{
+  const waffe = ALL_CARDS.find((x) => x.category === 'item' && x.slotKind === 'hand'
+    && x.handsCost === 1 && (x.bonus || 0) > 0);
+  const p = makePlayer({ hand: [waffe.id] });
+  const room = makeRoom([p]);
+  handleEquipItem(room, p.id, waffe.id);
+  const vorher = baseStrength(p, room);
+  applyPrimitiveAction(room, p, { type: 'curseItem', itemId: waffe.id, cardId: null });
+  assert.strictEqual(baseStrength(p, room), vorher - (waffe.bonus || 0),
+    'verfluchter Gegenstand zaehlt auch ausserhalb des Kampfes nicht mehr zur Kampfstaerke');
+}
+
 // --- VERFLUCHTER GEGENSTAND: man wird ihn nicht los ------------------------
 // "Du kannst ihn nicht ablegen oder loswerden, bis der Fluch aufgehoben wird."
 // Drei Wege: ablegen, verkaufen, verschenken/tauschen.
@@ -679,6 +696,11 @@ function makeRoom(players) {
 }
 
 // --- WELLE A SCHÄTZE: Bedingte Kampfboni ---
+// Der gedruckte Bonus (2) ist bei diesen beiden Karten der GESAMTE Bonus,
+// nur fuer das genannte Geschlecht - kein "Grundbonus + Zusatz" wie bei
+// GEILER HELM/SCHÄDELHELM. Das falsche Geschlecht bekommt also 0, nicht den
+// gedruckten Wert (Bugreport 2026-09-19: Schulterdrache gab den Bonus vorher
+// an alle, unabhaengig vom Geschlecht).
 {
   const p1 = makePlayer({ id: 'p1', name: 'Frau', gender: 'w' });
   const room = makeRoom([p1]);
@@ -688,8 +710,21 @@ function makeRoom(players) {
   const monster = findCard('LAHMER GOBLIN');
   startCombat(room, p1.id, [monster.id], { fromHand: false });
   const t1 = combatTotals(room);
-  // Frau: Stufe 5 + Drache Basis 2 + Frauen-Bonus 2 = 9
-  assert.strictEqual(t1.playerStrength, 9, 'Schulterdrache +4 für Frauen');
+  // Frau: Stufe 5 + Frauen-Bonus 2 = 7 (kein zusaetzlicher Grundbonus)
+  assert.strictEqual(t1.playerStrength, 7, 'Schulterdrache gibt Frauen +2');
+  room.combat = null;
+}
+{
+  const p1 = makePlayer({ id: 'p1', name: 'Mann', gender: 'm' });
+  const room = makeRoom([p1]);
+  const drache = findCard('SÜSSER SCHULTERDRACHE');
+  p1.hand.push(drache.id);
+  handleEquipItem(room, p1.id, drache.id);
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  const t1 = combatTotals(room);
+  // Mann: Stufe 5 + 0 = 5 - kein Bonus fuer das falsche Geschlecht.
+  assert.strictEqual(t1.playerStrength, 5, 'Schulterdrache gibt Männern keinen Bonus');
   room.combat = null;
 }
 {
@@ -701,8 +736,21 @@ function makeRoom(players) {
   const monster = findCard('LAHMER GOBLIN');
   startCombat(room, p1.id, [monster.id], { fromHand: false });
   const t = combatTotals(room);
-  // Mann: Stufe 5 + Genitalschoner Basis 2 + Männer-Bonus 2 = 9
-  assert.strictEqual(t.playerStrength, 9, 'Genitalschoner +4 für Männer');
+  // Mann: Stufe 5 + Männer-Bonus 2 = 7 (kein zusaetzlicher Grundbonus)
+  assert.strictEqual(t.playerStrength, 7, 'Genitalschoner gibt Männern +2');
+  room.combat = null;
+}
+{
+  const p1 = makePlayer({ id: 'p1', name: 'Frau', gender: 'w' });
+  const room = makeRoom([p1]);
+  const genital = findCard('STACHELIGER GENITALSCHONER');
+  p1.hand.push(genital.id);
+  handleEquipItem(room, p1.id, genital.id);
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  const t = combatTotals(room);
+  // Frau: Stufe 5 + 0 = 5 - kein Bonus fuer das falsche Geschlecht.
+  assert.strictEqual(t.playerStrength, 5, 'Genitalschoner gibt Frauen keinen Bonus');
   room.combat = null;
 }
 

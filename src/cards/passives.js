@@ -566,11 +566,22 @@ module.exports = (ctx) => {
     // etwas Untotes steht - das schliesst die Verstaerkerkarte UNTOT ein
     // ("Das Monster zaehlt jetzt als Untoter fuer alle Zwecke").
     'GHOULPEITSCHE': (player, monsters, untot) => (untot ? 3 : 0),
-    // "+2 Bonus für Frauen" - Zusatz zum Grundbonus (+2), Frauen also +4.
+    // "+2 Bonus für Frauen" - anders als GEILER HELM/SCHÄDELHELM KEIN Zusatz
+    // zu einem Grundbonus: der gedruckte Wert (2) ist der GESAMTE Bonus, den
+    // es nur für Frauen gibt. equippedBonusSum zaehlt den gedruckten Bonus
+    // dieser Karte deshalb bewusst NICHT mit (siehe GENDER_ONLY_BONUS_ITEMS) -
+    // sonst bekaemen auch Maenner faelschlich +2.
     'SÜSSER SCHULTERDRACHE': (player) => (istGeschlecht(player, 'w') ? 2 : 0),
-    // "+2 Bonus für Männer" - Zusatz zum Grundbonus (+2), Männer also +4.
+    // "+2 Bonus für Männer" - gleiche Bauform wie SÜSSER SCHULTERDRACHE.
     'STACHELIGER GENITALSCHONER': (player) => (istGeschlecht(player, 'm') ? 2 : 0),
   };
+
+  // Gegenstaende, deren GESAMTER Kampfbonus an eine Bedingung geknuepft ist
+  // (kein "Grundbonus + Zusatz" wie bei GEILER HELM), siehe ITEM_CONDITIONAL_BONUS
+  // oben. equippedBonusSum ignoriert den gedruckten bonus-Wert dieser Karten
+  // komplett - der volle Bonus kommt ausschliesslich ueber
+  // ITEM_CONDITIONAL_BONUS/conditionalItemBonusSum, je nach Bedingung.
+  const GENDER_ONLY_BONUS_ITEMS = new Set(['SÜSSER SCHULTERDRACHE', 'STACHELIGER GENITALSCHONER']);
 
   // Karten, die angelegt werden, aber auf keinen der klassischen Plaetze
   // gehoeren: Kartenname -> Platz in player.equipped (plus optionale
@@ -644,5 +655,6 @@ module.exports = (ctx) => {
     TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
     GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
     BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
+    GENDER_ONLY_BONUS_ITEMS,
   };
 };
