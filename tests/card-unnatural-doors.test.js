@@ -476,6 +476,61 @@ function makeRoom(players) {
   assert.strictEqual(p1.hand.length, 0, 'p1 hat alle Handkarten verloren');
 }
 
+﻿
+// --- Welle B: Targeting System fuer Tuerkarten ------------------------------
+{
+  const p1 = makePlayer({ id: 'p1', name: 'Spieler 1' });
+  const room = makeRoom([p1]);
+  raeume.push(room);
+  
+  room.doorDiscard.push(findCard('TOD').id); // Vorbereiten, da nicht im Deck
+  room.doorDiscard.push(findCard('ABGEBRANNT').id);
+  
+  startCombat(room, p1.id, [findCard('TOPFPFLANZE').id, findCard('LAHMER GOBLIN').id], { fromHand: true });
+  
+
+  
+  const tod = findCard('TOD').id;
+  p1.hand.push(tod);
+  handlePlayCombatCard(room, p1.id, tod);
+  
+  assert.ok(room.pendingCardAction, 'Monster-Auswahl sollte offen sein');
+  assert.strictEqual(room.pendingCardAction.kind, 'choice');
+  assert.strictEqual(room.pendingCardAction.options.length, 2);
+}
+
+﻿
+// --- Welle B: TOD & ABGEBRANNT ----------------------------------------------
+{
+  const { startCombat, handlePlayCombatCard, resolveCombatWin } = require('../server.js');
+  const p1 = makePlayer({ id: 'p1', name: 'Spieler 1' });
+  const p2 = makePlayer({ id: 'p2', name: 'Helfer 1' });
+  const room = makeRoom([p1, p2]);
+  raeume.push(room);
+  room.treasureDeck = [findCard('1.000 GOLDSTÜCKE').id, findCard('AMEISENHÜGEL AUFKOCHEN').id];
+
+  // TOD
+  startCombat(room, p1.id, [findCard('LAHMER GOBLIN').id], { fromHand: true });
+  const tod = findCard('TOD').id;
+  const startHand = p1.hand.length;
+  p1.hand.push(tod);
+  handlePlayCombatCard(room, p1.id, tod);
+
+  assert.ok(!room.combat, 'TOD beendet den Kampf, da letztes Monster');
+  assert.strictEqual(p1.hand.length, startHand + 1, '1 Schatz gezogen (TOD entfernt das Monster mit leavesTreasure)');
+
+  // ABGEBRANNT
+  startCombat(room, p1.id, [findCard('TOPFPFLANZE').id], { fromHand: true }); // 2 Schaetze
+  const abg = findCard('ABGEBRANNT').id;
+  p1.hand.push(abg);
+  handlePlayCombatCard(room, p1.id, abg);
+
+  assert.ok(room.combat.zeroTreasureMonsterIds);
+  resolveCombatWin(room); // Win
+  const rewards = p1.lastReward;
+  assert.strictEqual(rewards.cardIds.length, 0, 'ABGEBRANNT entfernt alle Basis-Schaetze');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');
 

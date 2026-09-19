@@ -1632,37 +1632,37 @@ function applyPrimitiveAction(room, player, action) {
       return `Ausrüstung abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
     }
     case 'curseEdelmut': {
-      const victim = findPlayer(room, action.victim);
-      const others = playerQueueFrom(room, victim, 'after').filter((id) => id !== action.victim);
+      const victim = (action.victim ? findPlayer(room, action.victim) : player) || player;
+      const others = playerQueueFrom(room, victim, 'after').filter((id) => id !== victim.id);
       if (others.length === 0) return 'hat niemanden zum Beschenken';
-      const queueIds = others.map(() => action.victim);
+      const queueIds = others.map(() => victim.id);
       openQueuedCardAction(room, (card(action.cardId) || {}).name || 'EDELMUT', queueIds, () => {
         const nextReceiverId = others.shift();
         if (!nextReceiverId) return null;
-        const victim = findPlayer(room, action.victim);
+        const currentVictim = findPlayer(room, victim.id);
         const receiver = findPlayer(room, nextReceiverId);
-        if (!victim || !receiver) return null;
+        if (!currentVictim || !receiver) return null;
         
-        const equip = equippedItemIds(victim);
+        const equip = equippedItemIds(currentVictim);
         if (equip.length > 0) {
           return {
-            playerId: victim.id,
+            playerId: currentVictim.id,
             kind: 'chooseCard',
             prompt: `Gegenstand für ${receiver.name} wählen`,
             candidateIds: equip,
             giveTo: receiver.id
           };
-        } else if (victim.hand.length > 0) {
-          const count = Math.min(2, victim.hand.length);
+        } else if (currentVictim.hand.length > 0) {
+          const count = Math.min(2, currentVictim.hand.length);
           const drawn = [];
           for (let i = 0; i < count; i++) {
-             const id = victim.hand[Math.floor(Math.random() * victim.hand.length)];
-             removeFromHand(victim, id);
-             clearCheatIfLost(victim, id);
+             const id = currentVictim.hand[Math.floor(Math.random() * currentVictim.hand.length)];
+             removeFromHand(currentVictim, id);
+             clearCheatIfLost(currentVictim, id);
              drawn.push(id);
           }
           drawn.forEach((id) => receiver.hand.push(id));
-          log(room, `${receiver.name} zieht ${drawn.length} Handkarte(n) von ${victim.name}.`);
+          log(room, `${receiver.name} zieht ${drawn.length} Handkarte(n) von ${currentVictim.name}.`);
           return null;
         }
         return null;
@@ -2616,7 +2616,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -4248,6 +4248,12 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     }
     // WANDERNDES MONSTER: "Dein Monster schliesst sich dem schon kaempfenden
     // an - addiere ihre Kampfstaerken."
+    case 'zeroMonsterTreasure': {
+      const mid = action.monsterId || c.monsterIds[0];
+      c.zeroTreasureMonsterIds = c.zeroTreasureMonsterIds || [];
+      c.zeroTreasureMonsterIds.push(mid);
+      return `reduziert die Schätze von "${card(mid).name}" auf 0`;
+    }
     case 'combatAddMonster': {
       removeFromHand(player, action.cardId);
       c.monsterIds.push(action.cardId);
@@ -4468,6 +4474,22 @@ function handlePlayCombatCard(room, playerId, cardId) {
       touchRoom(room);
       return;
     }
+
+    const needsTarget = ['removeOneMonster', 'zeroMonsterTreasure', 'duplicateMonsterMommy'];
+    const candidates = doorSpec.validMonsterIds || room.combat.monsterIds;
+    if (needsTarget.includes(doorSpec.type) && candidates.length > 1) {
+      openCardChoice(room, player, c.name, candidates.map((mId, i) => ({
+        id: `mon-${i}-${mId}`,
+        label: `Auf "${card(mId).name}" spielen`,
+        action: Object.assign({}, doorSpec, { monsterId: mId }),
+      })));
+      room.pendingCardAction.sourceCardId = cardId;
+      log(room, `${player.name} spielt "${c.name}" im Kampf - Monster-Wahl nötig.`, [cardId]);
+      announceCardPlay(room, player, cardId, 'Ziel wird gewählt');
+      touchRoom(room);
+      return;
+    }
+
     removeFromHand(player, cardId);
     discardCard(room, cardId);
     const desc = applyCombatPotionAction(room, player, doorSpec, c);
@@ -4626,7 +4648,10 @@ function applyCombatReaction(room, player, cardId, regel) {
 function kampfSchatzZahl(room) {
   const c = room.combat;
   if (!c) return 0;
-  const basis = c.monsterIds.reduce((sum, id) => sum + ((card(id) || {}).treasureCount || 0), 0);
+  const basis = c.monsterIds.reduce((sum, id) => {
+    if (c.zeroTreasureMonsterIds && c.zeroTreasureMonsterIds.includes(id)) return sum;
+    return sum + ((card(id) || {}).treasureCount || 0);
+  }, 0);
   return Math.max(0, c.treasureDelta ? Math.max(1, basis + c.treasureDelta) : basis);
 }
 
@@ -4887,7 +4912,10 @@ function resolveCombatWin(room) {
   const extras = monsterVictoryExtras(room, actor, helper, monsters);
   const levelsGained = monsters.length + extras.levels;
   setLevel(actor, actor.level + levelsGained);
-  const baseTreasures = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0) + extras.treasures;
+  const baseTreasures = monsters.reduce((sum, m) => {
+    if (c.zeroTreasureMonsterIds && c.zeroTreasureMonsterIds.includes(m.id)) return sum;
+    return sum + (m.treasureCount || 0);
+  }, 0) + extras.treasures;
   // PIÑATA: "Wenn Pinata besiegt wird, zieht jedes Gruppenmitglied einen
   // Schatz aufgedeckt. Es spielt keine Rolle, wer am Kampf teilgenommen hat."
   // Additiv zur normalen Beute (die Piñata nennt selbst 0 Schaetze) - bei
