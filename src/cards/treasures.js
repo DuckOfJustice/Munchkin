@@ -265,7 +265,6 @@ module.exports = (ctx) => {
     'ABGEBRANNT': () => ({ type: 'zeroMonsterTreasure' }),
     'FREUNDLICH': () => ({ type: 'freundlichChoice' }),
     'MAMI': (player, room) => {
-      console.log('MAMI CALLED', room.combat.monsterIds.map(m => card(m).level));
       const validMonsterIds = room.combat.monsterIds.filter((m) => {
         const lv = card(m).level || 0;
         const hasBaby = (room.combat.monsterBonuses || []).some(b => b.monsterId === m && b.name === 'BABY');

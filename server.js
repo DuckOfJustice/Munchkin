@@ -4274,7 +4274,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.treasureDelta = (c.treasureDelta || 0) + 2;
       return 'lässt den Kampf weitergehen (Monster gibt +2 Schätze)';
     }
-    case 'duplicateMonsterMommy': { console.log('MAMI TRIGGERED', action.validMonsterIds);
+    case 'duplicateMonsterMommy': {
       const mid = action.monsterId || action.validMonsterIds[0];
       c.monsterIds.push(mid);
       c.mommyMonsterId = mid;
