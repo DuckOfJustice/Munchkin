@@ -966,7 +966,7 @@ function handleDrawDoor(room, playerId) {
       room.turnPhase = 'aerger';
       log(room, `Fluch "${c.name}" - aber ${player.name} trägt "${card(shield).name}": keine Wirkung. Phase 2: Auf Ärger aus sein.`, [id, shield]);
     } else {
-      fluchZiel(room, player, c, (opfer) => {
+      fluchZiel(room, player, player.id, c, (opfer) => {
         if (!opfer) {
           room.turnPhase = 'aerger';
           log(room, `Fluch "${c.name}" verpufft. Phase 2: Auf Ärger aus sein.`, [id]);
@@ -1015,8 +1015,16 @@ function handleDrawDoor(room, playerId) {
 // ponytail: die Wuerfe des PRÄCHTIGEN HUTS bleiben ohne Fenster - das sind
 // mehrere Wuerfe mehrerer Personen gleichzeitig, und room.pendingRoll traegt
 // genau einen. Aufruestweg: eine Kette aus Einzelfenstern.
-function fluchZiel(room, ziel, c, weiter) {
+function fluchZiel(room, ziel, casterId, c, weiter) {
   const traegt = (p, name) => equippedItemIds(p).find((id) => (card(id) || {}).name === name);
+
+  const alu = traegt(ziel, 'ALUFOLIEN-HUT');
+  if (alu && ziel.id !== casterId) {
+    // Alufolien-Hut wehrt Flüche ANDERER Spieler komplett ab.
+    log(room, `"${c.name}" prallt am Alufolien-Hut von ${ziel.name} ab und verpufft.`, [alu]);
+    weiter(null);
+    return;
+  }
 
   const hut = traegt(ziel, 'PRÄCHTIGER HUT');
   if (hut) {
@@ -1095,7 +1103,7 @@ function handlePlayCurseFromHand(room, playerId, cardId, targetId) {
   removeFromHand(player, cardId);
   discardCard(room, cardId);
   // PRÄCHTIGER HUT / AMULETT koennen den Fluch umlenken oder ganz abwehren.
-  fluchZiel(room, target, c, (opfer) => {
+  fluchZiel(room, target, player.id, c, (opfer) => {
     if (!opfer) {
       log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${target.name} - er verpufft.`, [cardId]);
       refreshCombatReady(room);
@@ -3593,7 +3601,8 @@ function classDiscardPower(room, player) {
   if (!c) return null;
   const flee = !!c.mustFlee;
   const table = flee ? CLASS_FLEE_DISCARD : CLASS_COMBAT_DISCARD;
-  const name = Object.keys(table).find((n) => hasClass(player, n));
+  const isPriestViaHammer = !flee && equippedItemIds(player).some(id => (card(id)||{}).name === 'GESEGNETER HAMMER VON ST. UUUAAAAH');
+  const name = Object.keys(table).find((n) => hasClass(player, n) || (n === 'PRIESTER' && isPriestViaHammer));
   if (!name) return null;
   const rule = table[name];
   if (rule.requiresUndead && !combatHasUndead(room)) return null;
@@ -3686,6 +3695,11 @@ function handleThiefBackstab(room, playerId, discardCardId, targetId) {
   const stichOMat = dieb && equippedItemIds(dieb).some((id) => BACKSTAB_ITEMS.has((card(id) || {}).name));
   if (!dieb || !opfer || (!hasClass(dieb, 'DIEB') && !stichOMat)) return;
   if (dieb.id === opfer.id) return;                                     // nicht sich selbst
+  if (equippedItemIds(opfer).some((id) => (card(id) || {}).name === 'HELM FÜR PERIPHERES SEHEN')) {
+    log(room, `${dieb.name} kann ${opfer.name} nicht in den Rücken fallen - der Helm für peripheres Sehen schützt.`);
+    touchRoom(room);
+    return;
+  }
   if (stinktierSperre(room, playerId)) {
     log(room, `${dieb.name} kommt am Riesenstinktier nicht vorbei - kein Rückenfall.`);
     touchRoom(room);
@@ -3740,6 +3754,11 @@ function handleThiefSteal(room, playerId, discardCardId, targetId) {
   if (!dieb || !opfer || dieb.id === opfer.id) return;
   if (!hasClass(dieb, 'DIEB') || !dieb.hand.includes(discardCardId)) return;
   if (room.pendingCardAction || room.pendingRoll) return; // keine fremde Auswahl ueberschreiben
+  if (equippedItemIds(opfer).some((id) => (card(id) || {}).name === 'HELM FÜR PERIPHERES SEHEN')) {
+    log(room, `${dieb.name} kann ${opfer.name} nicht bestehlen - der Helm für peripheres Sehen schützt.`);
+    touchRoom(room);
+    return;
+  }
   removeFromHand(dieb, discardCardId);
   discardCard(room, discardCardId);
   log(room, `${dieb.name} (Dieb) legt "${card(discardCardId).name}" ab und versucht, ${opfer.name} zu bestehlen.`, [discardCardId]);
