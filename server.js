@@ -4254,6 +4254,17 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.zeroTreasureMonsterIds.push(mid);
       return `reduziert die Schätze von "${card(mid).name}" auf 0`;
     }
+    case 'freundlichChoice': {
+      openCardChoice(room, player, sourceCard ? sourceCard.name : 'FREUNDLICH', [
+        { id: 'freundlich-take', label: 'Schatz nehmen und Kampf beenden', action: { type: 'endCombatNoLevel', leavesTreasure: true } },
+        { id: 'freundlich-fight', label: 'Weiterkämpfen (Monster gibt 2 extra Schätze)', action: { type: 'freundlichFightOn' } },
+      ]);
+      return null;
+    }
+    case 'freundlichFightOn': {
+      c.treasureDelta = (c.treasureDelta || 0) + 2;
+      return 'lässt den Kampf weitergehen (Monster gibt +2 Schätze)';
+    }
     case 'combatAddMonster': {
       removeFromHand(player, action.cardId);
       c.monsterIds.push(action.cardId);

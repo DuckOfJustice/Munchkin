@@ -263,6 +263,7 @@ module.exports = (ctx) => {
   const DOOR_COMBAT_CARDS = {
     'TOD': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
     'ABGEBRANNT': () => ({ type: 'zeroMonsterTreasure' }),
+    'FREUNDLICH': () => ({ type: 'freundlichChoice' }),
     // "Das Monster in diesem Raum hat Mittagspause. ... Der kaempfende Spieler
     // legt alle ihn angreifenden Monster ab und zieht sofort 2 Schaetze."
     // Feste 2 Schaetze - nicht der treasureCount der Monster.

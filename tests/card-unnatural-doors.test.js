@@ -531,6 +531,33 @@ function makeRoom(players) {
   assert.strictEqual(rewards.cardIds.length, 0, 'ABGEBRANNT entfernt alle Basis-Schaetze');
 }
 
+﻿
+// --- Welle B: FREUNDLICH ----------------------------------------------------
+{
+  const { startCombat, handlePlayCombatCard, handleResolveCardChoice } = require('../server.js');
+  const p1 = makePlayer({ id: 'p1', name: 'Spieler 1' });
+  const room = makeRoom([p1]);
+  raeume.push(room);
+  room.treasureDeck = [findCard('1.000 GOLDSTÜCKE').id, findCard('AMEISENHÜGEL AUFKOCHEN').id];
+
+  startCombat(room, p1.id, [findCard('LAUFENDE NASE').id], { fromHand: true });
+  
+  
+  
+  const fr = findCard('FREUNDLICH').id;
+  p1.hand.push(fr);
+  handlePlayCombatCard(room, p1.id, fr);
+  
+  assert.ok(room.pendingCardAction, 'FREUNDLICH oeffnet Wahl-Dialog');
+  assert.strictEqual(room.pendingCardAction.kind, 'choice');
+  assert.strictEqual(room.pendingCardAction.options.length, 2);
+  
+  // Waehle weiterkaempfen
+  handleResolveCardChoice(room, p1.id, room.pendingCardAction.options[1].id);
+  assert.ok(room.combat, 'Kampf geht weiter');
+  assert.strictEqual(room.pendingCardAction, null, 'Wahl beendet');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');
 
