@@ -7,7 +7,8 @@ const {
   UNDEAD_MONSTERS, handlePlayCombatCard,
   resolveConsequenceSpec, applyPrimitiveAction, cursedItemIds, unequipSlotCard,
   handleUnequipItem, handleSellItems, ownTradeIds, clearActiveCurseByKind,
-  handleResolveCardCardChoice, TREASURE_POWER_OVERRIDES,
+  handleResolveCardCardChoice, TREASURE_POWER_OVERRIDES, handleUseCardPower,
+  handleResolveMultiCardSelection, handleResolveCardChoice,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -593,6 +594,68 @@ function makeRoom(players) {
   assert.strictEqual(extras.treasures, 2, 'Mami gibt 1 Extra-Schatz + 1 Ausgleich für Baby');
 }
 
+
+
+
+{
+  // Test: SCHICKSALHAFTE KARTEN
+  const p1 = makePlayer('P1');
+  const room = makeRoom([p1]);
+  const cardId = findCard('SCHICKSALHAFTE KARTEN').id;
+  p1.hand.push(cardId);
+  const discard1 = findCard('GEMEINE GHOULE').id;
+  const discard2 = findCard('WUNSCHRING').id;
+  p1.hand.push(discard1);
+  p1.hand.push(discard2);
+  
+  room.doorDeck = [findCard('TOD').id, findCard('TOD').id];
+  room.treasureDeck = [findCard('TOD').id, findCard('TOD').id];
+  
+  handleUseCardPower(room, p1.id, cardId);
+  assert.strictEqual(room.pendingCardAction.kind, 'multiCardSelection');
+  
+  // Waehle beide Karten abwerfen und vom doorDeck ziehen
+  handleResolveMultiCardSelection(room, p1.id, [discard1, discard2], 'door');
+  assert.strictEqual(room.pendingCardAction, null, 'Aktion beendet');
+  assert.ok(!p1.hand.includes(discard1), 'Abgeworfene Karte 1 ist weg');
+  assert.ok(!p1.hand.includes(discard2), 'Abgeworfene Karte 2 ist weg');
+  assert.strictEqual(p1.hand.length, 2, '2 neue Karten auf der Hand');
+  assert.strictEqual(room.doorDiscard.includes(discard1), true, 'In Ablagestapel');
+}
+
+{
+  // Test: FINDE EINE KARTE
+  const p1 = makePlayer('P1');
+  const room = makeRoom([p1]);
+  const cardId = findCard('FINDE EINE KARTE').id;
+  p1.hand.push(cardId);
+  
+  const c1 = findCard('GEMEINE GHOULE').id;
+  const c2 = findCard('WUNSCHRING').id;
+  const c3 = findCard('TOD').id;
+  room.doorDeck = [c1, c2, c3, findCard('TOD').id];
+  
+  handleUseCardPower(room, p1.id, cardId);
+  assert.strictEqual(room.pendingCardAction.kind, 'choice');
+  assert.strictEqual(room.pendingCardAction.options.length, 3);
+  
+  // Waehle c2 fuer ganz oben
+  const opt1 = room.pendingCardAction.options.find(o => o.id === c2).id;
+  handleResolveCardChoice(room, p1.id, opt1);
+  assert.strictEqual(room.pendingCardAction.kind, 'choice', 'Noch nicht fertig, zweite Wahl');
+  assert.strictEqual(room.pendingCardAction.options.length, 2);
+  
+  // Waehle c3 fuer als zweites
+  const opt2 = room.pendingCardAction.options.find(o => o.id === c3).id;
+  handleResolveCardChoice(room, p1.id, opt2);
+  
+  // Fertig! Die Reihenfolge auf dem Deck muss jetzt sein: c2, c3, c1 (da c1 uebrig blieb)
+  assert.strictEqual(room.pendingCardAction, null, 'Aktion beendet');
+  assert.strictEqual(room.doorDeck[0], c2);
+  assert.strictEqual(room.doorDeck[1], c3);
+  assert.strictEqual(room.doorDeck[2], c1);
+}
+
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');
-

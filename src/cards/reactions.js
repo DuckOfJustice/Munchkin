@@ -30,6 +30,8 @@ module.exports = () => {
     // "Alle Priester steigen sofort 1 Stufe auf. Dies darf die Siegesstufe
     // sein." Kartenname in den Rohdaten ohne Umlaut.
     'GOTTLICHE INTERVENTION': () => ({ type: 'levelUpAllPriests' }),
+    'SCHICKSALHAFTE KARTEN': () => ({ type: 'multiCardSelection', actionType: 'schicksalhafteKarten' }),
+    'FINDE EINE KARTE': () => ({ type: 'findeEineKarte' }),
   };
 
   // Flueche, die NACH dem Ziehen weiterwirken (statt sofort und einmalig).

@@ -1326,6 +1326,28 @@ function slotLabelDe(slot) {
 // zurück.
 function applyPrimitiveAction(room, player, action) {
   switch (action.type) {
+    case 'findeEineKarteSort1': {
+      const pa = room.pendingCardAction;
+      const oldContext = action.context;
+      oldContext.sortedCards.push(action.cardId);
+      oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
+      const remaining = oldContext.cardsToSort;
+      const options = remaining.map(id => ({ id, label: card(id).name + ' (' + card(id).category + ')', action: { type: 'findeEineKarteSort2', cardId: id, context: oldContext } }));
+      openCardChoice(room, player, 'FINDE_EINE_KARTE_SORT2', options);
+      // Prevent finishCardAction from clearing pendingCardAction
+      pa.keepPending = true;
+      return 'wählt 1. Karte für ganz oben';
+    }
+    case 'findeEineKarteSort2': {
+      const oldContext = action.context;
+      oldContext.sortedCards.push(action.cardId);
+      oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
+      const lastId = oldContext.cardsToSort[0];
+      oldContext.sortedCards.push(lastId);
+      // Put them back on deck in reverse order (so index 0 is on top)
+      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.unshift(id));
+      return 'wählt 2. Karte, 3. ergibt sich automatisch. Stapel sortiert!';
+    }
     // Entscheidung bei Monstern mit Vorbeigeh-Option (BEKIFFTER GOLEM).
     case 'startRevealedCombat':
       startCombat(room, player.id, [action.cardId], { fromHand: false });
@@ -2478,6 +2500,28 @@ function stinktierStrafeAktiv(player) {
 
 function applyTargetAction(room, actor, target, action) {
   switch (action.type) {
+    case 'findeEineKarteSort1': {
+      const pa = room.pendingCardAction;
+      const oldContext = action.context;
+      oldContext.sortedCards.push(action.cardId);
+      oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
+      const remaining = oldContext.cardsToSort;
+      const options = remaining.map(id => ({ id, label: card(id).name + ' (' + card(id).category + ')', action: { type: 'findeEineKarteSort2', cardId: id, context: oldContext } }));
+      openCardChoice(room, player, 'FINDE_EINE_KARTE_SORT2', options);
+      // Prevent finishCardAction from clearing pendingCardAction
+      pa.keepPending = true;
+      return 'wählt 1. Karte für ganz oben';
+    }
+    case 'findeEineKarteSort2': {
+      const oldContext = action.context;
+      oldContext.sortedCards.push(action.cardId);
+      oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
+      const lastId = oldContext.cardsToSort[0];
+      oldContext.sortedCards.push(lastId);
+      // Put them back on deck in reverse order (so index 0 is on top)
+      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.unshift(id));
+      return 'wählt 2. Karte, 3. ergibt sich automatisch. Stapel sortiert!';
+    }
     case 'kartenSperre': {
       room.kartenSperren = (room.kartenSperren || []).concat({ geschuetzt: actor.id, gesperrt: target.id });
       return `${target.name} darf für den Rest des Zugs keine Karten mehr gegen ${actor.name} spielen`;
@@ -2567,6 +2611,26 @@ function handleUseCardPower(room, playerId, cardId) {
     touchRoom(room);
     return;
   }
+  if (spec.type === 'multiCardSelection') {
+    room.pendingCardAction = { kind: 'multiCardSelection', sourceCardId: cardId, actionType: spec.actionType };
+    log(room, `${player.name} spielt "${c.name}" und wählt Karten zum Abwerfen aus.`, [cardId]);
+    touchRoom(room);
+    return;
+  }
+  if (spec.type === 'findeEineKarte') {
+    if (room.doorDeck.length < 3) {
+      room.doorDeck = shuffle(room.doorDiscard).concat(room.doorDeck);
+      room.doorDiscard = [];
+    }
+    const top3 = room.doorDeck.splice(0, 3);
+    room.pendingCardAction = { kind: 'choice', context: { cardsToSort: top3, sortedCards: [] } };
+    const initialContext = { cardsToSort: top3, sortedCards: [] };
+    const options = top3.map(id => ({ id, label: `${card(id).name} (${card(id).category})`, action: { type: 'findeEineKarteSort1', cardId: id, context: initialContext } }));
+    openCardChoice(room, player, 'FINDE_EINE_KARTE_SORT1', options);
+    log(room, `${player.name} spielt "${c.name}" und sortiert die obersten Türkarten.`, [cardId]);
+    touchRoom(room);
+    return;
+  }
   if (spec.type === 'targetPlayer') {
     openCardTarget(room, player, c.name, spec.prompt, spec.action);
     log(room, `${player.name} spielt "${c.name}" - Ziel nötig.`, [cardId]);
@@ -2591,6 +2655,7 @@ function handleUseCardPower(room, playerId, cardId) {
 // weg und das Spiel lief ohne die Auswahl weiter.
 function finishCardAction(room, pa) {
   if (room.pendingCardAction !== pa) return;
+  if (pa.keepPending) return;
   if (room._queuedCardAction) advanceCardActionQueue(room);
   else { room.pendingCardAction = null; room._pendingCardActionResolvers = null; }
 }
@@ -4089,6 +4154,28 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
   if (!c) return '';
   const isAlchemistDoubled = hasPowerGroup(player, 'ALCHEMIST') && /nur\s+einmal\s+einsetzbar/i.test((sourceCard && sourceCard.text) || '');
   switch (action.type) {
+    case 'findeEineKarteSort1': {
+      const pa = room.pendingCardAction;
+      const oldContext = action.context;
+      oldContext.sortedCards.push(action.cardId);
+      oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
+      const remaining = oldContext.cardsToSort;
+      const options = remaining.map(id => ({ id, label: card(id).name + ' (' + card(id).category + ')', action: { type: 'findeEineKarteSort2', cardId: id, context: oldContext } }));
+      openCardChoice(room, player, 'FINDE_EINE_KARTE_SORT2', options);
+      // Prevent finishCardAction from clearing pendingCardAction
+      pa.keepPending = true;
+      return 'wählt 1. Karte für ganz oben';
+    }
+    case 'findeEineKarteSort2': {
+      const oldContext = action.context;
+      oldContext.sortedCards.push(action.cardId);
+      oldContext.cardsToSort = oldContext.cardsToSort.filter(id => id !== action.cardId);
+      const lastId = oldContext.cardsToSort[0];
+      oldContext.sortedCards.push(lastId);
+      // Put them back on deck in reverse order (so index 0 is on top)
+      oldContext.sortedCards.reverse().forEach(id => room.doorDeck.unshift(id));
+      return 'wählt 2. Karte, 3. ergibt sich automatisch. Stapel sortiert!';
+    }
     case 'modifier': {
       const amount = isAlchemistDoubled ? action.amount * 2 : action.amount;
       if (action.side === 'both') { c.actorModifier += amount; c.monsterModifier += amount; return `+${amount} für beide Seiten`; }
@@ -5723,6 +5810,28 @@ function handleUnequipItem(room, playerId, cardId) {
 function halblingSaleOpen(player) {
   return !!player && hasRace(player, 'HALBLING') && !player.halblingSaleUsed;
 }
+function handleResolveMultiCardSelection(room, playerId, cardIds, deck) {
+  const player = findPlayer(room, playerId);
+  if (!player) return;
+  const pAction = room.pendingCardAction;
+  if (!pAction || pAction.kind !== 'multiCardSelection' || pAction.actionType !== 'schicksalhafteKarten') return;
+  if (!cardIds.every(id => player.hand.includes(id))) return;
+  
+  cardIds.forEach(id => {
+    removeFromHand(player, id);
+    discardCard(room, id);
+  });
+  
+  const count = cardIds.length;
+  for (let i = 0; i < count; i++) {
+    const drawn = deck === 'door' ? drawDoor(room) : drawTreasure(room);
+    if (drawn) player.hand.push(drawn);
+  }
+  
+  log(room, `${player.name} hat ${count} Karten abgeworfen und neu aus dem ${deck === 'door' ? 'Türen' : 'Schätze'}-Stapel gezogen.`);
+  room.pendingCardAction = null;
+  touchRoom(room);
+}
 
 function handleSellItems(room, playerId, cardIds) {
   const player = findPlayer(room, playerId);
@@ -6492,6 +6601,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'equipItem', ({ cardId }) => act(socket, (room, pid) => handleEquipItem(room, pid, cardId)));
   onSafe(socket, 'unequipItem', ({ cardId }) => act(socket, (room, pid) => handleUnequipItem(room, pid, cardId)));
   onSafe(socket, 'playCheat', ({ cheatCardId, targetItemId }) => act(socket, (room, pid) => handlePlayCheat(room, pid, cheatCardId, targetItemId)));
+  onSafe(socket, 'resolveMultiCardSelection', ({ cardIds, deck }) => act(socket, (room, pid) => handleResolveMultiCardSelection(room, pid, cardIds, deck)));
   onSafe(socket, 'sellItems', ({ cardIds }) => act(socket, (room, pid) => handleSellItems(room, pid, cardIds)));
   onSafe(socket, 'attachCard', ({ attachCardId, targetItemId }) => act(socket, (room, pid) => handleAttachCard(room, pid, attachCardId, targetItemId)));
   onSafe(socket, 'playRaceOrClass', ({ cardId }) => act(socket, (room, pid) => handlePlayRaceOrClass(room, pid, cardId)));
@@ -6568,7 +6678,7 @@ module.exports = {
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, resolveCombat, handleAttemptFlee, baseStrength,
   handlePrepReady, darfAusruesten,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
-  POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, halblingSaleOpen, endTurn,
+  POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, halblingSaleOpen, endTurn, handleResolveMultiCardSelection,
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee, handlePlayCurseFromHand,
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
   SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS, newEquipped, handleEquipItem, handleUnequipItem, equippedItemIds,
