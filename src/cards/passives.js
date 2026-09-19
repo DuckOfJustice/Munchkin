@@ -212,6 +212,7 @@ module.exports = (ctx) => {
   const ITEM_GRANTS_TRAIT = {
     'FALSCHE OHREN': { race: 'ELF', nurMonster: true },
     'ZAUBERCOUCH': { class: 'ZAUBERER' },
+    'FALSCHER BART': { race: 'ZWERG', nurMonster: true },
   };
 
   // --- Kartenanhaenge --------------------------------------------------------
@@ -227,6 +228,7 @@ module.exports = (ctx) => {
     // "Permanent an einen beliebigen grossen Gegenstand anzubringen. Der
     // Gegenstand zaehlt nicht laenger als gross."
     'NÜTZLICHE GRIFFE': { bedingung: 'gross', label: 'Nützliche Griffe' },
+    '… DER VERDAMMNIS': { bedingung: 'kampfbonus', label: 'der Verdammnis' },
   };
 
   // --- Geschlecht ------------------------------------------------------------
@@ -458,6 +460,8 @@ module.exports = (ctx) => {
     // "Verleiht dir einen kranken Tritt, aber du hast jetzt -2 auf Weglaufen."
     'AM FUSS BEFESTIGTER STREITKOLBEN': -2,
     'ZAUBERCOUCH': -1, // "Wenn du es tust, erhaeltst du -1 auf Weglaufen."
+    'TASCHE MIT KRÄHENFÜSSEN': 1,  // "+1 für Weglaufen."
+    'BELAGERUNGSMASCHINE': -1,     // "Bist du in der Belagerungsmaschine, hast du -1 auf Weglaufen."
   };
   const FLEE_MONSTER_MOD = {
     'SCHNECKEN AUF SPEED': -2, // "Du hast -2 auf Weglaufen."

@@ -772,7 +772,7 @@ function makeRoom(players) {
 
 // Krakzilla-Schwert: Flucht-Zwang gegen Krakzilla
 {
-  const p1 = makePlayer({ id: 'p1', name: 'Held', level: 9 });
+  const p1 = makePlayer({ id: 'p1', name: 'Held', level: 20 });
   const room = makeRoom([p1]);
   const schwert = findCard('ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT');
   p1.hand.push(schwert.id);
