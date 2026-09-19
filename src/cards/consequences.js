@@ -389,7 +389,7 @@ module.exports = (ctx) => {
     // Reihenfolge, wiederkehrender Rundenend-Hook, neue Kampfauslösung
     // mitten in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-
     // Status) - bleiben bewusst manuell:
-    'EDELMUT': () => null,
+    'EDELMUT': () => ({ type: 'curseEdelmut' }),
     'HUNGRIGER RUCKSACK': () => null,
     'KLEINER FEHLER': () => null,
     'TEMPORÄRE ANMNESIE': () => null,

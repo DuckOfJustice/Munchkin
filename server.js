@@ -1631,6 +1631,44 @@ function applyPrimitiveAction(room, player, action) {
       player.equipped = { head: null, armor: null, feet: null, hands: [null, null] };
       return `Ausrüstung abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
     }
+    case 'curseEdelmut': {
+      const victim = findPlayer(room, action.victim);
+      const others = playerQueueFrom(room, victim, 'after').filter((id) => id !== action.victim);
+      if (others.length === 0) return 'hat niemanden zum Beschenken';
+      const queueIds = others.map(() => action.victim);
+      openQueuedCardAction(room, (card(action.cardId) || {}).name || 'EDELMUT', queueIds, () => {
+        const nextReceiverId = others.shift();
+        if (!nextReceiverId) return null;
+        const victim = findPlayer(room, action.victim);
+        const receiver = findPlayer(room, nextReceiverId);
+        if (!victim || !receiver) return null;
+        
+        const equip = equippedItemIds(victim);
+        if (equip.length > 0) {
+          return {
+            playerId: victim.id,
+            kind: 'chooseCard',
+            prompt: `Gegenstand für ${receiver.name} wählen`,
+            candidateIds: equip,
+            giveTo: receiver.id
+          };
+        } else if (victim.hand.length > 0) {
+          const count = Math.min(2, victim.hand.length);
+          const drawn = [];
+          for (let i = 0; i < count; i++) {
+             const id = victim.hand[Math.floor(Math.random() * victim.hand.length)];
+             removeFromHand(victim, id);
+             clearCheatIfLost(victim, id);
+             drawn.push(id);
+          }
+          drawn.forEach((id) => receiver.hand.push(id));
+          log(room, `${receiver.name} zieht ${drawn.length} Handkarte(n) von ${victim.name}.`);
+          return null;
+        }
+        return null;
+      });
+      return 'muss all sein Hab und Gut verteilen';
+    }
     case 'discardWholeHand': {
       const ids = [...player.hand];
       if (!ids.length) return 'Hand war leer';

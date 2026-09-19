@@ -443,5 +443,39 @@ function makeRoom(players) {
     'nur der gewaehlte Fluch endet, der andere bleibt');
 }
 
+// --- EDELMUT (Fluch, Verteilung) --------------------------------------------
+{
+  const { handleKickOpenDoor } = require('../server.js');
+  const p1 = makePlayer({ id: 'p1', name: 'Opfer' });
+  const p2 = makePlayer({ id: 'p2', name: 'Empfaenger 1' });
+  const p3 = makePlayer({ id: 'p3', name: 'Empfaenger 2' });
+  const room = makeRoom([p1, p2, p3]);
+  raeume.push(room); // For cleanup
+
+  const helm = findCard('GEILER HELM').id;
+  p1.equipped.head = helm;
+  p1.hand = [findCard('1.000 GOLDSTÜCKE').id, findCard('AMEISENHÜGEL AUFKOCHEN').id];
+  p2.hand = [];
+  p3.hand = [];
+
+  room.doorDeck.unshift(findCard('EDELMUT').id);
+  applyPrimitiveAction(room, p1, { type: 'curseEdelmut', victim: p1.id, cardId: findCard('EDELMUT').id });
+
+  assert.strictEqual(room.pendingCardAction.playerId, p1.id, 'Opfer muss Gegenstand fuer p2 waehlen');
+  assert.strictEqual(room.pendingCardAction.kind, 'chooseCard');
+  assert.ok(room.pendingCardAction.candidateIds.includes(helm));
+
+  handleResolveCardCardChoice(room, p1.id, helm);
+
+  assert.ok(p2.hand.includes(helm), 'Helm landet in p2s Hand');
+  assert.ok(!p1.equipped.head, 'Helm ist abgelegt');
+
+  // Fuer p3 hat p1 keine angelegten Gegenstaende mehr, also automatische Handkarten-Zuteilung
+  assert.strictEqual(room.pendingCardAction, null, 'Warteschlange ist durch');
+  assert.strictEqual(p3.hand.length, 2, 'p3 hat 2 Karten gezogen');
+  assert.strictEqual(p1.hand.length, 0, 'p1 hat alle Handkarten verloren');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');
+
