@@ -541,6 +541,7 @@ function unequipSlotCard(player, cardId) {
   if (player.equipped.armor === cardId) player.equipped.armor = null;
   if (player.equipped.feet === cardId) player.equipped.feet = null;
   player.equipped.hands = player.equipped.hands.map((h) => (h === cardId ? null : h));
+  ensureHandsLength(player);
 }
 
 // ---------------------------------------------------------------------------
@@ -4176,6 +4177,10 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       oldContext.sortedCards.reverse().forEach(id => room.doorDeck.unshift(id));
       return 'wählt 2. Karte, 3. ergibt sich automatisch. Stapel sortiert!';
     }
+    case 'forceFlee': {
+      c.mustFlee = true;
+      return 'die Munchkins müssen weglaufen';
+    }
     case 'modifier': {
       const amount = isAlchemistDoubled ? action.amount * 2 : action.amount;
       if (action.side === 'both') { c.actorModifier += amount; c.monsterModifier += amount; return `+${amount} für beide Seiten`; }
@@ -4308,6 +4313,9 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       if (!c.monsterIds.includes(mId)) {
         if (action.returnToDoorDeckBottom) room.doorDeck.unshift(mId);
         else room.doorDiscard.push(mId);
+      }
+      if (action.keepTreasureForWin) {
+        c.treasureDelta = (c.treasureDelta || 0) + (m.treasureCount || 0);
       }
       const drawn = [];
       let actorFuerSchatz = null;
@@ -4493,6 +4501,16 @@ function handlePlayCombatCard(room, playerId, cardId) {
   // oder gegen dich" wirken, und die Karte nimmt sie nicht aus.
   const c = card(cardId);
   if (!c) return;
+  // REGENMANTEL: "Andere Spieler können deine Kämpfe nicht mit Tränken stören."
+  // Gilt nicht, wenn jemand hilft.
+  if (isCombatPotionCard(c) && !room.combat.helperId && playerId !== room.combat.actorId) {
+    const actor = findPlayer(room, room.combat.actorId);
+    if (equippedItemIds(actor).some((id) => (card(id) || {}).name === 'REGENMANTEL')) {
+      log(room, `${player.name} kann keinen Trank spielen: ${actor.name} trägt einen Regenmantel und kämpft alleine.`);
+      touchRoom(room);
+      return;
+    }
+  }
   if (stinktierSperre(room, playerId)
     && !(c.name === 'WANDERNDES MONSTER' || isMonsterEnhancerCard(c))) {
     log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - nur Wandernde Monster und Monsterverstärker gehen durch.`);
@@ -5589,6 +5607,23 @@ function darfAusruesten(room, player) {
   return !!player && !room.combat;
 }
 
+function ensureHandsLength(player) {
+  const wappenActive = equippedItemIds(player).some((id) => (card(id) || {}).name === 'WAPPEN');
+  const targetLength = wappenActive ? 4 : 2;
+  while (player.equipped.hands.length < targetLength) {
+    player.equipped.hands.push(null);
+  }
+  while (player.equipped.hands.length > targetLength) {
+    if (player.equipped.hands[player.equipped.hands.length - 1] === null) {
+      player.equipped.hands.pop();
+    } else {
+      const itemToDrop = player.equipped.hands.pop();
+      player.equipped.hands = player.equipped.hands.map(h => h === itemToDrop ? null : h);
+      player.hand.push(itemToDrop);
+    }
+  }
+}
+
 function handleEquipItem(room, playerId, cardId) {
   const player = findPlayer(room, playerId);
   if (!player || !player.hand.includes(cardId)) return;
@@ -5664,6 +5699,7 @@ function handleEquipItem(room, playerId, cardId) {
     removeFromHand(player, cardId);
     player.equipped[special.slot] = [...specialSlotCards(player, special.slot), cardId];
     log(room, `${player.name} legt "${c.name}" an (${SPECIAL_SLOTS[special.slot].label}).`, [cardId]);
+    ensureHandsLength(player);
     touchRoom(room);
     return;
   }
@@ -5679,7 +5715,12 @@ function handleEquipItem(room, playerId, cardId) {
     const freeSlots = player.equipped.hands.filter((h) => h === null).length;
     if (freeSlots < kosten) return;
     removeFromHand(player, cardId);
-    if (kosten === 2) { player.equipped.hands = [cardId, cardId]; }
+    if (kosten === 2) {
+      const idx1 = player.equipped.hands.indexOf(null);
+      player.equipped.hands[idx1] = cardId;
+      const idx2 = player.equipped.hands.indexOf(null);
+      player.equipped.hands[idx2] = cardId;
+    }
     else if (kosten === 1) { const idx = player.equipped.hands.indexOf(null); player.equipped.hands[idx] = cardId; }
     else { player.equipped.special = [...specialSlotCards(player, 'special'), cardId]; }
   } else return;
@@ -5689,6 +5730,7 @@ function handleEquipItem(room, playerId, cardId) {
   log(room, geschummelt
     ? `${player.name} legt "${c.name}" geschummelt an (Spezialausrüstung - die Platzregeln gelten dafür nicht).`
     : `${player.name} legt "${c.name}" an.`, [cardId]);
+  ensureHandsLength(player);
   touchRoom(room);
 }
 
