@@ -2172,6 +2172,71 @@
       .replace(/&lt;i&gt;/gi, '<i>').replace(/&lt;\/i&gt;/gi, '</i>')
       .replace(/&lt;br\s*\/?&gt;/gi, '<br>');
   }
+
+  // ---------------------------------------------------------------------
+  // Komfort: gemerkter Name, Enter-Taste, Einladungslink, Regeln, ARIA
+  // ---------------------------------------------------------------------
+  (function comfort() {
+    const NAME_KEY = 'spiele_name';
+    const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+    const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* optional */ } };
+    const cn = $('createNameInput'); const jn = $('joinNameInput'); const jc = $('codeInput');
+    const cached = lsGet(NAME_KEY);
+    [cn, jn].forEach((inp) => {
+      if (!inp) return;
+      if (cached && !inp.value) inp.value = cached;
+      inp.addEventListener('input', () => { const v = inp.value.trim(); if (v) { lsSet(NAME_KEY, v); [cn, jn].forEach((o) => { if (o && o !== inp) o.value = inp.value; }); } });
+      inp.setAttribute('autocomplete', 'nickname'); inp.setAttribute('autocapitalize', 'words');
+      inp.setAttribute('aria-label', 'Dein Name'); inp.setAttribute('enterkeyhint', 'go');
+    });
+    jc.setAttribute('autocomplete', 'off'); jc.setAttribute('autocapitalize', 'characters');
+    jc.setAttribute('autocorrect', 'off'); jc.setAttribute('spellcheck', 'false');
+    jc.setAttribute('aria-label', 'Raum-Code'); jc.setAttribute('enterkeyhint', 'go');
+    jc.addEventListener('input', () => { jc.value = jc.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
+    cn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('btnCreate').click(); } });
+    jn.addEventListener('keydown', (e) => { if (e.key !== 'Enter') return; e.preventDefault(); if (!jc.value.trim()) jc.focus(); else $('btnJoin').click(); });
+    jc.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('btnJoin').click(); } });
+
+    try {
+      const urlCode = (new URLSearchParams(window.location.search).get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      if (urlCode) {
+        if (session && session.code && session.code !== urlCode) clearSession();
+        jc.value = urlCode;
+        const tabBtn = document.querySelector('.tab-btn[data-tab="join"]');
+        if (tabBtn) tabBtn.click();
+        const target = !jn.value.trim() ? jn : $('btnJoin');
+        setTimeout(() => target.focus(), 50);
+      }
+    } catch (e) { /* ignore */ }
+
+    const share = $('btnShareLink');
+    if (share) share.addEventListener('click', async () => {
+      const code = ($('lobbyCode').textContent || '').trim();
+      if (!/^[A-Z0-9]{4}$/.test(code)) return;
+      const url = window.location.origin + window.location.pathname + '?code=' + code;
+      try { if (navigator.share) { await navigator.share({ title: 'Munchkin', text: `Komm ins Spiel: Munchkin – Raum ${code}`, url }); return; } }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+      try { await navigator.clipboard.writeText(url); share.textContent = '✅ Link kopiert'; setTimeout(() => { share.textContent = '🔗 Einladungslink teilen'; }, 2500); }
+      catch (e) { window.prompt('Link zum Kopieren:', url); }
+    });
+
+    const rm = $('rulesModal');
+    ['btnRules', 'btnRulesLobby'].forEach((id) => { const b = $(id); if (b) b.addEventListener('click', () => rm.classList.remove('hidden')); });
+    $('rulesClose').addEventListener('click', () => rm.classList.add('hidden'));
+    rm.addEventListener('click', (e) => { if (e.target === rm) rm.classList.add('hidden'); });
+
+    const se = $('startError'); if (se) { se.setAttribute('role', 'alert'); }
+    const tabs = document.querySelector('.tabs');
+    if (tabs) {
+      tabs.setAttribute('role', 'tablist');
+      const sync = () => tabs.querySelectorAll('.tab-btn').forEach((b) => b.setAttribute('aria-selected', b.classList.contains('active') ? 'true' : 'false'));
+      tabs.querySelectorAll('.tab-btn').forEach((b) => b.setAttribute('role', 'tab'));
+      document.querySelectorAll('.tab-panel').forEach((pn) => pn.setAttribute('role', 'tabpanel'));
+      new MutationObserver(sync).observe(tabs, { subtree: true, attributes: true, attributeFilter: ['class'] });
+      sync();
+    }
+    const lc = $('lobbyCode'); if (lc) lc.setAttribute('aria-label', 'Raum-Code');
+  })();
 })();
 
   function updateMultiSelectionBar() {

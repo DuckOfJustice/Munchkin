@@ -642,3 +642,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* Verkaufen sitzt unter den Karten rechts, damit oben rechts der Schalter
    allein steht. */
 .hand-bar-bottom { display: flex; justify-content: flex-end; flex-shrink: 0; margin-top: 8px; }
+
+/* --- Regeln, Einladungslink --- */
+.rules-box { max-width: 640px; }
+.rules-text h3 { color: var(--gold-bright, #f4d27a); margin-top: 16px; }
+.rules-text p { line-height: 1.5; }
+#btnShareLink { margin-top: 6px; }

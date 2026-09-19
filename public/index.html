@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Munchkin – Online</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%AA%3C/text%3E%3C/svg%3E" />
+<meta name="theme-color" content="#10160f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Munchkin">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -51,8 +57,9 @@
       <div>
         <div class="eyebrow">Raum-Code – an deine Mitspieler:innen weitergeben</div>
         <div id="lobbyCode" class="code big"></div>
+        <button id="btnShareLink" class="secondary small" type="button">🔗 Einladungslink teilen</button>
       </div>
-      <button id="btnLeaveLobby" class="ghost small">Verlassen</button>
+      <div class="row gap"><button id="btnRulesLobby" class="ghost small" type="button">📜 Regeln</button><button id="btnLeaveLobby" class="ghost small">Verlassen</button></div>
     </div>
     <p class="hint">Offiziell werden 3-6 Spieler:innen empfohlen, zu zweit/allein geht es auch zum Testen.</p>
 
@@ -83,6 +90,7 @@
     <div id="turnBanner" class="turnbanner"></div>
     <div class="row gap">
       <span id="deckInfo"></span>
+      <button id="btnRules" class="ghost" type="button">📜 Regeln</button>
       <button id="btnLeave" class="ghost">Verlassen</button>
     </div>
   </header>
@@ -167,6 +175,32 @@
   <div class="modalbox">
     <div id="cardModalBody"></div>
     <button id="cardModalClose">Schließen</button>
+  </div>
+</div>
+
+<div id="rulesModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Regeln – Munchkin">
+  <div class="modalbox rules-box">
+    <h2>📜 Regeln – Munchkin</h2>
+    <div class="rules-text">
+      <p><i>Kurzfassung der Grundregeln – Einzelheiten und Sonderfälle stehen auf den Karten (Karte antippen zum Vergrößern).</i></p>
+      <h3>Ziel</h3>
+      <p>Alle starten auf Stufe 1. Wer als Erste:r <b>Stufe 10</b> erreicht, gewinnt.</p>
+      <h3>Dein Zug</h3>
+      <p><b>1. Tür eintreten:</b> Zieh die oberste Türkarte und lege sie offen aus. Ist es ein <b>Monster</b>, kommt es zum Kampf. Ein <b>Fluch</b> trifft dich sofort. Alles andere (Klasse, Rasse, Verstärker …) nimmst du auf die Hand.<br>
+      <b>2. Ärger suchen oder Raum plündern:</b> Kam kein Monster, darfst du ein Monster von der Hand ausspielen und bekämpfen (Ärger suchen) – oder eine weitere Türkarte verdeckt auf die Hand ziehen (Raum plündern).<br>
+      <b>3. Milde Gaben:</b> Hast du mehr als 5 Karten auf der Hand, gib die überzähligen an die Person mit der niedrigsten Stufe (bei Gleichstand teilen) oder lege sie ab.</p>
+      <h3>Kampf</h3>
+      <p>Deine Kampfstärke = <b>Stufe + Boni deiner Ausrüstung</b>. Ist sie <b>höher</b> als die des Monsters, gewinnst du: Du steigst eine Stufe auf (bei manchen Monstern mehr) und ziehst die angegebenen Schatzkarten. Gleichstand geht ans Monster. Alle im Kampf dürfen Einmal-Karten spielen (Trank, Verstärker …). Du kannst andere um <b>Hilfe</b> bitten und ihnen dafür Schatzkarten zusagen.</p>
+      <h3>Weglaufen</h3>
+      <p>Wer nicht gewinnen kann, würfelt (bei 5 oder 6 gelingt die Flucht). Misslingt sie, passiert das <b>Schlimme Dinge</b> des Monsters (Stufenverlust, Tod, Gegenstände verlieren …).</p>
+      <h3>Tod</h3>
+      <p>Stirbst du, verlierst du alles außer Stufe, Klasse und Rasse; deine Karten gehen an die anderen (nach Regel). Im nächsten Zug bist du mit neuen Karten wieder dabei.</p>
+      <h3>Ausrüstung &amp; Verkaufen</h3>
+      <p>Getragen werden dürfen ein Kopfstück, eine Rüstung, Schuhwerk und zwei Hände voll Waffen (plus „Groß“-Gegenstände nur mit passender Rasse/Klasse). Gegenstände im Wert von <b>1000 Goldstücken</b> kannst du gegen <b>eine Stufe</b> verkaufen (nicht auf Stufe 10).</p>
+      <h3>Zuschauen &amp; Handeln</h3>
+      <p>Wer später einsteigt, kann als Zuschauer:in mitfiebern. Im Tausch-Bereich kannst du mit anderen handeln.</p>
+    </div>
+    <button id="rulesClose" type="button">Schließen</button>
   </div>
 </div>
 
