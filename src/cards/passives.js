@@ -40,11 +40,8 @@ module.exports = (ctx) => {
     'TENTAKELDÄMON': (p) => p.level <= 2,  // "Greift niemanden mit Stufe 2 oder niedriger an."
     'JABBERWOCK': (p) => p.level <= 4,     // "Greift niemanden mit Stufe 4 oder niedriger an."
     // "Greift keine Frauen an oder Traeger des Stacheligen Genitalschoners."
-    // ponytail: nur die Geschlechts-Klausel. Der STACHELIGE GENITALSCHONER
-    // liegt in den Rohdaten als treasure_other ohne slotKind und laesst sich
-    // deshalb gar nicht tragen - die Klausel kommt in der Runde nach, in der
-    // die Unnatural-Axe-Schatzkarten ihren Slot bekommen.
-    'PSYCHO-EICHHÖRNCHEN': (p) => istGeschlecht(p, 'w'),
+    'PSYCHO-EICHHÖRNCHEN': (p) => istGeschlecht(p, 'w')
+      || equippedItemIds(p).some((id) => (card(id) || {}).name === 'STACHELIGER GENITALSCHONER'),
     // "Fluechtet vor Orks, statt anzugreifen und hinterlaesst den Schatz."
     'PESTRATTEN': (p) => hasRace(p, 'ORK'),
   };
@@ -565,6 +562,10 @@ module.exports = (ctx) => {
     // etwas Untotes steht - das schliesst die Verstaerkerkarte UNTOT ein
     // ("Das Monster zaehlt jetzt als Untoter fuer alle Zwecke").
     'GHOULPEITSCHE': (player, monsters, untot) => (untot ? 3 : 0),
+    // "+2 Bonus für Frauen" - Zusatz zum Grundbonus (+2), Frauen also +4.
+    'SÜSSER SCHULTERDRACHE': (player) => (istGeschlecht(player, 'w') ? 2 : 0),
+    // "+2 Bonus für Männer" - Zusatz zum Grundbonus (+2), Männer also +4.
+    'STACHELIGER GENITALSCHONER': (player) => (istGeschlecht(player, 'm') ? 2 : 0),
   };
 
   // Karten, die angelegt werden, aber auf keinen der klassischen Plaetze
@@ -608,6 +609,14 @@ module.exports = (ctx) => {
     // bei der Monsterkarte steht der Bonus hier im bonus-Feld der Rohdaten,
     // deshalb kein `bonus` an der Regel.
     'EISKALTES HÄNDCHEN (KLEINE FREUNDIN)': { slot: 'special' },
+    // --- Unnatural Axe: platzlose Gegenstände ---
+    'BEGLEITER': { slot: 'special' },
+    'FÜRCHTERLICHE FALSCHE ZÄHNE': { slot: 'special' },
+    'GANZ HEILIGES BUCH': { slot: 'special' },
+    'TASCHE MIT KRÄHENFÜSSEN': { slot: 'special' },
+    'SÜSSER SCHULTERDRACHE': { slot: 'special' },
+    'STACHELIGER GENITALSCHONER': { slot: 'special' },
+    'FALSCHER BART': { slot: 'special' },
   };
   // Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
   // nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).

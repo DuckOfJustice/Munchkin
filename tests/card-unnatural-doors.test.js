@@ -9,6 +9,9 @@ const {
   handleUnequipItem, handleSellItems, ownTradeIds, clearActiveCurseByKind,
   handleResolveCardCardChoice, TREASURE_POWER_OVERRIDES, handleUseCardPower,
   handleResolveMultiCardSelection, handleResolveCardChoice,
+  // Welle A Schätze:
+  fleeModifierParts, monsterRefusesTarget, monsterSeesRace, hasRace,
+  handleAttachCard, attachmentBonusSum,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -656,6 +659,129 @@ function makeRoom(players) {
   assert.strictEqual(room.doorDeck[2], c1);
 }
 
+// --- WELLE A SCHÄTZE: Platzlose Gegenstände ---
+{
+  const p1 = makePlayer('P1');
+  const room = makeRoom([p1]);
+  const namen = [
+    'BEGLEITER', 'FÜRCHTERLICHE FALSCHE ZÄHNE', 'GANZ HEILIGES BUCH',
+    'TASCHE MIT KRÄHENFÜSSEN', 'SÜSSER SCHULTERDRACHE',
+    'STACHELIGER GENITALSCHONER', 'FALSCHER BART',
+  ];
+  for (const name of namen) {
+    const c = findCard(name);
+    p1.hand.push(c.id);
+    handleEquipItem(room, p1.id, c.id);
+    assert.ok(equippedItemIds(p1).includes(c.id), `${name} muss anlegbar sein`);
+  }
+}
+
+// --- WELLE A SCHÄTZE: Bedingte Kampfboni ---
+{
+  const p1 = makePlayer({ id: 'p1', name: 'Frau', gender: 'w' });
+  const room = makeRoom([p1]);
+  const drache = findCard('SÜSSER SCHULTERDRACHE');
+  p1.hand.push(drache.id);
+  handleEquipItem(room, p1.id, drache.id);
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  const t1 = combatTotals(room);
+  // Frau: Stufe 5 + Drache Basis 2 + Frauen-Bonus 2 = 9
+  assert.strictEqual(t1.playerStrength, 9, 'Schulterdrache +4 für Frauen');
+  room.combat = null;
+}
+{
+  const p1 = makePlayer({ id: 'p1', name: 'Mann', gender: 'm' });
+  const room = makeRoom([p1]);
+  const genital = findCard('STACHELIGER GENITALSCHONER');
+  p1.hand.push(genital.id);
+  handleEquipItem(room, p1.id, genital.id);
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  const t = combatTotals(room);
+  // Mann: Stufe 5 + Genitalschoner Basis 2 + Männer-Bonus 2 = 9
+  assert.strictEqual(t.playerStrength, 9, 'Genitalschoner +4 für Männer');
+  room.combat = null;
+}
+
+// PSYCHO-EICHHÖRNCHEN: greift Träger des Genitalschoners nicht an
+{
+  const p1 = makePlayer({ id: 'p1', name: 'Mann', gender: 'm' });
+  const room = makeRoom([p1]);
+  const genital = findCard('STACHELIGER GENITALSCHONER');
+  p1.hand.push(genital.id);
+  handleEquipItem(room, p1.id, genital.id);
+  const eichhoernchen = findCard('PSYCHO-EICHHÖRNCHEN');
+  assert.ok(monsterRefusesTarget(eichhoernchen.id, p1), 'Psycho-Eichhörnchen greift Genitalschoner-Träger nicht an');
+}
+
+// --- WELLE A SCHÄTZE: Flucht-Boni ---
+{
+  const p1 = makePlayer('P1');
+  const room = makeRoom([p1]);
+  const tasche = findCard('TASCHE MIT KRÄHENFÜSSEN');
+  p1.hand.push(tasche.id);
+  handleEquipItem(room, p1.id, tasche.id);
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  const parts = fleeModifierParts(room, p1);
+  const taschenBonus = parts.find(p => p.label === 'TASCHE MIT KRÄHENFÜSSEN');
+  assert.ok(taschenBonus, 'Tasche erscheint in Flucht-Modifikatoren');
+  assert.strictEqual(taschenBonus.amount, 1, 'Tasche gibt +1 auf Weglaufen');
+  room.combat = null;
+}
+{
+  const p1 = makePlayer('P1');
+  const room = makeRoom([p1]);
+  const maschine = findCard('BELAGERUNGSMASCHINE');
+  p1.hand.push(maschine.id);
+  handleEquipItem(room, p1.id, maschine.id);
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  const parts = fleeModifierParts(room, p1);
+  const maschinenMalus = parts.find(p => p.label === 'BELAGERUNGSMASCHINE');
+  assert.ok(maschinenMalus, 'Belagerungsmaschine erscheint in Flucht-Modifikatoren');
+  assert.strictEqual(maschinenMalus.amount, -1, 'Belagerungsmaschine gibt -1 auf Weglaufen');
+  room.combat = null;
+}
+
+// FALSCHER BART: Monster sehen Träger als Zwerg
+{
+  const p1 = makePlayer('P1');
+  const room = makeRoom([p1]);
+  const bart = findCard('FALSCHER BART');
+  p1.hand.push(bart.id);
+  handleEquipItem(room, p1.id, bart.id);
+  assert.ok(monsterSeesRace(p1, 'ZWERG'), 'Falscher Bart: Monster sehen Zwerg');
+  assert.ok(!hasRace(p1, 'ZWERG'), 'Falscher Bart gibt keine echte Zwergen-Rasse');
+}
+
+// … DER VERDAMMNIS: Anhang an Kampfbonus-Gegenstand
+{
+  const p1 = makePlayer('P1');
+  const room = makeRoom([p1]);
+  const schwert = findCard('LUSTIGES SCHWERT');
+  p1.hand.push(schwert.id);
+  handleEquipItem(room, p1.id, schwert.id);
+  const verdammnis = findCard('… DER VERDAMMNIS');
+  p1.hand.push(verdammnis.id);
+  handleAttachCard(room, p1.id, verdammnis.id, schwert.id);
+  const bonus = attachmentBonusSum(room, schwert.id);
+  assert.strictEqual(bonus, 2, '… DER VERDAMMNIS gibt +2 Anhang-Bonus');
+}
+
+// Krakzilla-Schwert: Flucht-Zwang gegen Krakzilla
+{
+  const p1 = makePlayer({ id: 'p1', name: 'Held', level: 9 });
+  const room = makeRoom([p1]);
+  const schwert = findCard('ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT');
+  p1.hand.push(schwert.id);
+  handleEquipItem(room, p1.id, schwert.id);
+  const krakzilla = findCard('KRAKZILLA');
+  startCombat(room, p1.id, [krakzilla.id], { fromHand: false });
+  resolveCombat(room);
+  assert.ok(room.combat.mustFlee, 'Krakzilla-Schwert erzwingt Flucht gegen Krakzilla');
+}
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');
