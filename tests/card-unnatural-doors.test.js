@@ -555,6 +555,7 @@ function makeRoom(players) {
   // Waehle weiterkaempfen
   handleResolveCardChoice(room, p1.id, room.pendingCardAction.options[1].id);
   assert.ok(room.combat, 'Kampf geht weiter');
+  assert.ok(room.combat.monsterModifier > 0, 'FREUNDLICH würfelt 2d6 auf monsterModifier');
   assert.strictEqual(room.pendingCardAction, null, 'Wahl beendet');
 }
 
@@ -569,6 +570,9 @@ function makeRoom(players) {
   // Basis-Monster
   const nase = findCard('LAHMER GOBLIN').id; // Lvl 1
   startCombat(room, p1.id, [nase], { fromHand: true });
+  room.combat.enhancerIds = room.combat.enhancerIds || [];
+  room.combat.enhancerIds.push(findCard('BABY').id);
+  room.combat.monsterModifier -= 5;
   
   // MAMI + BABY spielen! Wait, we don't have BABY yet but we can test MAMI.
   const mami = findCard('MAMI').id;
@@ -582,11 +586,11 @@ function makeRoom(players) {
   
   // Mami gibt +10 auf den Modifikator, und das verdoppelte Monster 
   // wurde hinzugefügt (Lvl +2 = 12 total bonus vom Duplikat).
-  assert.strictEqual(room.combat.monsterModifier, 10);
+  assert.strictEqual(room.combat.monsterModifier, 5);
   
   const extras = monsterVictoryExtras(room, p1, null, [findCard('LAHMER GOBLIN'), findCard('LAHMER GOBLIN')]);
   assert.strictEqual(extras.levels, 1, 'Mami gibt 1 Extra-Stufe');
-  assert.strictEqual(extras.treasures, 1, 'Mami gibt 1 Extra-Schatz');
+  assert.strictEqual(extras.treasures, 2, 'Mami gibt 1 Extra-Schatz + 1 Ausgleich für Baby');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

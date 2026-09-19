@@ -3489,7 +3489,7 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
   if (c && c.mommyMonsterId) {
     levels += 1;
     treasures += 1;
-    if (c.monsterBonuses && c.monsterBonuses.some(b => b.monsterId === c.mommyMonsterId && b.name === 'BABY')) {
+    if (c.enhancerIds && c.enhancerIds.some(id => card(id).name === 'BABY')) {
       treasures += 1; // BABY gab -1 Basis-Schatz, MAMI gleicht aus
     }
   }
@@ -4271,16 +4271,23 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       return null;
     }
     case 'freundlichFightOn': {
-      c.treasureDelta = (c.treasureDelta || 0) + 2;
-      return 'lässt den Kampf weitergehen (Monster gibt +2 Schätze)';
+      const r1 = Math.floor(Math.random() * 6) + 1;
+      const r2 = Math.floor(Math.random() * 6) + 1;
+      const roll = r1 + r2;
+      c.monsterModifier = (c.monsterModifier || 0) + roll;
+      return `würfelt ${roll} und lässt den Kampf weitergehen (+${roll} auf Monster)`;
     }
     case 'duplicateMonsterMommy': {
       const mid = action.monsterId || action.validMonsterIds[0];
       c.monsterIds.push(mid);
       c.mommyMonsterId = mid;
-      c.monsterModifier += 10;
+      const hasBaby = (c.enhancerIds || []).some(id => card(id).name === 'BABY');
+      const enhancerBonus = (c.enhancerIds || []).reduce((sum, id) => sum + (card(id).bonus || 0), 0);
+      let mamiBonus = 10 + enhancerBonus;
+      if (hasBaby) mamiBonus += 5; // Compensate for Baby's -5
+      c.monsterModifier += mamiBonus;
       refreshCombatReady(room);
-      return `ruft die MAMI von "${card(mid).name}" (+10 auf Mami)`;
+      return `ruft die MAMI von "${card(mid).name}" (+${mamiBonus} auf Mami)`;
     }
     case 'combatAddMonster': {
       removeFromHand(player, action.cardId);

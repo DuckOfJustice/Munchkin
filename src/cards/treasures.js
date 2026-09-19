@@ -267,7 +267,7 @@ module.exports = (ctx) => {
     'MAMI': (player, room) => {
       const validMonsterIds = room.combat.monsterIds.filter((m) => {
         const lv = card(m).level || 0;
-        const hasBaby = (room.combat.monsterBonuses || []).some(b => b.monsterId === m && b.name === 'BABY');
+        const hasBaby = (room.combat.enhancerIds || []).some(id => (card(id)||{}).name === 'BABY');
         return lv <= 5 || hasBaby;
       });
       if (validMonsterIds.length === 0) return null;
