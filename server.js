@@ -1335,6 +1335,50 @@ function slotLabelDe(slot) {
 // zurück.
 function applyPrimitiveAction(room, player, action) {
   switch (action.type) {
+    case 'flohmarktSelectTarget1': {
+      if (player.hand.includes(action.discardedId)) {
+        removeFromHand(player, action.discardedId);
+      } else {
+        unequipSlotCard(player, action.discardedId);
+        removeFromHand(player, action.discardedId);
+      }
+      discardCard(room, action.discardedId);
+      
+      const v = card(action.discardedId).gold || 0;
+      const discards = room.treasureDiscard.filter(id => card(id) && typeof card(id).gold === 'number' && card(id).gold <= v);
+      const options = discards.map(id => ({
+        id,
+        label: `"${card(id).name}" (${card(id).gold} G) ziehen`,
+        action: { type: 'flohmarktSelectTarget2', v, firstId: id }
+      }));
+      options.push({ id: 'none', label: 'Keinen Schatz ziehen', action: { type: 'flohmarktFinish' } });
+      
+      openCardChoice(room, player, 'FLOHMARKT (1. Schatz)', options);
+      return `wirft "${card(action.discardedId).name}" ab und wählt Schätze aus dem Ablagestapel`;
+    }
+    case 'flohmarktSelectTarget2': {
+      room.treasureDiscard = room.treasureDiscard.filter(x => x !== action.firstId);
+      player.hand.push(action.firstId);
+      const remV = action.v - card(action.firstId).gold;
+      const discards = room.treasureDiscard.filter(id => card(id) && typeof card(id).gold === 'number' && card(id).gold <= remV);
+      const options = discards.map(id => ({
+        id,
+        label: `"${card(id).name}" (${card(id).gold} G) ziehen`,
+        action: { type: 'flohmarktFinish', secondId: id }
+      }));
+      options.push({ id: 'none', label: 'Keinen weiteren Schatz ziehen', action: { type: 'flohmarktFinish' } });
+      
+      openCardChoice(room, player, 'FLOHMARKT (2. Schatz)', options);
+      return `zieht "${card(action.firstId).name}" und wählt einen weiteren Schatz`;
+    }
+    case 'flohmarktFinish': {
+      if (action.secondId) {
+        room.treasureDiscard = room.treasureDiscard.filter(x => x !== action.secondId);
+        player.hand.push(action.secondId);
+        return `zieht "${card(action.secondId).name}"`;
+      }
+      return 'beendet die Schatzsuche';
+    }
     case 'findeEineKarteSort1': {
       const pa = room.pendingCardAction;
       const oldContext = action.context;
@@ -2690,7 +2734,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn', 'juckpulverDiscard']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -4199,6 +4243,13 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     case 'forceFlee': {
       c.mustFlee = true;
       return 'die Munchkins müssen weglaufen';
+    }
+    case 'juckpulverDiscard': {
+      const p = findPlayer(room, action.playerId);
+      unequipSlotCard(p, action.itemId);
+      removeFromHand(p, action.itemId);
+      discardCard(room, action.itemId);
+      return `${p.name} muss "${card(action.itemId).name}" ablegen`;
     }
     case 'modifier': {
       const amount = isAlchemistDoubled ? action.amount * 2 : action.amount;
