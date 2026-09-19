@@ -647,6 +647,13 @@ function publicState(room) {
     dieRoll: room.dieRoll,
     // Gespielte Kampfkarte (Anzeige-Ereignis, siehe announceCardPlay).
     cardPlay: room.cardPlay || null,
+    // Aktivierte Sonderkraft (Anzeige-Ereignis, siehe announceCardPower) - der
+    // Client zeigt die Karte kurz gross mit einem "glaenzenden" Spezialeffekt.
+    cardPower: room.cardPower || null,
+    // Statische Namensliste, damit der Client selbst erkennen kann, ob ein
+    // Kampfmonster "untot" ist (fuer UNTOT/Priester-Vertreiben/GHOULPEITSCHE) -
+    // siehe UNDEAD_MONSTERS in src/cards/passives.js und combatHasUndead.
+    undeadMonsters: [...UNDEAD_MONSTERS],
     combat: room.combat ? Object.assign({}, room.combat, combatConditionalBonusFields(room)) : null,
     pendingConsequence: room.pendingConsequence,
     // onResolve ist eine Funktion und darf nicht serialisiert werden -
@@ -2690,6 +2697,7 @@ function handleUseCardPower(room, playerId, cardId) {
   }
   removeFromHand(player, cardId);
   discardCard(room, cardId);
+  announceCardPower(room, player, cardId);
   if (spec.type === 'choice') {
     openCardChoice(room, player, c.name, spec.options);
     log(room, `${player.name} spielt "${c.name}" - Wahl nötig.`, [cardId]);
@@ -2697,7 +2705,11 @@ function handleUseCardPower(room, playerId, cardId) {
     return;
   }
   if (spec.type === 'multiCardSelection') {
-    room.pendingCardAction = { kind: 'multiCardSelection', sourceCardId: cardId, actionType: spec.actionType };
+    // playerId ist Pflicht: renderCardAction() im Client zeigt ohne
+    // uebereinstimmende playerId fuer NIEMANDEN (auch nicht fuer die
+    // handelnde Person) die eigentliche Auswahl-UI, sondern nur "Warte auf
+    // ?...", weil pa.playerId dann nie mit myInfo.playerId matcht.
+    room.pendingCardAction = { kind: 'multiCardSelection', playerId: player.id, cardName: c.name, sourceCardId: cardId, actionType: spec.actionType };
     log(room, `${player.name} spielt "${c.name}" und wählt Karten zum Abwerfen aus.`, [cardId]);
     touchRoom(room);
     return;
@@ -4582,6 +4594,17 @@ function announceCardPlay(room, player, cardId, hinweis) {
   };
 }
 
+// Gleiches Muster wie announceCardPlay: der Client zeigt kurz die Karte,
+// deren Sonderkraft gerade aktiviert wurde, mit einem "glaenzenden"
+// Spezialeffekt (siehe playCardPower im Client) statt der schlichten
+// Kampfkarten-Anzeige.
+function announceCardPower(room, player, cardId) {
+  room.cardPower = {
+    seq: (room.cardPower ? room.cardPower.seq : 0) + 1,
+    cardId, playerName: player.name,
+  };
+}
+
 function handlePlayCombatCard(room, playerId, cardId) {
   if (!room.combat || room.combat.mustFlee) return;
   const player = findPlayer(room, playerId);
@@ -5968,8 +5991,11 @@ function handleResolveMultiCardSelection(room, playerId, cardIds, deck) {
   if (!player) return;
   const pAction = room.pendingCardAction;
   if (!pAction || pAction.kind !== 'multiCardSelection' || pAction.actionType !== 'schicksalhafteKarten') return;
+  if (pAction.playerId !== playerId) return;
+  if (!Array.isArray(cardIds) || !cardIds.length) return;
+  if (deck !== 'door' && deck !== 'treasure') return;
   if (!cardIds.every(id => player.hand.includes(id))) return;
-  
+
   cardIds.forEach(id => {
     removeFromHand(player, id);
     discardCard(room, id);

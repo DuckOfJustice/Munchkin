@@ -399,6 +399,34 @@
     cardPlayTimer = setTimeout(() => { box.classList.add('hidden'); box.classList.remove('play'); box.innerHTML = ''; }, 1800);
   }
 
+  // Aktivierte Sonderkraft ("Passiver Effekt"): dieselbe Grossanzeige wie
+  // playCardPlay, aber mit "glaenzendem" Spezialeffekt (siehe .shiny-Klasse
+  // in style.css) statt der schlichten Kampfkarten-Anzeige - macht sichtbar,
+  // DASS und WESSEN Karte gerade eine Sonderkraft ausgeloest hat.
+  let cardPowerTimer = null;
+  function playCardPower() {
+    const e = state.cardPower;
+    if (!istNeuesEreignis('cardPower', e)) return;
+    const box = $('cardPowerAnim');
+    if (!box) return;
+    box.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cardplay-box shiny';
+    const who = document.createElement('div');
+    who.className = 'cardplay-who';
+    who.textContent = `${e.playerName} aktiviert Sonderkraft:`;
+    wrap.appendChild(who);
+    const tile = cardTile(e.cardId, {});
+    tile.classList.add('shiny-card');
+    wrap.appendChild(tile);
+    box.appendChild(wrap);
+    box.classList.remove('hidden', 'play');
+    void box.offsetWidth; // Reflow erzwingen, sonst startet die Animation bei schneller Folge nicht neu
+    box.classList.add('play');
+    clearTimeout(cardPowerTimer);
+    cardPowerTimer = setTimeout(() => { box.classList.add('hidden'); box.classList.remove('play'); box.innerHTML = ''; }, 1800);
+  }
+
   function playDieRoll() {
     const d = state.dieRoll;
     if (!istNeuesEreignis('die', d)) return;
@@ -547,6 +575,7 @@
     playDoorReveal();
     playDieRoll();
     playCardPlay();
+    playCardPower();
     playReward();
     renderPlayerList();
     renderSpectatorList();
@@ -1020,9 +1049,17 @@
     div.className = 'combatbox';
     div.innerHTML = `<h3>⚔️ Kampf gegen ${c.monsterIds.map((id) => card(id).name).join(' + ')}</h3>`;
 
+    // "Untot" gilt fuer den GANZEN Kampf, nicht pro Monster (siehe
+    // combatHasUndead im Server): entweder steht von Haus aus ein untotes
+    // Monster da (state.undeadMonsters, z.B. MR. BONES), oder die
+    // Verstaerkerkarte UNTOT wurde gespielt - dann zaehlen ALLE Monster
+    // dieses Kampfes als untot.
+    const untotVerstaerkt = (c.enhancerIds || []).some((eid) => { const ec = card(eid); return ec && ec.name === 'UNTOT'; });
+    const istUntot = untotVerstaerkt || c.monsterIds.some((id) => (state.undeadMonsters || []).includes((card(id).name || '').toUpperCase()));
+
     const monsterRow = document.createElement('div');
     monsterRow.className = 'cardgrid';
-    c.monsterIds.forEach((id) => monsterRow.appendChild(cardTile(id, {})));
+    c.monsterIds.forEach((id) => monsterRow.appendChild(cardTile(id, { undead: istUntot })));
     div.appendChild(monsterRow);
 
     const iAmActor = c.actorId === myInfo.playerId;
@@ -1437,6 +1474,29 @@
         row.appendChild(tile);
       });
       if (!pa.candidateIds.length) row.appendChild(textNode('(Ablagestapel sind leer.)'));
+      div.appendChild(row);
+    } else if (pa.kind === 'multiCardSelection') {
+      // Die Haekchen an den einzelnen Handkarten kommen aus handActionsFor
+      // (siehe multiSelection weiter unten) - hier nur Kopf, Zaehler und die
+      // zwei "Ziehen aus..."-Knoepfe, deren Klickhandler updateMultiSelectionBar
+      // gleich danach setzt (ueber renderMyPanel -> renderHand, das nach
+      // renderCardAction laeuft).
+      div.innerHTML = `<h3>✨ "${escapeHtml(pa.cardName || 'Schicksalhafte Karten')}"</h3>` +
+        `<p>Wähle unten auf deinen Handkarten beliebig viele zum Abwerfen aus (Häkchen "Abwerfen") und ziehe genauso viele neue Karten nach.</p>`;
+      const sum = document.createElement('p');
+      sum.id = 'multiSelectionSum';
+      sum.className = 'hint';
+      sum.textContent = '0 Karten ausgewählt';
+      div.appendChild(sum);
+      const row = document.createElement('div');
+      row.className = 'row gap wrap';
+      const btnD = mkBtn('🚪 Neue Türkarten ziehen', () => {});
+      btnD.id = 'btnMultiDoor';
+      btnD.className = 'primary';
+      const btnT = mkBtn('💰 Neue Schatzkarten ziehen', () => {});
+      btnT.id = 'btnMultiTreasure';
+      btnT.className = 'primary';
+      row.append(btnD, btnT);
       div.appendChild(row);
     }
     box.appendChild(div);
@@ -1981,10 +2041,14 @@
     if (multiSum) multiSum.textContent = count + (count === 1 ? ' Karte' : ' Karten') + ' ausgewählt';
     const btnD = $('btnMultiDoor');
     const btnT = $('btnMultiTreasure');
+    // "Lege eine beliebige ODER ALLE Karten ab" - mindestens eine muss es
+    // sein, sonst gaebe es nichts zu ziehen.
     if (btnD) {
+      btnD.disabled = count === 0;
       btnD.onclick = () => { socket.emit('resolveMultiCardSelection', { cardIds: Array.from(multiSelection), deck: 'door' }); multiSelection.clear(); updateMultiSelectionBar(); };
     }
     if (btnT) {
+      btnT.disabled = count === 0;
       btnT.onclick = () => { socket.emit('resolveMultiCardSelection', { cardIds: Array.from(multiSelection), deck: 'treasure' }); multiSelection.clear(); updateMultiSelectionBar(); };
     }
   }
@@ -2068,6 +2132,17 @@
     img.src = cardImageUrl(id);
     img.onerror = () => { div.classList.add('noimg'); imgWrap.remove(); };
     imgWrap.appendChild(img);
+    // Untot-Indikator (siehe renderCombat): von Haus aus untote Monster oder
+    // per Verstaerkerkarte UNTOT "zu Untoten gemachte" Monster bekommen ein
+    // Totenkopf-Abzeichen auf der Kachel - relevant fuer Priester-"Vertreiben"
+    // und die GHOULPEITSCHE.
+    if (opts.undead) {
+      const badge = document.createElement('span');
+      badge.className = 'undead-badge';
+      badge.textContent = '☠️ Untot';
+      badge.title = 'Zaehlt fuer alle Zwecke als untot (Priester-Vertreiben, Ghoulpeitsche, ...).';
+      imgWrap.appendChild(badge);
+    }
     div.appendChild(imgWrap);
 
     const type = document.createElement('span');
@@ -2212,15 +2287,22 @@
       }
     } catch (e) { /* ignore */ }
 
+    async function copyText(text) {
+      try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { /* Fallback unten */ }
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+        document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+      } catch (e) { return false; }
+    }
     const share = $('btnShareLink');
     if (share) share.addEventListener('click', async () => {
       const code = ($('lobbyCode').textContent || '').trim();
       if (!/^[A-Z0-9]{4}$/.test(code)) return;
       const url = window.location.origin + window.location.pathname + '?code=' + code;
-      try { if (navigator.share) { await navigator.share({ title: 'Munchkin', text: `Komm ins Spiel: Munchkin – Raum ${code}`, url }); return; } }
-      catch (e) { if (e && e.name === 'AbortError') return; }
-      try { await navigator.clipboard.writeText(url); share.textContent = '✅ Link kopiert'; setTimeout(() => { share.textContent = '🔗 Einladungslink teilen'; }, 2500); }
-      catch (e) { window.prompt('Link zum Kopieren:', url); }
+      if (await copyText(url)) { share.textContent = '✅ Link kopiert'; setTimeout(() => { share.textContent = '🔗 Einladungslink kopieren'; }, 2500); }
+      else window.prompt('Link zum Kopieren:', url);
     });
 
     const rm = $('rulesModal');

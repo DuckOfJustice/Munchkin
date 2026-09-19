@@ -290,6 +290,14 @@ button.wide { width: 100%; }
   text-transform: uppercase; letter-spacing: 0.02em; box-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
 .cardtile.noimg .cttype { position: static; align-self: flex-start; margin: 8px 8px 0; }
+/* Untot-Abzeichen (siehe renderCombat/cardTile): oben links, damit es sich
+   nicht mit dem Kategorie-Etikett (.cttype, oben rechts) beisst. */
+.undead-badge {
+  position: absolute; top: 9px; left: 9px; z-index: 1; font-size: 0.68em; padding: 1px 7px;
+  border-radius: 999px; background: rgba(94, 30, 30, 0.85); color: white;
+  text-transform: uppercase; letter-spacing: 0.02em; box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+.cardtile.noimg .undead-badge { position: static; align-self: flex-start; margin: 8px 8px 0; display: inline-block; }
 .cardtile .ctbody { padding: 6px 10px 9px; display: flex; flex-direction: column; gap: 3px; flex: 1; }
 /* Kartennamen sind sehr unterschiedlich lang (Rekord im Datensatz: "DING MIT
    EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST", 70 Zeichen).
@@ -510,6 +518,38 @@ select { background: var(--bg-alt); color: var(--text); border: 1px solid var(--
   padding: 6px 16px; color: var(--text); font-weight: 700; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
 }
 .cardplay-note { color: var(--text-dim); font-size: 0.95em; }
+
+/* -------- Aktivierte Sonderkraft: dieselbe Buehne wie .cardplay-box, aber
+   mit "glaenzendem" Spezialeffekt (goldener Rahmen + diagonaler Lichtstreif,
+   der einmal ueber die Karte laeuft) statt der schlichten Anzeige - macht
+   sichtbar, DASS gerade eine Sonderkraft (kein reiner Kampfkarten-Einsatz)
+   ausgeloest wurde. -------- */
+.cardplay-box.shiny .cardplay-who {
+  border-color: var(--gold); color: var(--gold);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 18px rgba(244, 201, 93, 0.55);
+}
+.shiny-card {
+  position: relative; overflow: hidden;
+  box-shadow: 0 0 0 2px var(--gold), 0 0 28px 6px rgba(244, 201, 93, 0.65);
+  animation: shinyPulse 1.8s ease-in-out infinite;
+}
+.shiny-card::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.75) 48%, rgba(244,201,93,0.85) 52%, transparent 70%);
+  background-size: 250% 250%;
+  animation: shinySweep 1.8s ease-in-out infinite;
+}
+@keyframes shinyPulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--gold), 0 0 22px 4px rgba(244, 201, 93, 0.55); }
+  50% { box-shadow: 0 0 0 2px var(--gold), 0 0 34px 10px rgba(244, 201, 93, 0.85); }
+}
+@keyframes shinySweep {
+  0% { background-position: 140% 0%; }
+  100% { background-position: -40% 0%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shiny-card, .shiny-card::after { animation: none; }
+}
 .die-face { font-size: 5em; line-height: 1.05; color: var(--text); }
 .die-sum { font-size: 1.3em; font-weight: 700; color: var(--gold); margin-top: 4px; }
 .die-result { font-size: 1.15em; font-weight: 700; margin-top: 6px; }
