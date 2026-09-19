@@ -833,6 +833,31 @@ function endTurn(room) {
   // Der HALBLING-Doppelverkauf gilt "pro Runde" - siehe handleSellItems.
   room.players.forEach((p) => { p.halblingSaleUsed = false; });
   room.turnPhase = 'tuer';
+  
+  if (room.bumerangReturns) {
+    const cp = currentPlayer(room);
+    if (room.bumerangReturns[cp.id] && room.bumerangReturns[cp.id].length > 0) {
+      room.bumerangReturns[cp.id].forEach(id => {
+        const c = card(id);
+        if (!c) return;
+        const currentHolder = room.players.find(p => p.hand.includes(id) || equippedItemIds(p).includes(id));
+        if (currentHolder) {
+          if (currentHolder.id !== cp.id) {
+             if (!currentHolder.hand.includes(id)) unequipSlotCard(currentHolder, id);
+             removeFromHand(currentHolder, id);
+             cp.hand.push(id);
+             log(room, `"${c.name}" kehrt magisch zu ${cp.name} zurück!`);
+          }
+        } else if (room.treasureDiscard.includes(id)) {
+          room.treasureDiscard = room.treasureDiscard.filter(x => x !== id);
+          cp.hand.push(id);
+          log(room, `"${c.name}" kehrt aus dem Ablagestapel zu ${cp.name} zurück!`);
+        }
+      });
+      delete room.bumerangReturns[cp.id];
+    }
+  }
+  
   room.combatHappenedThisTurn = false;
   // lastCombatWinnerId wird bewusst NICHT sofort hier geleert (anders als bis
   // eben): HEIMSE DIE LORBEEREN EIN reagiert auf einen fremden Sieg, der per
@@ -1194,6 +1219,10 @@ function handleApplyConsequenceAction(room, playerId, action) {
 function discardCard(room, cardId) {
   const c = card(cardId);
   if (!c) return;
+  if (c.name === 'BUMERANGDOLCH' && room.pendingConsequence && room.pendingConsequence.kind === 'curse') {
+    room.bumerangReturns = room.bumerangReturns || {};
+    room.bumerangReturns[room.pendingConsequence.playerId] = (room.bumerangReturns[room.pendingConsequence.playerId] || []).concat(cardId);
+  }
   if (c.type === 'door') room.doorDiscard.push(cardId);
   else room.treasureDiscard.push(cardId);
   // SCHUMMELN!: "Lege diese Karte ab, wenn du den geschummelten Gegenstand
@@ -1340,7 +1369,6 @@ function applyPrimitiveAction(room, player, action) {
         removeFromHand(player, action.discardedId);
       } else {
         unequipSlotCard(player, action.discardedId);
-        removeFromHand(player, action.discardedId);
       }
       discardCard(room, action.discardedId);
       
@@ -1359,7 +1387,7 @@ function applyPrimitiveAction(room, player, action) {
     case 'flohmarktSelectTarget2': {
       room.treasureDiscard = room.treasureDiscard.filter(x => x !== action.firstId);
       player.hand.push(action.firstId);
-      const remV = action.v - card(action.firstId).gold;
+      const remV = action.v;
       const discards = room.treasureDiscard.filter(id => card(id) && typeof card(id).gold === 'number' && card(id).gold <= remV);
       const options = discards.map(id => ({
         id,
@@ -2112,6 +2140,10 @@ function applyPrimitiveAction(room, player, action) {
     case 'stealItemFrom': {
       const opfer = findPlayer(room, action.targetId);
       if (!opfer || !equippedItemIds(opfer).includes(action.cardId)) return 'Gegenstand nicht (mehr) getragen';
+      if (card(action.cardId).name === 'BUMERANGDOLCH') {
+        room.bumerangReturns = room.bumerangReturns || {};
+        room.bumerangReturns[opfer.id] = (room.bumerangReturns[opfer.id] || []).concat(action.cardId);
+      }
       unequipSlotCard(opfer, action.cardId);
       clearCheatIfLost(opfer, action.cardId);
       player.hand.push(action.cardId);
@@ -6019,6 +6051,10 @@ function handleSellItems(room, playerId, cardIds) {
   if (halblingBonus) player.halblingSaleUsed = true;
   const levels = Math.floor(total / 1000);
   removable.forEach((id) => {
+    if (card(id).name === 'BUMERANGDOLCH') {
+      room.bumerangReturns = room.bumerangReturns || {};
+      room.bumerangReturns[player.id] = (room.bumerangReturns[player.id] || []).concat(id);
+    }
     if (player.hand.includes(id)) removeFromHand(player, id); else unequipSlotCard(player, id);
     discardCard(room, id);
   });
