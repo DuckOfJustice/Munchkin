@@ -7,11 +7,12 @@
 // Ablaufen der "naechster Kampf"-Flueche bei Sieg/Flucht und WUNSCHRING.
 const assert = require('assert');
 const {
-  ALL_CARDS, combatTotals, addActiveCurse, clearActiveCurse, clearNextCombatCurses,
+  ALL_CARDS, combatTotals, addActiveCurse, clearActiveCurseByKind, clearNextCombatCurses,
   curseCombatModifier, curseSuppressesItemBonuses, newEquipped, handleEquipItem,
   handleDrawDoor, resolveCombatWin, applyPrimitiveAction, TREASURE_POWER_OVERRIDES,
   CONSEQUENCE_OVERRIDES, LINGERING_CURSES, refreshCombatReady, combatAllReady,
   handleSetCombatReady, handlePlayCurseFromHand, handleAckConsequence,
+  handleUseCardPower, handleResolveCardChoice,
   rollWithWindow, equippedItemIds, applyCombatPotionAction,
 } = require('../server.js');
 
@@ -211,7 +212,10 @@ function run() {
 
     addActiveCurse({ logs: [] }, p, 'HUHN AUF DEINEM KOPF', findCard('HUHN AUF DEINEM KOPF').id);
     const spec1 = TREASURE_POWER_OVERRIDES['WUNSCHRING'](p);
-    assert.deepStrictEqual(spec1, { type: 'clearCurse', index: 0 }, 'genau ein Fluch: kein Wahldialog');
+    // Die Aktion nennt Wirkungsart und Namen, keinen Listenindex - siehe
+    // fluchBeendenSpec.
+    assert.deepStrictEqual(spec1, { type: 'clearCurse', kind: 'rollMalus', name: 'HUHN AUF DEINEM KOPF' },
+      'genau ein Fluch: kein Wahldialog');
     applyPrimitiveAction({}, p, spec1);
     assert.strictEqual(p.activeCurses.length, 0, 'der einzige Fluch ist beendet');
 
@@ -226,14 +230,67 @@ function run() {
     assert.strictEqual(p.activeCurses[0].name, 'HUHN AUF DEINEM KOPF', 'nur der gewaehlte Fluch wurde beendet');
   }
 
-  // clearActiveCurse direkt: unbekannter Index raeumt nichts weg.
+  // clearActiveCurseByKind direkt: unbekannte Wirkungsart raeumt nichts weg.
   {
     const p = makePlayer();
     addActiveCurse({ logs: [] }, p, 'HUHN AUF DEINEM KOPF', findCard('HUHN AUF DEINEM KOPF').id);
-    assert.strictEqual(clearActiveCurse({}, p, 5), null, 'Index ausserhalb der Liste -> nichts entfernt');
+    assert.strictEqual(clearActiveCurseByKind(p, 'gibtsNicht'), false, 'unbekannte Art -> nichts entfernt');
     assert.strictEqual(p.activeCurses.length, 1);
-    assert.ok(clearActiveCurse({}, p, 0), 'gueltiger Index entfernt den Fluch');
+    assert.ok(clearActiveCurseByKind(p, 'rollMalus'), 'die passende Art entfernt den Fluch');
     assert.strictEqual(p.activeCurses.length, 0);
+  }
+
+  // -------------------------------------------------------------------
+  // WUNSCHRING, Wahldialog gegen eine Liste, die sich unter ihm verschiebt:
+  // laeuft ein "naechster Kampf"-Fluch ab, WAEHREND der Dialog offen steht
+  // (clearNextCombatCurses am Kampfende), dann zeigt jeder gespeicherte
+  // Listenindex danach auf den falschen Eintrag - und die einmalige Karte
+  // ist ohnehin schon abgelegt.
+  // -------------------------------------------------------------------
+  {
+    const ring = findCard('WUNSCHRING');
+    // Aufbau: ein Fluch, der nur bis zum Kampfende gilt (GESCHLECHTS-
+    // UMWANDLUNG, dauer 'naechsterKampf'), davor in der Liste; dahinter der
+    // dauerhafte (WINZIGE HÄNDE).
+    function ringDialog() {
+      const room = makeRoom();
+      const p = room.players[0];
+      p.hand = [ring.id];
+      addActiveCurse(room, p, 'GESCHLECHTSUMWANDLUNG', findCard('GESCHLECHTSUMWANDLUNG').id);
+      addActiveCurse(room, p, 'WINZIGE HÄNDE', findCard('WINZIGE HÄNDE').id);
+      assert.strictEqual(p.activeCurses.length, 2, 'Testvoraussetzung: zwei Flueche im Tracker');
+      assert.strictEqual(p.activeCurses[0].dauer, 'naechsterKampf',
+        'Testvoraussetzung: der vordere Eintrag laeuft mit dem Kampf ab');
+      handleUseCardPower(room, p.id, ring.id);
+      assert.ok(room.pendingCardAction && room.pendingCardAction.options.length === 2,
+        'zwei Flueche -> Wahldialog mit zwei Optionen');
+      const opt = (name) => room.pendingCardAction.options.find((o) => o.label.includes(name)).id;
+      // Der Kampf endet, waehrend der Dialog offen steht.
+      clearNextCombatCurses([p]);
+      assert.strictEqual(p.activeCurses.length, 1, 'der vordere Fluch ist von selbst vorbei');
+      return { room, p, opt };
+    }
+
+    // a) Der noch aktive Fluch wird gewaehlt - und genau der geht weg.
+    {
+      const { room, p, opt } = ringDialog();
+      handleResolveCardChoice(room, p.id, opt('WINZIGE HÄNDE'));
+      assert.strictEqual(p.activeCurses.length, 0,
+        'der gewaehlte, noch aktive Fluch wird beendet - nicht der verschobene Nachbar');
+      done(room);
+    }
+    // b) Der schon abgelaufene Fluch wird gewaehlt - dann darf NICHT der
+    //    andere dran glauben, und der Log sagt ehrlich, dass der Ring
+    //    umsonst weg ist.
+    {
+      const { room, p, opt } = ringDialog();
+      handleResolveCardChoice(room, p.id, opt('GESCHLECHTSUMWANDLUNG'));
+      assert.strictEqual(p.activeCurses.length, 1, 'der falsche Fluch wird nicht beendet');
+      assert.strictEqual(p.activeCurses[0].name, 'WINZIGE HÄNDE');
+      assert.ok(room.logs.some((e) => /umsonst weg/.test(e.text)),
+        'und der Log behauptet keine Wirkung, die es nicht gab');
+      done(room);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -338,7 +395,7 @@ function run() {
 
     // Gegenprobe: ohne Fluch muss der volle Bereich 1..6 erreichbar bleiben -
     // rollWithWindow darf sich ohne Fluch nicht anders verhalten als vorher.
-    clearActiveCurse(room, p, 0);
+    clearActiveCurseByKind(p, 'rollMalus');
     const ohne = [];
     for (let i = 0; i < 300; i++) {
       let gesehen = null;

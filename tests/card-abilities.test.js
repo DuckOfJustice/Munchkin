@@ -127,7 +127,11 @@ function run() {
   assert.strictEqual(twoClassSpec.type, 'choice', 'mit 2 Klassen (Super Munchkin): echte Wahl, welche abgelegt wird');
   assert.strictEqual(twoClassSpec.options.length, 2);
 
-  assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer({ equipped: { head: null, armor: null, feet: 'boots', hands: [null, null] } })), { type: 'discardSlot', slot: 'feet' });
+  // Echte Kartenid noetig: die Bedingung fragt inzwischen nach dem slotKind der
+  // getragenen Karte (getrageneSlotKarte), nicht nur danach, ob der Platz
+  // belegt ist - sonst uebersieht sie geschummelte Gegenstaende.
+  const schuhe = findCard('ARSCHTRITT-STIEFEL');
+  assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer({ equipped: { head: null, armor: null, feet: schuhe.id, hands: [null, null] } })), { type: 'discardSlot', slot: 'feet' });
   assert.deepStrictEqual(resolveConsequenceSpec('QUANTEN', '', makePlayer()), { type: 'noEffect' }, 'ohne Schuhwerk: kein Effekt');
 
   // -------------------------------------------------------------------
@@ -478,14 +482,18 @@ function run() {
   assert.deepStrictEqual(sandwichJa.players[0].equipped.special, [sandwich.id], 'Halblinge dürfen das Sandwich anlegen');
 
   // Jede Karte in der Tabelle muss es auch wirklich geben und etwas bringen -
-  // entweder einen Kampfbonus oder (seit Clerical Errors) eine verliehene
-  // Rasse/Klasse wie bei FALSCHE OHREN und ZAUBERCOUCH. Ohne beides waere der
-  // Platz sinnlos.
+  // entweder einen Kampfbonus (gedruckt ODER, seit EISKALTES HÄNDCHEN, an der
+  // Regel selbst - siehe equippedBonusSum-Rueckfall) oder (seit Clerical
+  // Errors) eine verliehene Rasse/Klasse wie bei FALSCHE OHREN und
+  // ZAUBERCOUCH. Ohne alle drei waere der Platz sinnlos.
   Object.keys(SPECIAL_SLOT_ITEMS).forEach((name) => {
     const c = findCard(name);
-    const bringtWas = (typeof c.bonus === 'number' && c.bonus !== 0) || !!ITEM_GRANTS_TRAIT[name];
+    const regel = SPECIAL_SLOT_ITEMS[name];
+    const bringtWas = (typeof c.bonus === 'number' && c.bonus !== 0)
+      || (typeof regel.bonus === 'number' && regel.bonus !== 0)
+      || !!ITEM_GRANTS_TRAIT[name];
     assert.ok(bringtWas, `${name}: Spezialausrüstung ohne Kampfbonus und ohne verliehene Rasse/Klasse`);
-    assert.ok(SPECIAL_SLOTS[SPECIAL_SLOT_ITEMS[name].slot], `${name}: verweist auf einen unbekannten Platz`);
+    assert.ok(SPECIAL_SLOTS[regel.slot], `${name}: verweist auf einen unbekannten Platz`);
   });
 
   // MIETLING wurde aus dem Spiel genommen.

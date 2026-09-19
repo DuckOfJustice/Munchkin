@@ -428,13 +428,50 @@ function pickItemsWorthGold(player, gold) {
   return { summe, weg };
 }
 
+// Alle Ids, die eine Hand belegen: gedruckte Handgegenstaende plus
+// Spezialslot-Karten mit slotKind 'hand' (z.B. ZWEIHAENDIGES SCHWERT). Eine
+// Stelle fuer "was ist ueberhaupt eine Waffe" - benutzt von KALI (waffenAnzahl
+// unten) und von MONDJUNGFERN (excludeIds in combatTotals), damit beide
+// niemals auseinanderlaufen.
+function handItemIds(player) {
+  const ids = new Set((player.equipped.hands || []).filter(Boolean));
+  (player.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
+  return ids;
+}
+
 // room ist optional: ohne ihn zaehlen nur die gedruckten Boni, mit ihm auch
-// die Kartenanhaenge (VERGIFTET/GESEGNET, je +2).
-function equippedBonusSum(player, room) {
+// die Kartenanhaenge (VERGIFTET/GESEGNET, je +2). excludeIds (optional):
+// Gegenstands-Ids, die komplett aussen vor bleiben - samt ihrer Anhaenge,
+// siehe MONDJUNGFERN in combatTotals.
+function equippedBonusSum(player, room, excludeIds) {
   return equippedItemIds(player).reduce((sum, id) => {
+    if (excludeIds && excludeIds.has(id)) return sum;
     const c = card(id);
-    return sum + (c && c.bonus ? c.bonus : 0) + attachmentBonusSum(room, id);
+    // Rueckfall auf den Bonus der Spezialplatz-Regel: das EISKALTE HÄNDCHEN
+    // ist eine Monsterkarte und nennt in den Rohdaten selbst keinen Bonus.
+    const regelBonus = (specialSlotRule(c) || {}).bonus || 0;
+    return sum + (c && c.bonus ? c.bonus : regelBonus) + attachmentBonusSum(room, id);
   }, 0);
+}
+
+// Die Karte, die einen gedruckten Platz (Kopf/Ruestung/Schuhe) belegt - egal,
+// wo sie wirklich liegt: ein geschummelter Gegenstand liegt auf dem
+// Spezialplatz (siehe handleEquipItem), traegt seinen slotKind aber weiter.
+// EINE Stelle fuer alle, die sonst direkt in player.equipped[slot] schauen.
+// Liegen zwei Karten desselben slotKind an (nur geschummelt moeglich), gewinnt
+// die auf dem gedruckten Platz: equippedItemIds liefert Kopf/Ruestung/Schuhe
+// vor dem Spezialplatz. "Ruestung verlieren" nimmt also die echte zuerst.
+function getrageneSlotKarte(player, slot) {
+  return equippedItemIds(player).find((id) => (card(id) || {}).slotKind === slot) || null;
+}
+
+// MIESER SPIEGEL/GEMEINE GHOULE lassen nur Ruestungsboni stehen. Summiert
+// statt eines einzelnen Slots: geschummelt kann eine zweite Ruestung anliegen
+// (siehe getrageneSlotKarte), und beide sind Ruestungsboni.
+function ruestungsBonusSumme(player) {
+  return equippedItemIds(player)
+    .filter((id) => (card(id) || {}).slotKind === 'armor')
+    .reduce((sum, id) => sum + ((card(id) || {}).bonus || 0), 0);
 }
 
 // Machtgruppe Höllenritter, "Höllenritterrüstung": eine im Kampf +5 werte
@@ -453,11 +490,14 @@ function hellknightArmorBonus(player) {
 // RACE_ITEM_BONUS in src/cards/passives.js - heute nur der Gnom). Zaehlt wie
 // ein Gegenstandsbonus: MIESER SPIEGEL und GEMEINE GHOULE unterdruecken ihn
 // entsprechend, siehe combatTotals.
-function raceItemBonusSum(player) {
+// excludeIds (optional): siehe equippedBonusSum - dieselbe Ausschlussmenge,
+// damit RACE_ITEM_BONUS (z.B. GNOM) nicht ueber die Rasse zurueckholt, was
+// MONDJUNGFERN gerade an Waffenbonus gestrichen hat.
+function raceItemBonusSum(player, excludeIds) {
   return player.races.reduce((sum, id) => {
     const c = card(id);
     const fn = c && RACE_ITEM_BONUS[c.name.toUpperCase()];
-    return sum + (fn ? fn(player) : 0);
+    return sum + (fn ? fn(player, excludeIds) : 0);
   }, 0);
 }
 
@@ -467,13 +507,20 @@ function baseStrength(player, room) {
 
 // ITEM_CONDITIONAL_BONUS: siehe src/cards/passives.js (dort zusammen mit den
 // übrigen Dauerwirkungstabellen geladen, obwohl die Nutzung hier ist).
-
-function conditionalItemBonusSum(player, monsters, untot) {
+// excludeIds (optional): siehe equippedBonusSum.
+function conditionalItemBonusSum(player, monsters, untot, excludeIds) {
   if (!player || !monsters || !monsters.length) return 0;
+  // EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
+  // Schaden." Verdoppeln heisst: den gedruckten Bonus ein zweites Mal
+  // dazuzaehlen. Generisch ueber FIRE_ITEMS, damit neue Feuergegenstaende
+  // automatisch mitzaehlen.
+  const eisriese = monsters.some((m) => m && m.name === 'EISRIESE');
   return equippedItemIds(player).reduce((sum, id) => {
+    if (excludeIds && excludeIds.has(id)) return sum;
     const c = card(id);
     const fn = c && ITEM_CONDITIONAL_BONUS[c.name];
-    return sum + (fn ? fn(player, monsters, !!untot) : 0);
+    const feuer = (eisriese && c && FIRE_ITEMS.has(c.name)) ? (c.bonus || 0) : 0;
+    return sum + (fn ? fn(player, monsters, !!untot) : 0) + feuer;
   }, 0);
 }
 
@@ -501,6 +548,14 @@ function unequipSlotCard(player, cardId) {
 // ---------------------------------------------------------------------------
 
 function publicPlayer(room, p) {
+  // RIESENSTINKTIER: die Strafe endet beim LESEN, sobald keine Kleidung mehr
+  // anliegt (siehe stinktierStrafeAktiv). Ausruestung kann auf vielen Wegen
+  // verschwinden, nicht nur ueber handleUnequipItem - Verkauf, Diebstahl,
+  // Fluch, Schlimme Dinge, Tod. Dieser eine Aufruf in der Serialisierung
+  // normalisiert activeCurses fuer ALLE Leser: die Anzeige im Client zeigt
+  // keine abgelaufene Strafe mehr an, und der WUNSCHRING, der die Rohliste
+  // liest, kann nicht mehr an sie verschwendet werden.
+  stinktierStrafeAktiv(p);
   return {
     id: p.id,
     name: p.name,
@@ -836,9 +891,8 @@ function handleDrawDoor(room, playerId) {
       room.doorDiscard.push(id);
       room.turnPhase = 'aerger';
       // AMAZONE: "Sie erhalten stattdessen 1 Schatz."
-      const geschenk = MONSTER_REFUSES_TREASURE[c.name] || 0;
-      const gezogen = [];
-      for (let i = 0; i < geschenk; i++) { const t = drawTreasure(room); if (t) gezogen.push(t); }
+      const geschenkSoll = MONSTER_REFUSES_TREASURE[c.name] || 0;
+      const gezogen = zieheSchaetzeFuer(room, player, geschenkSoll);
       gezogen.forEach((tid) => player.hand.push(tid));
       if (gezogen.length) {
         player.lastReward = {
@@ -846,7 +900,10 @@ function handleDrawDoor(room, playerId) {
           cardIds: gezogen, levelsGained: 0, monsterNames: [c.name],
         };
       }
-      log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter${gezogen.length ? `, laesst aber ${gezogen.length} Schatzkarte(n) da` : ''}. Phase 2: Auf Ärger aus sein.`, [id]);
+      const geschenkHinweis = (geschenkSoll && !gezogen.length && hatSchatzSperre(player))
+        ? `, aber ${player.name} steht auf der Störerliste und bekommt nichts`
+        : (gezogen.length ? `, laesst aber ${gezogen.length} Schatzkarte(n) da` : '');
+      log(room, `"${c.name}" greift ${player.name} nicht an und zieht weiter${geschenkHinweis}. Phase 2: Auf Ärger aus sein.`, [id]);
     } else if (monsterPassOption(id, player)) {
       // "Kaempfen oder vorbeigehen und winken" - Halblinge bekommen die Wahl
       // gar nicht angeboten (monsterPassOption), die muessen kaempfen.
@@ -1026,6 +1083,11 @@ function handlePlayCurseFromHand(room, playerId, cardId, targetId) {
   if (room.winner) return;
   if (kartenSperreAktiv(room, playerId, targetId)) {
     log(room, `${player.name} steht unter einer Einstweiligen Verfügung von ${target.name} - kein Fluch.`);
+    touchRoom(room);
+    return;
+  }
+  if (stinktierSperre(room, playerId) && combatParticipants(room).some((p) => p.id === targetId)) {
+    log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - kein Fluch gegen ${target.name}.`);
     touchRoom(room);
     return;
   }
@@ -1278,15 +1340,16 @@ function applyPrimitiveAction(room, player, action) {
     case 'wegjagenMitSchatz': {
       const m = card(action.cardId);
       room.doorDiscard.push(action.cardId);
-      const drawn = [];
-      for (let i = 0; i < (m.treasureCount || 0); i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+      const drawn = zieheSchaetzeFuer(room, player, m.treasureCount || 0);
       drawn.forEach((cid) => player.hand.push(cid));
       player.lastReward = {
         seq: (player.lastReward ? player.lastReward.seq : 0) + 1,
         cardIds: drawn, levelsGained: 0, monsterNames: [m.name],
       };
       room.turnPhase = 'aerger';
-      return `jagt "${m.name}" weg, ${drawn.length} Schatzkarte(n), keine Stufe`;
+      return (!drawn.length && (m.treasureCount || 0) && hatSchatzSperre(player))
+        ? `jagt "${m.name}" weg, keine Stufe - ${player.name} steht auf der Störerliste und bekommt keinen Schatz`
+        : `jagt "${m.name}" weg, ${drawn.length} Schatzkarte(n), keine Stufe`;
     }
     // PACKRATTE: "Wenn du keine Gegenstaende im Spiel hast, erhaeltst du einen
     // von der Packratte. Ziehe zwei offene Schaetze und waehle einen aus. Du
@@ -1294,9 +1357,11 @@ function applyPrimitiveAction(room, player, action) {
     case 'packratteGeschenk': {
       const m = card(action.cardId);
       room.doorDiscard.push(action.cardId);
-      const gezogen = [];
-      for (let i = 0; i < 2; i++) { const t = drawTreasure(room); if (t) gezogen.push(t); }
       room.turnPhase = 'aerger';
+      if (hatSchatzSperre(player)) {
+        return `"${m.name}" will schenken, aber ${player.name} steht auf der Störerliste und bekommt nichts`;
+      }
+      const gezogen = zieheSchaetzeFuer(room, player, 2);
       if (!gezogen.length) return `"${m.name}" zieht weiter - der Schatzstapel ist leer`;
       if (gezogen.length === 1) {
         player.hand.push(gezogen[0]);
@@ -1381,6 +1446,20 @@ function applyPrimitiveAction(room, player, action) {
       room.turnPhase = 'aerger';
       return `laesst "${card(chosen).name}" fallen - "${card(action.cardId).name}" lenkt ab (automatische Flucht)`;
     }
+    // EISKALTES HÄNDCHEN: kein Kampf, der Ring geht weg, die Monsterkarte
+    // wird zur Ausruestung. Der Ring wird aus der Hand ODER der Ausruestung
+    // genommen - "geben" heisst hergeben.
+    case 'haendchenBesaenftigen': {
+      const m = card(action.cardId);
+      const ringId = player.hand.find((id) => (card(id) || {}).name === 'WUNSCHRING')
+        || equippedItemIds(player).find((id) => (card(id) || {}).name === 'WUNSCHRING');
+      if (!ringId) return 'kein Wunschring da';
+      if (player.hand.includes(ringId)) removeFromHand(player, ringId); else unequipSlotCard(player, ringId);
+      discardCard(room, ringId);
+      player.equipped.special = [...specialSlotCards(player, 'special'), action.cardId];
+      room.turnPhase = 'aerger';
+      return `gibt den Wunschring - "${m.name}" wird die kleine Freundin (+3 im Kampf)`;
+    }
     case 'death':
       applyDeathConsequence(room, player);
       return 'Tod';
@@ -1390,6 +1469,15 @@ function applyPrimitiveAction(room, player, action) {
     case 'levelUp':
       setLevel(player, player.level + action.amount);
       return `+${action.amount} Stufe(n) (jetzt Stufe ${player.level})`;
+    // Monster-Schlimme-Dinge, die ueber diese eine Konsequenz hinaus
+    // weiterwirken. Landen im selben Tracker wie die anhaltenden Flueche
+    // (activeCurses) - deshalb beendet der WUNSCHRING sie mit, was gewollt
+    // ist: im Spielgefuehl sind es Flueche, und der Ring sagt "beendet jeden
+    // Fluch". Der Name kommt aus der Action, weil die Konsequenz-Funktionen
+    // nur (player, room) sehen und die Monsterkarte selbst nicht kennen.
+    case 'lingeringCurse':
+      applyLingeringRule(room, player, action.name, action.cardId || null, action);
+      return action.hinweis || 'anhaltende Wirkung';
     case 'levelUpAllPriests': {
       const priester = room.players.filter((p) => hasClass(p, 'PRIESTER'));
       if (!priester.length) return 'niemand ist Priester - keine Wirkung';
@@ -1399,10 +1487,11 @@ function applyPrimitiveAction(room, player, action) {
       return `Priester steigen 1 Stufe auf: ${priester.map((p) => p.name).join(', ')}`;
     }
     case 'drawTreasureN': {
-      const drawn = [];
-      for (let i = 0; i < action.n; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+      const drawn = zieheSchaetzeFuer(room, player, action.n);
       drawn.forEach((id) => player.hand.push(id));
-      return `${drawn.length} Schatzkarte(n) gezogen`;
+      return (!drawn.length && action.n && hatSchatzSperre(player))
+        ? `keine Schatzkarte - ${player.name} steht auf der Störerliste`
+        : `${drawn.length} Schatzkarte(n) gezogen`;
     }
     // EINHEITSGRÖSSE: "Durchsuche den Schatzabwurfstapel, fange dabei oben an,
     // und tausche diese Karte gegen den ersten tragbaren Gegenstand, den du
@@ -1468,6 +1557,17 @@ function applyPrimitiveAction(room, player, action) {
         setLevel(player, player.level - roll);
         return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
       });
+    // KATZENMÄDCHEN: "Wirf den Wuerfel und lege so viele Karten aus deiner
+    // Hand ab." Gleiche Bauform wie diceLevelLoss, nur dass die Augenzahl die
+    // Anzahl der Karten ist statt der Stufen.
+    case 'diceDiscardHand':
+      return wurfMitFenster(room, player, 'handkartenverlust', (roll) => {
+        const anzahl = Math.min(roll, player.hand.length);
+        if (!anzahl) return `Würfelwurf ${roll} -> keine Handkarten zum Ablegen`;
+        applyPrimitiveAction(room, player, { type: 'queuedDiscardOwn', count: anzahl, quelle: 'hand',
+          cardName: action.cardName || 'Schlimme Dinge', prompt: 'Eine Handkarte ablegen' });
+        return `Würfelwurf ${roll} -> ${anzahl} Handkarte(n) ablegen`;
+      });
     case 'diceThresholdDeath':
       return wurfMitFenster(room, player, 'schlimmeDinge', (roll) => {
         if (action.deathValues.includes(roll)) {
@@ -1478,7 +1578,7 @@ function applyPrimitiveAction(room, player, action) {
         return `Würfelwurf ${roll} -> -${roll} Stufe(n)`;
       });
     case 'discardSlot': {
-      const id = player.equipped[action.slot];
+      const id = getrageneSlotKarte(player, action.slot);
       // Gekoppelte Spezialausruestung faellt mit (GNOMEX-ANZUG mit der
       // Ruestung, SCHRECKLICHE SOCKEN mit dem Schuhwerk) - auch dann, wenn der
       // eigentliche Platz gerade leer ist.
@@ -1488,7 +1588,9 @@ function applyPrimitiveAction(room, player, action) {
       gekoppelt.forEach((sid) => { unequipSlotCard(player, sid); discardCard(room, sid); });
       const mit = gekoppelt.length ? ` (mit ${gekoppelt.map((sid) => `"${card(sid).name}"`).join(', ')})` : '';
       if (!id) return gekoppelt.length ? `${slotLabelDe(action.slot)} war leer${mit} abgelegt` : `${slotLabelDe(action.slot)}: nichts getragen`;
-      player.equipped[action.slot] = null;
+      // unequipSlotCard statt player.equipped[slot] = null: die Karte kann
+      // auch geschummelt auf dem Spezialplatz liegen.
+      unequipSlotCard(player, id);
       discardCard(room, id);
       return `${slotLabelDe(action.slot)} "${card(id).name}"${mit} abgelegt`;
     }
@@ -1528,8 +1630,12 @@ function applyPrimitiveAction(room, player, action) {
       ids.forEach((id) => discardCard(room, id));
       let extra = '';
       if (ids.length > 1) {
-        const t = drawTreasure(room);
-        if (t) { player.hand.push(t); extra = `, +1 Schatz gezogen ("${card(t).name}")`; }
+        if (hatSchatzSperre(player)) {
+          extra = ` - ${player.name} steht auf der Störerliste und bekommt keinen Extraschatz`;
+        } else {
+          const [t] = zieheSchaetzeFuer(room, player, 1);
+          if (t) { player.hand.push(t); extra = `, +1 Schatz gezogen ("${card(t).name}")`; }
+        }
       }
       return `ganze Hand abgelegt (${ids.length} Karte(n))${extra}`;
     }
@@ -1728,6 +1834,23 @@ function applyPrimitiveAction(room, player, action) {
           candidateIds: ids, takeFrom: opfer.id };
       });
       return `${queue.length} Mitspieler nehmen je 1 Gegenstand`;
+    }
+    // PIÑATA: "Der Spieler, der nach dem Opfer an der Reihe ist, waehlt einen
+    // der Gegenstaende des Opfers, die im Spiel sind. Leg es ab."
+    // Spiegelbild zu queuedTakeItem: dieselbe Fremdauswahl, aber die Karte
+    // geht auf den Ablagestapel statt in die Hand der waehlenden Person.
+    case 'queuedDiscardItemOfVictim': {
+      const opfer = player;
+      const naechste = playerQueueFrom(room, opfer, 'after')[0];
+      if (!naechste) return 'niemand sonst am Tisch';
+      if (!equippedItemIds(opfer).length) return 'kein Gegenstand im Spiel';
+      openQueuedCardAction(room, action.cardName || 'Schlimme Dinge', [naechste], () => {
+        const ids = equippedItemIds(opfer);
+        if (!ids.length) return null;
+        return { kind: 'chooseCard', prompt: `Einen Gegenstand von ${opfer.name} ablegen`,
+          candidateIds: ids, discardVictim: opfer.id };
+      });
+      return `${findPlayer(room, naechste).name} waehlt einen Gegenstand zum Ablegen`;
     }
     case 'discardItemsWorthGold': {
       // VERSICHERUNGSVERTRETER: "Verliere Gegenstaende im Wert von 1.000
@@ -1951,9 +2074,14 @@ function applyPrimitiveAction(room, player, action) {
     case 'noEffect':
       return 'kein spielmechanischer Effekt';
     // WUNSCHRING: "Beendet jeden Fluch." - siehe TREASURE_POWER_OVERRIDES.
+    // Geloescht wird nach Wirkungsart, nicht nach Index - siehe
+    // fluchBeendenSpec in src/cards/treasures.js. Ist der gewaehlte Fluch
+    // inzwischen von selbst ausgelaufen, sagt die Meldung das ehrlich: die
+    // Karte ist trotzdem verbraucht, und niemand soll glauben, sie haette
+    // gewirkt.
     case 'clearCurse': {
-      const removed = clearActiveCurse(room, player, action.index);
-      return removed ? `Fluch "${removed.name}" beendet` : 'kein Fluch (mehr) vorhanden';
+      if (clearActiveCurseByKind(player, action.kind)) return `Fluch "${action.name}" beendet`;
+      return `Fluch "${action.name}" war schon vorbei - die Karte ist umsonst weg`;
     }
     default:
       return '';
@@ -1969,7 +2097,7 @@ const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
   card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
   resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
-  istGrosserGegenstand,
+  istGrosserGegenstand, getrageneSlotKarte,
 });
 
 const CONSEQUENCE_CONDITIONAL_RE = /\b(wenn|falls|sofern|es sei denn|außer|ansonsten|andernfalls|entweder)\b/i;
@@ -2252,6 +2380,32 @@ function kartenSperreAktiv(room, wer, gegen) {
   return (room.kartenSperren || []).some((k) => k.gesperrt === wer && k.geschuetzt === gegen);
 }
 
+// RIESENSTINKTIER: gesperrt ist, wer NICHT selbst kaempft. Der Kartentext
+// richtet sich an "deine Freunde" ("SIE können dir nicht helfen, dich
+// hintergehen, oder ..."), nicht an die kaempfende Person - die spielt ihre
+// eigenen Waffen und Traenke weiter. Eine Helfer:in kann es nicht geben, weil
+// schon die Anfrage gesperrt ist.
+function stinktierSperre(room, playerId) {
+  if (!room.combat || !combatHasMonster(room, MONSTER_LOCKS_OTHERS)) return false;
+  return !combatParticipants(room).some((p) => p.id === playerId);
+}
+
+// Kleidung und Ruestung im Sinne des Stinktiers: Kopf, Ruestung, Schuhe.
+// Hand-Gegenstaende (Waffen, Schilde) sind keine Kleidung.
+const KLEIDUNG_SLOTS = ['head', 'armor', 'feet'];
+
+// "... bevor du nicht alle getragene Kleidung und Rüstung ablegst."
+// ponytail: geprueft beim LESEN, nicht aufgeraeumt an jeder Stelle, an der
+// Ausruestung verschwinden kann (Ablegen, Verkaufen, Fluch, Schlimme Dinge) -
+// eine Pruefstelle statt fuenf, und sie kann nicht vergessen werden, wenn
+// spaeter ein sechster Weg dazukommt.
+function stinktierStrafeAktiv(player) {
+  if (!player || !(player.activeCurses || []).some((f) => f.kind === 'noHelpHalfGold')) return false;
+  if (KLEIDUNG_SLOTS.some((s) => getrageneSlotKarte(player, s))) return true;
+  clearActiveCurseByKind(player, 'noHelpHalfGold');
+  return false;
+}
+
 function applyTargetAction(room, actor, target, action) {
   switch (action.type) {
     case 'kartenSperre': {
@@ -2461,6 +2615,20 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
     clearCheatIfLost(player, chosenCardId);
     empfaenger.hand.push(chosenCardId);
     log(room, `${player.name}: "${pa.cardName}" -> 1 Karte an ${empfaenger.name} gegeben.`);
+  } else if (pa.discardVictim) {
+    // PIÑATA: die waehlende Person nimmt nichts - der Gegenstand geht weg.
+    const opfer = findPlayer(room, pa.discardVictim);
+    if (!opfer || !gehoert(opfer, chosenCardId)) {
+      log(room, `"${chosen ? chosen.name : chosenCardId}" gehoert ${opfer ? opfer.name : '?'} nicht mehr - nichts abgelegt.`);
+      finishCardAction(room, pa);
+      touchRoom(room);
+      return;
+    }
+    if (opfer.hand.includes(chosenCardId)) removeFromHand(opfer, chosenCardId);
+    else unequipSlotCard(opfer, chosenCardId);
+    clearCheatIfLost(opfer, chosenCardId);
+    discardCard(room, chosenCardId);
+    log(room, `${player.name}: "${pa.cardName}" -> "${chosen ? chosen.name : chosenCardId}" von ${opfer.name} abgelegt.`, [chosenCardId]);
   } else if (pa.discardOwn) {
     // SCHNECKEN AUF SPEED: die eigene Wahl geht direkt auf den Ablagestapel.
     if (!gehoert(player, chosenCardId)) {
@@ -2601,6 +2769,24 @@ function combatHasMonster(room, nameSet) {
   return !!room.combat && room.combat.monsterIds.some((id) => { const c = card(id); return c && nameSet.has(c.name); });
 }
 
+// LUSTMONSTER: "ein Charakter des anderen Geschlechts". istGeschlecht liefert
+// fuer das geschlechtslose STRICHMÄNNCHEN ueberall false - fuer eine Regel,
+// die ein Geschlecht NENNT, ist es keins von beiden, und zwar auf beiden
+// Seiten der Bedingung.
+function passendeHilfe(room) {
+  const c = room.combat;
+  if (!c || !c.helperId) return false;
+  const actor = findPlayer(room, c.actorId);
+  const helfer = findPlayer(room, c.helperId);
+  return istAnderesGeschlecht(actor, helfer);
+}
+
+function istAnderesGeschlecht(a, b) {
+  if (!a || !b || !a.gender || !b.gender) return false;
+  return (istGeschlecht(a, 'm') && istGeschlecht(b, 'w'))
+    || (istGeschlecht(a, 'w') && istGeschlecht(b, 'm'));
+}
+
 // Dauerwirkungstabellen (CURSE_PROOF_ITEMS, MONSTER_REFUSES, ...): siehe
 // src/cards/passives.js. Aufruf hier - erst nach hasRace/hasClass, aber vor
 // der ersten Benutzung der Tabellen (curseProtectionItem gleich darunter).
@@ -2608,7 +2794,8 @@ const passivesFactory = require('./src/cards/passives.js');
 const {
   CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
   MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
-  MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
+  MONSTER_IGNORES_WEAPONS, MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, MONSTER_LOCKS_OTHERS,
+  FLEE_ITEM_BONUS,
   FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,
   FLEE_TREASURE_ITEMS, MONSTER_EXTRA_LEVEL, FIRE_ITEMS,
   CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
@@ -2616,8 +2803,8 @@ const {
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
-  BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT,
-} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht });
+  BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
+} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
 // Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
@@ -2641,6 +2828,13 @@ function curseProtectionItem(player) {
 function addActiveCurse(room, player, cardName, cardId) {
   const regel = LINGERING_CURSES[cardName];
   if (!regel) return;
+  applyLingeringRule(room, player, cardName, cardId, regel);
+}
+
+// Das Eintragen selbst - getrennt vom Nachschlag in LINGERING_CURSES, damit
+// auch Monster-Schlimme-Dinge (Primitiv 'lingeringCurse') denselben Tracker
+// benutzen koennen, ohne eine zweite Tabelle danebenzustellen.
+function applyLingeringRule(room, player, cardName, cardId, regel) {
   // ponytail: defensiv statt eine Invariante vorauszusetzen - ältere
   // Test-Helper/Spielstände ohne activeCurses sollen nicht abstürzen.
   if (!player.activeCurses) player.activeCurses = [];
@@ -2674,11 +2868,19 @@ function addActiveCurse(room, player, cardName, cardId) {
   }
 }
 
-// Rückgabewert statt eigenem log() - die aufrufende Stelle (applyPrimitiveAction
-// 'clearCurse' -> handleUseCardPower/handleResolveCardChoice) loggt bereits
-// einheitlich "X spielt WUNSCHRING: ...", wie bei jeder anderen Sonderkraft.
-function clearActiveCurse(room, player, index) {
-  return (player.activeCurses || []).splice(index, 1)[0] || null;
+// Gezieltes Loeschen nach Wirkungsart - der EINZIGE Weg, einen Eintrag aus
+// activeCurses zu nehmen. Gebraucht von den Eintraegen, die nicht nach fester
+// Dauer enden, sondern wenn eine Bedingung eintritt (Stinktier: alle Kleidung
+// abgelegt; Weihnachtsmann: ein Monster ohne Hilfe getoetet) - und vom
+// WUNSCHRING. Rueckgabewert sagt, ob wirklich etwas weg ist - die aufrufende
+// Stelle loggt nur dann. Eine index-basierte Variante gab es hier bis
+// 2026-09-17; sie ist weg, weil ein gespeicherter Index veraltet, sobald die
+// Liste sich unter einem offenen Wahldialog verschiebt.
+function clearActiveCurseByKind(player, kind) {
+  const vorher = (player.activeCurses || []).length;
+  if (!vorher) return false;
+  player.activeCurses = player.activeCurses.filter((f) => f.kind !== kind);
+  return player.activeCurses.length < vorher;
 }
 
 // "Nächster Kampf"-Flüche gelten für GENAU den einen folgenden Kampf - egal
@@ -2699,6 +2901,65 @@ function curseCombatModifier(player) {
 
 function curseSuppressesItemBonuses(player) {
   return (player.activeCurses || []).some((f) => f.kind === 'noItemBonusExceptArmor');
+}
+
+// LUSTMONSTER: "in deinem naechsten Kampf werden deine Hand-Gegenstaende
+// nutzlos" - dieselbe Ausblendung, die MONDJUNGFERN im Kampf macht, nur an
+// der Person statt am Monster.
+function curseHidesHandItems(player) {
+  return (player.activeCurses || []).some((f) => f.kind === 'noHandItemBonus');
+}
+
+// WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... auch nicht von anderen
+// Spielern." Betroffene Karten werden gar nicht erst GEZOGEN statt gezogen
+// und weggeworfen - der Text sagt "du erhaeltst keine", der Stapel soll
+// dadurch nicht schrumpfen.
+function hatSchatzSperre(player) {
+  return !!player && (player.activeCurses || []).some((f) => f.kind === 'noTreasure');
+}
+
+// WEIHNACHTSMANN: "Du erhaeltst keine Schatzkarten ... auch nicht von
+// anderen Spielern." Gesperrte Personen ziehen gar nicht erst - der
+// Stapel darf durch die Sperre nicht schrumpfen. EINZIGER Ort, der fuer
+// eine belohnende Ziehung (Kampfsieg, Geschenk, Bonuszug, ...) direkt
+// drawTreasure() aufrufen darf - jede neue Belohnungsstelle geht ab jetzt
+// hier durch, statt eine eigene hatSchatzSperre-Abfrage zu bauen.
+// ponytail: deckt jede Ziehung ab, bei der EINE Person das Ergebnis
+// bekommt (die ueblichen "ziehe N Schaetze"-Faelle). Deckt NICHT ab: den
+// Erstausteilungs-Zug bei Spielstart (noch keine Flueche moeglich) und
+// UNFASSBAR REICH/schatzTauschen (schon oberhalb ueber fuerActor.length
+// gesperrt - ein Aufruf hier waere die zweite Pruefung fuer dieselbe
+// Person). Fuer eine Ziehung, die auf zwei Personen verteilt wird (Kampf-
+// Hauptausschuettung), gilt die Sperre der Person, fuer die tatsaechlich
+// gezogen wird - siehe resolveCombatWin.
+// Deckt ausserdem NICHT ab: eine Schatzkarte, die OHNE drawTreasure() die
+// Hand wechselt - also nicht gezogen, sondern von einer Person zur
+// anderen bewegt wird - oder ohne drawTreasure() aus einem Ablagestapel
+// kommt. Bekannte Faelle:
+//   - DIEB "Diebstahl" (stealItemFrom nimmt einen bereits getragenen
+//     Schatz-Gegenstand direkt von der bestohlenen Person),
+//   - ENTE DER VIELEN SACHEN, Schritt "klauen" (nimmt eine zufaellige
+//     Handkarte der naechsten Person, die zufaellig auch ein Schatz sein
+//     kann),
+//   - PRIESTER-Wiederbelebung (handlePriestResurrect: treasureDiscard.pop()
+//     direkt auf die Hand),
+//   - EINHEITSGRÖSSE (takeFirstWearableFromTreasureDiscard: erster
+//     tragbarer Gegenstand aus dem Schatz-Ablagestapel),
+//   - openCardCardChoice/WÜNSCHELSTAB (freie Wahl einer Karte aus den
+//     Ablagestapeln),
+//   - Leichenfund nach einem Tod (applyDeathConsequence verteilt die
+//     Ausruestung der gestorbenen Person an die anderen).
+// Alle bewusst ungefixt (Ruling 2026-09-17): seltener
+// als PESTRATTEN/AMAZONE, und ein sauberer Fix braucht ein Audit der
+// gesamten .hand.push(-Flaeche in server.js, nicht nur dieser zwei
+// Stellen. Aufruestweg: diese Flaeche durchsuchen und jede Stelle, die
+// eine Schatzkarte von einer Person zur anderen bewegt, ueber
+// hatSchatzSperre(empfaenger) fuehren (siehe finishTrade als Vorbild).
+function zieheSchaetzeFuer(room, player, n) {
+  if (hatSchatzSperre(player)) return [];
+  const drawn = [];
+  for (let i = 0; i < n; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+  return drawn;
 }
 
 // HUHN AUF DEINEM KOPF: "-1 auf alle Wuerfe." Gilt fuer jeden Wurf, den die
@@ -2830,7 +3091,10 @@ function monsterTraitBonusSum(room) {
       const kandidaten = rule.nurKaempfer ? parts.filter((p) => p.id === room.combat.actorId) : parts;
       const hit = kandidaten.some((p) => (!(immun && traitImmun(p, 'races')) && (rule.races || []).some((r) => monsterSeesRace(p, r)))
         || (!(immun && traitImmun(p, 'classes')) && (rule.classes || []).some((k) => hasClass(p, k)))
-        || (rule.wennErfuellt ? rule.wennErfuellt(p) : false));
+        // Der Raum kommt als zweites Argument dazu, damit eine Regel den
+        // Kampfzustand sehen kann (FEUERLÖSCHER: "+5, wenn dir niemand
+        // hilft"). Alle aelteren Regeln ignorieren ihn.
+        || (rule.wennErfuellt ? rule.wennErfuellt(p, room) : false));
       return teil + (hit ? rule.bonus : 0);
     }, 0);
   }, 0);
@@ -3183,6 +3447,11 @@ function handleThiefBackstab(room, playerId, discardCardId, targetId) {
   const stichOMat = dieb && equippedItemIds(dieb).some((id) => BACKSTAB_ITEMS.has((card(id) || {}).name));
   if (!dieb || !opfer || (!hasClass(dieb, 'DIEB') && !stichOMat)) return;
   if (dieb.id === opfer.id) return;                                     // nicht sich selbst
+  if (stinktierSperre(room, playerId)) {
+    log(room, `${dieb.name} kommt am Riesenstinktier nicht vorbei - kein Rückenfall.`);
+    touchRoom(room);
+    return;
+  }
   if (!combatParticipants(room).some((p) => p.id === opfer.id)) return; // nur Kaempfende
   if (!dieb.hand.includes(discardCardId)) return;
   c.backstabs = c.backstabs || {};
@@ -3371,8 +3640,8 @@ function startCombat(room, actorId, monsterIds, opts) {
     fleeFailed: [],
     fromHand: !!opts.fromHand,
     classDiscards: {}, // "<playerId>:combat"/"<playerId>:flee" -> Anzahl bereits abgeworfener Karten
-    fleeBonus: 0,
-    playedFleeBonus: 0,  // STEAM-CODE: Weglauf-Zuschlag aus gespielten Kampfkarten      // Summe der Flugzauber-Karten
+    fleeBonus: 0,        // Summe der Flugzauber-Karten
+    playedFleeBonus: 0,  // STEAM-CODE: Weglauf-Zuschlag aus gespielten Kampfkarten
     treasureDelta: 0,  // Schatzbonus/-malus gespielter Monster-Verstärker
     // Gespielte Monster-Verstärker. Die meisten wirken nur über ihr
     // bonus-Feld (sofort in monsterModifier), zwei aber über den weiteren
@@ -3466,6 +3735,7 @@ function combatTotals(room) {
     return sum + stufe;
   }, 0);
   const ignoreLevel = combatHasMonster(room, MONSTER_IGNORES_LEVEL);
+  const ignoreWeapons = combatHasMonster(room, MONSTER_IGNORES_WEAPONS);
   const ignoreBonuses = combatHasMonster(room, MONSTER_IGNORES_BONUSES);
   let playerStrength;
   if (ignoreBonuses) {
@@ -3478,9 +3748,19 @@ function combatTotals(room) {
       // sind Rüstungsboni" - sonst zaehlen Ausruestung + situative Item-Boni
       // wie gewohnt. hellknightArmorBonus bleibt in beiden Faellen stehen
       // (kein regulaerer Gegenstands-Slot, siehe Kommentar dort).
+      // MONDJUNGFERN: "keine Vorteile durch Waffen" - die Waffen-Ids fliegen
+      // hier komplett aus allen drei Item-Summanden, statt hinterher eine
+      // zweite Summe abzuziehen. Sonst ueberleben Kartenanhaenge an der Waffe,
+      // konditionale Item-Boni (VORPALE KLINGE, EISRIESE-Verdopplung, ...)
+      // und rassenabhaengige Item-Boni (GNOM) den Abzug.
+      // ignoreWeapons haengt am Monster und gilt fuer beide Seiten gleich,
+      // curseHidesHandItems an der Person - deshalb steht der Ausdruck hier
+      // in der sides-Schleife, wo p bekannt ist.
+      const excludeIds = (ignoreWeapons || curseHidesHandItems(p)) ? handItemIds(p) : null;
       const items = curseSuppressesItemBonuses(p)
-        ? ((card(p.equipped.armor) || {}).bonus || 0)
-        : equippedBonusSum(p, room) + raceItemBonusSum(p) + conditionalItemBonusSum(p, monsters, combatHasUndead(room));
+        ? ruestungsBonusSumme(p)
+        : equippedBonusSum(p, room, excludeIds) + raceItemBonusSum(p, excludeIds)
+          + conditionalItemBonusSum(p, monsters, combatHasUndead(room), excludeIds);
       return sum + p.level + items + hellknightArmorBonus(p)
         + curseCombatModifier(p) - (ignoreLevel ? p.level : 0);
     }, 0) + c.actorModifier + backstabMalus(room);
@@ -3632,16 +3912,17 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       if (action.returnToDoorDeckBottom) [...new Set(c.monsterIds)].forEach((id) => room.doorDeck.unshift(id));
       else discardMonsterIds(room.doorDiscard, c.monsterIds);
       const drawn = [];
+      let actor = null;
       if (action.leavesTreasure) {
         // Schatz wie beim Sieg: an die kämpfende Person, nicht an die, die
         // den Trank gespielt hat (jede:r am Tisch darf ihn einwerfen).
-        const actor = findPlayer(room, c.actorId) || player;
+        actor = findPlayer(room, c.actorId) || player;
         // MAHLZEIT! nennt eine feste Zahl, sonst gilt der treasureCount der
         // zurueckgelassenen Monster.
         const treasureCount = typeof action.fixedTreasures === 'number'
           ? action.fixedTreasures
           : monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0);
-        for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+        drawn.push(...zieheSchaetzeFuer(room, actor, treasureCount));
         drawn.forEach((id) => actor.hand.push(id));
         actor.lastReward = {
           seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
@@ -3652,7 +3933,9 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       }
       beendeKampfOhneSieg(room, c, action.thenLoot);
       return action.leavesTreasure
-        ? `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`
+        ? (!drawn.length && actor && hatSchatzSperre(actor)
+            ? `Kampf gegen ${names} beendet, keine Stufe - ${actor.name} steht auf der Störerliste und bekommt keinen Schatz`
+            : `Kampf gegen ${names} beendet, keine Stufe, ${drawn.length} zurückgelassene Schatzkarte(n)`)
         : `Kampf gegen ${names} beendet, kein Schatz`;
     }
     case 'doubleStrength': {
@@ -3747,25 +4030,29 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
         else room.doorDiscard.push(mId);
       }
       const drawn = [];
+      let actorFuerSchatz = null;
       if (action.leavesTreasure) {
-        const actor = findPlayer(room, c.actorId) || player;
-        for (let i = 0; i < (m.treasureCount || 0); i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
-        drawn.forEach((id) => actor.hand.push(id));
-        actor.lastReward = {
-          seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
+        actorFuerSchatz = findPlayer(room, c.actorId) || player;
+        drawn.push(...zieheSchaetzeFuer(room, actorFuerSchatz, m.treasureCount || 0));
+        actorFuerSchatz.lastReward = {
+          seq: (actorFuerSchatz.lastReward ? actorFuerSchatz.lastReward.seq : 0) + 1,
           cardIds: drawn, levelsGained: 0, monsterNames: [m.name],
         };
+        drawn.forEach((id) => actorFuerSchatz.hand.push(id));
       }
+      const schatzHinweis = (!drawn.length && actorFuerSchatz && (m.treasureCount || 0) && hatSchatzSperre(actorFuerSchatz))
+        ? `, aber ${actorFuerSchatz.name} steht auf der Störerliste und bekommt nichts`
+        : (drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : '');
       // ponytail: der Anteil gespielter Verstaerker (monsterModifier,
       // treasureDelta) bleibt im Kampf, auch wenn er auf dem entfernten
       // Monster lag - genau wie bei ILLUSION. Aufruestweg waere ein
       // monsterModifier pro Monster-ID.
       if (!c.monsterIds.length) {
         beendeKampfOhneSieg(room, c, action.thenLoot);
-        return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : ''}`;
+        return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${schatzHinweis}`;
       }
       refreshCombatReady(room);
-      return `"${m.name}" verschwindet${drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : ''} - der Kampf geht weiter`;
+      return `"${m.name}" verschwindet${schatzHinweis} - der Kampf geht weiter`;
     }
     case 'killMonsterInCombat': {
       const idx = c.monsterIds.findIndex((id) => { const m = card(id); return m && m.name === action.name; });
@@ -3888,8 +4175,18 @@ function handlePlayCombatCard(room, playerId, cardId) {
     touchRoom(room);
     return;
   }
+  // RIESENSTINKTIER, weisse Liste: erlaubt sind genau die zwei Ausnahmen, die
+  // der Kartentext nennt. Alles andere ist gesperrt - ausdruecklich auch
+  // KUMPEL, ILLUSION, HILF MIR und ÜBERFALLTRANK: es sind Karten, die "fuer
+  // oder gegen dich" wirken, und die Karte nimmt sie nicht aus.
   const c = card(cardId);
   if (!c) return;
+  if (stinktierSperre(room, playerId)
+    && !(c.name === 'WANDERNDES MONSTER' || isMonsterEnhancerCard(c))) {
+    log(room, `${player.name} kommt am Riesenstinktier nicht vorbei - nur Wandernde Monster und Monsterverstärker gehen durch.`);
+    touchRoom(room);
+    return;
+  }
   // COMBAT_REACTION_CARDS (Kumpel, Wanderndes Monster, Illusion, Hilf mir,
   // Ueberfalltrank): sie greifen selbst in monsterIds/actorId ein statt nur
   // einen Zahlenwert zu addieren - deshalb vor der Verstaerker-/Trank-Logik.
@@ -3933,7 +4230,21 @@ function handlePlayCombatCard(room, playerId, cardId) {
     // ihm +10." ponytail: verdoppelt wird der Kampfbonus, den die Karte
     // ausdruecklich nennt - der Schatzbonus bleibt wie gedruckt.
     const trottel = room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'RAPIER-TROTTEL');
-    const zuschlag = trottel ? c.bonus * 2 : c.bonus;
+    // FUNGUS: "Wenn der Fungus Gigantisch wird, erhaelt er einen Bonus von
+    // +25, statt +10!" Gleiche Bauform wie der RAPIER-TROTTEL, nur ein fester
+    // Wert statt einer Verdopplung.
+    const fungusGigantisch = c.name === 'GIGANTISCH'
+      && room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'FUNGUS');
+    const zuschlag = fungusGigantisch ? 25 : (trottel ? c.bonus * 2 : c.bonus);
+    // Fungus hat Vorrang: sein Text setzt einen FESTEN Ersatzwert (25 statt
+    // 10), keine Verdopplung des Kartenbonus - im Unterschied zum Trottel, der
+    // den gedruckten Bonus verdoppelt. Bei beiden gleichzeitig (Fungus +
+    // Rapier-Trottel im selben Kampf) greift nur die feste Zahl, der Trottel
+    // traegt nichts mehr bei - die Logzeile darf deshalb nur den Zusatz
+    // nennen, der tatsaechlich gegriffen hat, sonst behauptet sie zwei
+    // einander ausschliessende Dinge (siehe Review M3).
+    const zusatzText = fungusGigantisch ? ' - der Fungus erhält 25 statt 10'
+      : (trottel ? ' - der Rapier-Trottel verdoppelt' : '');
     room.combat.monsterModifier += zuschlag;
     // Getrennt mitgezaehlt, weil KUMPEL ("ein weiteres Monster mit den
     // gleichen Monsterverstaerker-Karten") genau diesen Anteil ein zweites
@@ -3951,8 +4262,8 @@ function handlePlayCombatCard(room, playerId, cardId) {
       room.combat.enhancerTreasure = (room.combat.enhancerTreasure || 0) + delta;
     }
     room.doorDiscard.push(cardId);
-    log(room, `${player.name} spielt "${c.name}" im Kampf (${c.bonus >= 0 ? '+' : ''}${trottel ? c.bonus * 2 : c.bonus} für das Monster${trottel ? ' - der Rapier-Trottel verdoppelt' : ''}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
-    announceCardPlay(room, player, cardId, `${c.bonus >= 0 ? '+' : ''}${c.bonus} für das Monster`);
+    log(room, `${player.name} spielt "${c.name}" im Kampf (${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster${zusatzText}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
+    announceCardPlay(room, player, cardId, `${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster`);
     touchRoom(room);
     return;
   }
@@ -4137,9 +4448,22 @@ function handleRequestHelp(room, playerId, targetId, reward) {
   const actor = findPlayer(room, playerId);
   const target = findPlayer(room, targetId);
   if (!target || targetId === c.actorId) return;
+  if (stinktierSperre(room, targetId)) {
+    log(room, 'Das Riesenstinktier hält alle anderen auf 20 Meter Abstand - niemand hilft.');
+    touchRoom(room);
+    return;
+  }
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
+  // Steht VOR der Stinktier-Strafe: was das Monster im Kampf verbietet, ist
+  // der naeherliegende Grund - sonst bekaeme eine besprühte Person am
+  // Pavillon die Meldung, sie solle ihre Kleidung ablegen.
   if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
     log(room, 'Gegen dieses Monster darf niemand helfen.');
+    touchRoom(room);
+    return;
+  }
+  if (stinktierStrafeAktiv(actor)) {
+    log(room, `${actor.name} stinkt noch aus dem Riesenstinktier-Kampf - niemand hilft, solange Kleidung und Rüstung anliegen.`);
     touchRoom(room);
     return;
   }
@@ -4168,6 +4492,17 @@ function handleRespondHelp(room, playerId, accept) {
     accept = true;
   }
   if (accept) {
+    // LUSTMONSTER: die Zusage kommt nicht zustande, wenn das Geschlecht nicht
+    // passt. Bewusst hier und nicht in handleRequestHelp: das Fragen bleibt
+    // erlaubt, nur das Zustandekommen nicht - so sieht der Tisch im Verlauf,
+    // dass es versucht wurde.
+    if (combatHasMonster(room, MONSTER_REQUIRES_OTHER_GENDER)
+      && !istAnderesGeschlecht(findPlayer(room, c.actorId), target)) {
+      log(room, `${target.name} kann hier nicht helfen - das Lustmonster verlangt einen Charakter des anderen Geschlechts.`);
+      c.helperPending = null;
+      touchRoom(room);
+      return;
+    }
     c.helperId = playerId;
     // Die Zusage aus der Anfrage wird beim Sieg eingeloest (resolveCombatWin).
     c.helperReward = c.helperPending.reward || 0;
@@ -4255,23 +4590,35 @@ function handleEvaluateCombat(room, playerId) {
   // darf also selbst noch mit einem gezinkten Wuerfel geaendert werden. Dann
   // wartet die Auswertung auf das Fenster.
   if (hasenWurf(room, () => handleEvaluateCombat(room, playerId))) return;
+  resolveCombat(room);
+}
+
+function resolveCombat(room) {
+  const c = room.combat;
   const { playerStrength, monsterStrength } = combatTotals(room);
+  // LUSTMONSTER: "sonst kannst du das Lustmonster nicht besiegen". Ohne
+  // passende Hilfe ist der Kampf unabhaengig von der Kampfstaerke verloren -
+  // deshalb ganz oben, vor Krieger-Gleichstand UND ALUFOLIE-Notloesung. Ein
+  // Gleichstand ist auch ein Sieg, und die Notloesung waere sonst umsonst
+  // verbraucht (Karte weg, "zaehlt als Sieg" geloggt, direkt danach doch
+  // geflohen).
+  const lustOhneHilfe = combatHasMonster(room, MONSTER_REQUIRES_OTHER_GENDER) && !passendeHilfe(room);
   // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Greift vor der
   // ALUFOLIE-Notlösung, damit die Karte nicht unnötig verbraucht wird.
-  const warrior = playerStrength === monsterStrength
+  const warrior = !lustOhneHilfe && playerStrength === monsterStrength
     ? combatParticipants(room).find((p) => hasClass(p, 'KRIEGER')) : null;
   if (warrior) {
     log(room, `Gleichstand (${playerStrength} vs. ${monsterStrength}) - ${warrior.name} ist Krieger und gewinnt ihn.`);
     resolveCombatWin(room);
     return;
   }
-  const tie = playerStrength === monsterStrength ? findTieBreaker(room) : null;
+  const tie = !lustOhneHilfe && playerStrength === monsterStrength ? findTieBreaker(room) : null;
   if (tie) {
     removeFromHand(tie.player, tie.cardId);
     discardCard(room, tie.cardId);
     log(room, `${tie.player.name} setzt "${TIE_BREAKER_CARD}" ein: Gleichstand (${playerStrength} vs. ${monsterStrength}) zählt als Sieg.`, [tie.cardId]);
   }
-  if (playerStrength > monsterStrength || tie) {
+  if (!lustOhneHilfe && (playerStrength > monsterStrength || tie)) {
     resolveCombatWin(room);
   } else {
     c.mustFlee = true;
@@ -4281,7 +4628,9 @@ function handleEvaluateCombat(room, playerId) {
     c.fleeFailed = [];
     const wer = combatParticipants(room).length > 1
       ? ` Jede:r läuft einzeln weg (${combatParticipants(room).map((p) => p.name).join(', ')}).` : '';
-    log(room, `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`);
+    log(room, lustOhneHilfe
+      ? `Ohne Hilfe eines Charakters des anderen Geschlechts ist das Lustmonster nicht zu besiegen. Fliehen nötig!${wer}`
+      : `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`);
     touchRoom(room);
   }
 }
@@ -4290,6 +4639,14 @@ function resolveCombatWin(room) {
   const c = room.combat;
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
+  // "... bis du ein Monster ohne Hilfe tötest." Die Loeschung steht VOR der
+  // Schatzvergabe: wer die Strafe mit einem hilfsfreien Sieg abschuettelt,
+  // bekommt den Schatz dieses Kampfes schon wieder. Das ist die
+  // spielerfreundliche Lesart und erspart die Erklaerung, warum ausgerechnet
+  // der befreiende Sieg leer ausgeht.
+  if (!c.helperId && clearActiveCurseByKind(actor, 'noTreasure')) {
+    log(room, `${actor.name} hat ein Monster ohne Hilfe getötet und ist von der Störerliste runter.`);
+  }
   // MIESER SPIEGEL/GESCHLECHTSUMWANDLUNG gelten nur "im nächsten Kampf" -
   // der ist hiermit vorbei (gewonnen).
   clearNextCombatCurses([actor, helper]);
@@ -4301,12 +4658,56 @@ function resolveCombatWin(room) {
   const levelsGained = monsters.length + extras.levels;
   setLevel(actor, actor.level + levelsGained);
   const baseTreasures = monsters.reduce((sum, m) => sum + (m.treasureCount || 0), 0) + extras.treasures;
+  // PIÑATA: "Wenn Pinata besiegt wird, zieht jedes Gruppenmitglied einen
+  // Schatz aufgedeckt. Es spielt keine Rolle, wer am Kampf teilgenommen hat."
+  // Additiv zur normalen Beute (die Piñata nennt selbst 0 Schaetze) - bei
+  // einem zweiten Monster im selben Kampf bekommt die kaempfende Person also
+  // beides, das ist regeltechnisch richtig.
+  // Die Piñata-Karte von actor/helper wird HIER nur gezogen, aber erst unten
+  // bei fuerActor/fuerHelfer eingereiht - sonst wuerde die dortige
+  // lastReward-Zuweisung sie kommentarlos ueberschreiben (siehe Review I3).
+  const pinata = monsters.some((m) => m && m.name === 'PIÑATA');
+  let actorPinataCard = null;
+  let helperPinataCard = null;
+  if (pinata) {
+    let gezogen = 0;
+    room.players.forEach((p) => {
+      const [t] = zieheSchaetzeFuer(room, p, 1);
+      if (!t) return;
+      gezogen += 1;
+      if (p.id === actor.id) { actorPinataCard = t; return; }
+      if (helper && p.id === helper.id) { helperPinataCard = t; return; }
+      p.hand.push(t);
+      p.lastReward = {
+        seq: (p.lastReward ? p.lastReward.seq : 0) + 1,
+        cardIds: [t], levelsGained: 0,
+        monsterNames: monsters.map((m) => m.name),
+      };
+    });
+    // Wer nichts bekommt, bekommt aus einem von zwei Gruenden nichts:
+    // Stoererliste (zieheSchaetzeFuer zieht gar nicht) oder leerer
+    // Schatzstapel. Die Zeile nennt den Grund, der wirklich zutrifft.
+    const gesperrt = room.players.filter(hatSchatzSperre).length;
+    const grund = !gesperrt ? 'der Schatzstapel reicht nicht für alle'
+      : (gezogen + gesperrt === room.players.length ? 'die Störerliste lässt nicht alle mitziehen'
+        : 'Störerliste und Schatzstapel lassen nicht alle mitziehen');
+    log(room, gezogen === room.players.length
+      ? `Die Piñata platzt - jede:r am Tisch zieht 1 Schatzkarte.`
+      : `Die Piñata platzt - ${grund}: nur ${gezogen} von ${room.players.length} Personen ziehen je 1 Schatzkarte.`);
+  }
   // Monster-Verstärker aus dem Kampf zählen mit; BABY sagt ausdrücklich
   // "mindestens 1", deshalb die Untergrenze - aber nur, wenn überhaupt ein
   // Verstärker im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
   const treasureCount = c.treasureDelta ? Math.max(1, baseTreasures + c.treasureDelta) : baseTreasures;
-  const drawn = [];
-  for (let i = 0; i < treasureCount; i++) { const t = drawTreasure(room); if (t) drawn.push(t); }
+  // Gezogen wird nur, was auch ankommt, und nur fuer die Person, die es
+  // ueberhaupt bekommen kann. Steht die kaempfende Person auf der
+  // Stoererliste, zieht stattdessen die Helfer:in ihren zugesagten Anteil
+  // direkt (zieheSchaetzeFuer greift von selbst, wenn auch sie gesperrt
+  // ist oder es keine Helfer:in gibt) - der Stapel bleibt in beiden
+  // Faellen unberuehrt, wenn niemand etwas bekommen kann.
+  const ziehendFuer = hatSchatzSperre(actor) ? helper : actor;
+  const sollZiehen = hatSchatzSperre(actor) ? Math.min(treasureCount, c.helperReward || 0) : treasureCount;
+  const drawn = ziehendFuer ? zieheSchaetzeFuer(room, ziehendFuer, sollZiehen) : [];
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache
   // (README) etwas zugesagt - hier immer erst alles an die/den Angreifer:in,
   // Weitergabe von Schätzen kann jederzeit frei "gehandelt" werden.
@@ -4314,9 +4715,15 @@ function resolveCombatWin(room) {
   // Helfer:in (weniger, wenn weniger Schaetze kommen als versprochen). Der
   // Rest geht wie bisher an die kaempfende Person; darueber hinaus bleibt
   // jede Weitergabe freier Handel.
-  const zusage = helper ? Math.max(0, Math.min(c.helperReward || 0, drawn.length)) : 0;
-  const fuerHelfer = drawn.slice(0, zusage);
-  const fuerActor = drawn.slice(zusage);
+  // Eine gesperrte Helfer:in bekommt kein Versprechen eingeloest - die
+  // Zusage wird schlicht auf 0 gesetzt, statt schon gezogene Karten zu
+  // vernichten (das waeren Karten, die dann in keinem Stapel und keiner
+  // Hand mehr existieren). Die Karten bleiben bei der kaempfenden Person,
+  // die sie ohnehin schon gezogen hat.
+  const zusage = (helper && !hatSchatzSperre(helper))
+    ? Math.max(0, Math.min(c.helperReward || 0, drawn.length)) : 0;
+  const fuerHelfer = drawn.slice(0, zusage).concat(helperPinataCard ? [helperPinataCard] : []);
+  const fuerActor = drawn.slice(zusage).concat(actorPinataCard ? [actorPinataCard] : []);
   fuerActor.forEach((id) => actor.hand.push(id));
   actor.lastReward = {
     seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
@@ -4361,7 +4768,11 @@ function resolveCombatWin(room) {
     });
   }
   discardMonsterIds(room.doorDiscard, c.monsterIds);
-  log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${treasureCount} Schatzkarte(n) gezogen.`, c.monsterIds);
+  // treasureCount zaehlt nur die reguläre Beute - die Piñata-Karte der
+  // kaempfenden Person kommt (falls gezogen) obendrauf, sonst meldet die
+  // Zeile faelschlich "0 Schatzkarte(n)", obwohl eine Karte in der Hand liegt.
+  const gemeldeteSchaetze = treasureCount + (actorPinataCard ? 1 : 0);
+  log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${gemeldeteSchaetze} Schatzkarte(n) gezogen.`, c.monsterIds);
   if (extras.levels) log(room, `Kartenbonus: +${extras.levels} zusätzliche Stufe(n).`);
   if (extras.treasures) log(room, `Kartenbonus: +${extras.treasures} zusätzliche(r) Schatz.`);
   if (hasClass(actor, 'BARDE')) log(room, `Bardenglück: ${actor.name} zieht 1 Extraschatz und wirft dafür sofort 1 beliebige Karte ab.`);
@@ -4496,17 +4907,21 @@ function finishFleeSuccess(room, actor, c) {
   }
   const tuba = equippedItemIds(actor).find((id) => FLEE_TREASURE_ITEMS.has((card(id) || {}).name));
   if (tuba) {
-    const t = drawTreasure(room);
-    if (t) {
-      actor.hand.push(t);
-      // Gleiche Beute-Animation wie nach einem Kampfsieg - privat im yourInfo,
-      // denn die gezogene Karte ist eine Handkarte (kind/quelle steuern nur
-      // die Ueberschrift im Client).
-      actor.lastReward = {
-        seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
-        cardIds: [t], levelsGained: 0, monsterNames: [], kind: 'flucht', quelle: card(tuba).name,
-      };
-      log(room, `${actor.name} nimmt auf dem Weg nach draussen noch 1 verdeckte Schatzkarte mit.`);
+    if (hatSchatzSperre(actor)) {
+      log(room, `${actor.name} könnte wegen "${card(tuba).name}" noch eine Schatzkarte mitnehmen, steht aber auf der Störerliste und bekommt keine.`);
+    } else {
+      const [t] = zieheSchaetzeFuer(room, actor, 1);
+      if (t) {
+        actor.hand.push(t);
+        // Gleiche Beute-Animation wie nach einem Kampfsieg - privat im yourInfo,
+        // denn die gezogene Karte ist eine Handkarte (kind/quelle steuern nur
+        // die Ueberschrift im Client).
+        actor.lastReward = {
+          seq: (actor.lastReward ? actor.lastReward.seq : 0) + 1,
+          cardIds: [t], levelsGained: 0, monsterNames: [], kind: 'flucht', quelle: card(tuba).name,
+        };
+        log(room, `${actor.name} nimmt auf dem Weg nach draussen noch 1 verdeckte Schatzkarte mit.`);
+      }
     }
   }
   naechsterFluechtling(room, c);
@@ -4792,13 +5207,19 @@ function handleEquipItem(room, playerId, cardId) {
   }
   // SCHUMMELN!: "Diesen Gegenstand kannst du nun legal einsetzen, auch wenn
   // das normalerweise nicht erlaubt wäre" - hebt fuer GENAU DIESEN Gegenstand
-  // die Anlege-Regeln auf (siehe handlePlayCheat). Bewusst nur fuer die
-  // Gross-Gegenstand- und Rassen-Sperre umgesetzt: die Slot-Belegung
-  // (Kopf/Ruestung/Schuhe/Haende) ist hier je Spieler:in ein fester Platz
-  // (kein Array), ein zweiter Gegenstand im selben Slot wuerde den ersten
-  // stillschweigend verdraengen statt ihn abzulegen - dafuer muesste das
-  // Ausruestungsmodell erst auf Arrays je Slot umgestellt werden.
-  // ponytail: Slot-Belegung/Handzahl bleiben deshalb hart, Ausbauweg s.o.
+  // die Anlege-Regeln auf (siehe handlePlayCheat): Gross-Gegenstand-Sperre,
+  // Rassen-Sperre und - Ruling 2026-09-18 - auch der belegte Platz. Der
+  // geschummelte Gegenstand landet dafuer auf dem Spezialplatz statt in
+  // seinem gedruckten Slot (siehe unten): der Spezialplatz ist ein
+  // Sammelbereich, verdraengt also nichts und braucht keine belegten
+  // Haende. Zaehlt trotzdem ueberall mit, weil equippedItemIds ihn
+  // einschliesst - auch als Waffe (handItemIds liest slotKind, nicht den
+  // Platz).
+  // ponytail: dadurch sieht eine geschummelte Ruestung nicht mehr in
+  // player.equipped.armor - wer dort direkt hineinliest (MIESER SPIEGEL,
+  // Stinktier-Kleidung, "Ruestung verlieren"), greift daneben. Bewusst so:
+  // die Alternative waere ein Array je Slot, also das ganze
+  // Ausruestungsmodell.
   const geschummelt = player.attachments && player.attachments.cheatedItemId === cardId;
   if (!geschummelt && istGrosserGegenstand(room, cardId) && !canCarryAnotherBigItem(player, room)) {
     log(room, `${player.name} kann "${c.name}" nicht anlegen - Grosser Gegenstand, und es wird bereits einer getragen (nur Zwerge duerfen mehrere).`);
@@ -4821,6 +5242,17 @@ function handleEquipItem(room, playerId, cardId) {
   const special = specialSlotRule(c);
   if (special) {
     if (specialSlotCards(player, special.slot).includes(cardId)) return; // liegt schon an
+    // EISKALTES HÄNDCHEN: die Spezialslot-Regel (+3) gilt nur fuer die
+    // BESAENFTIGTE Monsterkarte. Eine Monsterkarte kommt legitim einzig
+    // ueber das Primitiv 'haendchenBesaenftigen' in equipped.special - das
+    // setzt den Slot direkt und bezahlt dafuer den Wunschring. Aus der Hand
+    // (Beute, Erstausteilung, aufgedeckte Tuer, Leichenfund) darf sie
+    // niemals angelegt werden, sonst gaebe es den +3 gratis.
+    if (c.category === 'monster') {
+      log(room, `${player.name} kann "${c.name}" nicht anlegen - eine Monsterkarte rüstet man nicht aus.`);
+      touchRoom(room);
+      return;
+    }
     // FALSCHE OHREN: "Erlaubt dem Traeger, elfen-exklusive Gegenstaende zu
     // nutzen." - deshalb hier itemGrantsTrait statt nur hasRace.
     if (!geschummelt && special.races
@@ -4836,7 +5268,9 @@ function handleEquipItem(room, playerId, cardId) {
     return;
   }
   if (c.category !== 'item') return;
-  if (c.slotKind === 'head') { if (player.equipped.head) return; removeFromHand(player, cardId); player.equipped.head = cardId; }
+  // Geschummelt: ab auf den Spezialplatz, ohne Slot- und Handzahl-Pruefung.
+  if (geschummelt) { removeFromHand(player, cardId); player.equipped.special = [...specialSlotCards(player, 'special'), cardId]; }
+  else if (c.slotKind === 'head') { if (player.equipped.head) return; removeFromHand(player, cardId); player.equipped.head = cardId; }
   else if (c.slotKind === 'armor') { if (player.equipped.armor) return; removeFromHand(player, cardId); player.equipped.armor = cardId; }
   else if (c.slotKind === 'feet') { if (player.equipped.feet) return; removeFromHand(player, cardId); player.equipped.feet = cardId; }
   else if (c.slotKind === 'hand') {
@@ -4852,7 +5286,9 @@ function handleEquipItem(room, playerId, cardId) {
   // FREUD'SCHEN SLIPPER: das Geschlecht beim Ausspielen merken - beim Verlust
   // entscheidet es ueber die -5-Strafe (siehe pruefeSlipperVerlust).
   if (GENDER_IMMUNE_ITEMS.has(c.name)) player.genderBeiSlippern = player.gender;
-  log(room, `${player.name} legt "${c.name}" an.`, [cardId]);
+  log(room, geschummelt
+    ? `${player.name} legt "${c.name}" geschummelt an (Spezialausrüstung - die Platzregeln gelten dafür nicht).`
+    : `${player.name} legt "${c.name}" an.`, [cardId]);
   touchRoom(room);
 }
 
@@ -4941,6 +5377,17 @@ function handleUnequipItem(room, playerId, cardId) {
   const player = findPlayer(room, playerId);
   if (!player) return;
   if (!equippedItemIds(player).includes(cardId)) return;
+  // EISKALTES HAENDCHEN: die besaenftigte Monsterkarte liegt als einzige
+  // Monsterkarte legitim in der Ausruestung (siehe haendchenBesaenftigen).
+  // Zurueck in die Hand darf sie nicht: handleEquipItem weist Monsterkarten
+  // ab, der +3 waere also dauerhaft weg - und aus der Hand liesse sich die
+  // Karte als Monster ausspielen.
+  const unequipKarte = card(cardId);
+  if (unequipKarte && unequipKarte.category === 'monster') {
+    log(room, `${player.name} kann "${unequipKarte.name}" nicht ablegen - die Karte bleibt, wo sie ist.`);
+    touchRoom(room);
+    return;
+  }
   if (!darfAusruesten(room, player)) {
     log(room, `${player.name} kann gerade nichts ablegen - Ausruestung aendert man im eigenen Zug und nicht im Kampf.`);
     touchRoom(room);
@@ -4950,6 +5397,11 @@ function handleUnequipItem(room, playerId, cardId) {
   player.hand.push(cardId);
   const c = card(cardId);
   log(room, `${player.name} legt "${c ? c.name : cardId}" wieder in die Hand.`, [cardId]);
+  // RIESENSTINKTIER-Strafe: derselbe Check wie in handleRequestHelp/
+  // handleSellItems, hier direkt nach dem Ablegen ausgeloest, damit der
+  // Tracker verschwindet, sobald das letzte Kleidungsstueck faellt, statt
+  // erst beim naechsten Hilfegesuch oder Verkauf.
+  stinktierStrafeAktiv(player);
   touchRoom(room);
 }
 
@@ -4996,6 +5448,21 @@ function handleSellItems(room, playerId, cardIds) {
   const halblingBonus = (halblingSaleOpen(player) && values.length)
     ? Math.max.apply(null, values) : 0;
   total += halblingBonus;
+  // RIESENSTINKTIER: "Der Goldwert ist halbiert." Halbiert wird die Endsumme
+  // (nach Alchemisten-Mindestwert und Halbling-Bonus), nicht der einzelne
+  // Gegenstand: der Kartentext nennt eine Eigenschaft der Person, keine der
+  // Gegenstaende - und die Endsumme ist ohnehin die Stelle, an der gerundet
+  // wird. Halbiert wird VOR der Schwelle - der halbierte Wert darf einen
+  // Verkauf also unter 1000 druecken und ihn scheitern lassen. Geloggt wird
+  // die Halbierung aber erst NACH der Schwelle (wie der Halbling-Bonus),
+  // sonst behauptet die Logzeile einen Verkauf, der gar nicht stattfand.
+  const vollVorHalbierung = total;
+  // Ruling 2026-09-17: wer sein LETZTES Kleidungsstueck verkauft, verkauft es
+  // noch halbiert - der Check laeuft vor dem Entfernen. Absicht: die Strafe
+  // endet, wenn die Kleidung ABGELEGT ist, und beim Verkauf liegt sie beim
+  // Preisvergleich noch an.
+  const besprueht = stinktierStrafeAktiv(player);
+  if (besprueht) total = Math.floor(total / 2);
   if (total < 1000) return;
   if (halblingBonus) player.halblingSaleUsed = true;
   const levels = Math.floor(total / 1000);
@@ -5005,6 +5472,7 @@ function handleSellItems(room, playerId, cardIds) {
   });
   setLevel(player, player.level + levels);
   if (halblingBonus) log(room, `${player.name} ist Halbling und verkauft den teuersten Gegenstand zum doppelten Preis (+${halblingBonus} Goldstücke, einmal pro Runde).`);
+  if (besprueht) log(room, `${player.name} stinkt noch - der Goldwert ist halbiert: ${vollVorHalbierung} GS zählen nur ${total} GS.`);
   log(room, `${player.name} legt Gegenstände im Wert von ${total} Goldstücken ab und steigt ${levels} Stufe(n) auf (jetzt Stufe ${player.level}).`);
   // Die Siegesstufe ist laut Regelwerk nur durch ein besiegtes Monster
   // erreichbar - Verkaufen bringt auf Stufe 10, gewinnt aber nicht. Der Sieg
@@ -5228,12 +5696,28 @@ function finishTrade(room, trade, from, to, counterCardIds) {
   // übersprungen; der Rest wird getauscht.
   const offerIds = ownTradeIds(from, trade.offerCardIds);
   const counterIds = ownTradeIds(to, counterCardIds);
-  offerIds.forEach((id) => { takeTradedCard(from, id); clearCheatIfLost(from, id); to.hand.push(id); });
-  counterIds.forEach((id) => { takeTradedCard(to, id); clearCheatIfLost(to, id); from.hand.push(id); });
+  // WEIHNACHTSMANN: "auch nicht von anderen Spielern". Die Annahme wird
+  // ABGELEHNT, nicht gefiltert: gefiltert wurde bis 2026-09-17, und dabei gab
+  // eine gesperrte Person ihre Seite des Handels her und bekam nichts zurueck
+  // - ein Gegner konnte das beliebig oft wiederholen. Geprueft werden beide
+  // Richtungen, denn beide Seiten koennen Schatzkarten enthalten.
+  const istSchatz = (id) => (card(id) || {}).type === 'treasure';
+  const gesperrt = [];
+  if (hatSchatzSperre(to) && offerIds.some(istSchatz)) gesperrt.push(to);
+  if (hatSchatzSperre(from) && counterIds.some(istSchatz)) gesperrt.push(from);
+  if (gesperrt.length) {
+    log(room, `Der Handel zwischen ${from.name} und ${to.name} kommt nicht zustande: ${gesperrt.map((p) => p.name).join(' und ')} steht auf der Störerliste und darf keine Schatzkarten annehmen.`);
+    touchRoom(room);
+    return;
+  }
+  const anEmpfaenger = offerIds;
+  const anGeber = counterIds;
+  anEmpfaenger.forEach((id) => { takeTradedCard(from, id); clearCheatIfLost(from, id); to.hand.push(id); });
+  anGeber.forEach((id) => { takeTradedCard(to, id); clearCheatIfLost(to, id); from.hand.push(id); });
   const names = (ids) => ids.map((id) => { const c = card(id); return c ? c.name : id; }).join(', ');
-  const offerText = offerIds.length ? `${names(offerIds)} - ${tradeGoldSum(offerIds)} GS` : '(nichts mehr davon verfügbar)';
-  const counterText = counterIds.length ? `${names(counterIds)} - ${tradeGoldSum(counterIds)} GS` : '(nichts zurück)';
-  log(room, `Handel: ${from.name} gibt [${offerText}] an ${to.name}, erhält dafür [${counterText}].`, [...offerIds, ...counterIds]);
+  const offerText = anEmpfaenger.length ? `${names(anEmpfaenger)} - ${tradeGoldSum(anEmpfaenger)} GS` : '(nichts mehr davon verfügbar)';
+  const counterText = anGeber.length ? `${names(anGeber)} - ${tradeGoldSum(anGeber)} GS` : '(nichts zurück)';
+  log(room, `Handel: ${from.name} gibt [${offerText}] an ${to.name}, erhält dafür [${counterText}].`, [...anEmpfaenger, ...anGeber]);
   touchRoom(room);
 }
 
@@ -5754,13 +6238,13 @@ module.exports = {
   rollWithWindow, handlePlayReactionCard, ITEM_GRANTS_TRAIT, itemGrantsTrait,
   dryadeWirkung, hasenWurf, startCombat, applyTargetAction, handlePlayCurseFromHand,
   kartenSperreAktiv,
-  ATTACHMENT_CARDS, equippedBonusSum,
-  handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, handleAttemptFlee, baseStrength,
+  ATTACHMENT_CARDS, equippedBonusSum, handItemIds,
+  handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, resolveCombat, handleAttemptFlee, baseStrength,
   handlePrepReady, darfAusruesten,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
   POST_FLEE_ESCAPE_CARDS, DOOR_COMBAT_CARDS, handleSellItems, halblingSaleOpen, endTurn,
   handleApplyConsequenceAction, handleRequestHelp, handleUseGuaranteedFlee, handlePlayCurseFromHand,
-  CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
+  CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
   SPECIAL_SLOT_ITEMS, SPECIAL_SLOTS, newEquipped, handleEquipItem, handleUnequipItem, equippedItemIds,
   handlePlayCheat, handleRespondHelp, resolveCombatWin, applyPrimitiveAction,
   MONSTER_AUTO_KILL_BY_RACE, MONSTER_PASS_OPTION, handleResolveCardChoice,
@@ -5782,7 +6266,8 @@ module.exports = {
   handlePlayReactionCard, handlePassReaction, LAMP_CARDS, lampCardIds, handleUseLamp,
   fluechtenderId, naechsterFluechtling, beendeFluchtphase,
   handleUseCardPower, DOOR_POWER_CARDS,
-  LINGERING_CURSES, addActiveCurse, clearActiveCurse, curseCombatModifier, curseSuppressesItemBonuses,
+  LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
+  curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatSchatzSperre,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,

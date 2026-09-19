@@ -1,0 +1,1492 @@
+// Unnatural Axe, Monsterkarten (Plan 2026-09-16, Spec gleichen Datums).
+//
+// Gemessen wird jeweils die DIFFERENZ der Monsterstaerke mit und ohne das
+// genannte Merkmal - ein absoluter Wert waere auch dann gruen, wenn das
+// Monster aus einem anderen Grund staerker ist.
+const assert = require('assert');
+const {
+  ALL_CARDS, newEquipped, combatTotals, monsterRefusesTarget, fleeModifierParts,
+  resolveConsequenceSpec, applyPrimitiveAction, handleResolveCardCardChoice, isBigItem,
+  handlePlayCombatCard,
+} = require('../server.js');
+
+function findCard(name, category) {
+  const c = ALL_CARDS.find((x) => x.name === name && (!category || x.category === category));
+  if (!c) throw new Error(`Testkarte nicht gefunden: ${name}`);
+  return c;
+}
+
+function makePlayer(overrides) {
+  return Object.assign({
+    id: 'p1', name: 'A', level: 5, hand: [], races: [], classes: [], powerGroups: [],
+    raceCapCard: null, classCapCard: null, powerGroupCapCard: null,
+    equipped: newEquipped(), attachments: { cheatedItemId: null }, activeCurses: [],
+    isBot: false, connected: true, gender: 'm', genderBeiSlippern: null,
+  }, overrides || {});
+}
+
+const raeume = [];
+function makeRoom(players) {
+  const room = {
+    code: 'TEST', players, turnIndex: 0, turnPhase: 'kampf',
+    doorDeck: [], doorDiscard: [], treasureDeck: [], treasureDiscard: [],
+    itemAttachments: {}, logs: [], combat: null, combatHappenedThisTurn: false,
+    pendingConsequence: null, pendingCardAction: null, pendingRoll: null,
+    lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+  };
+  raeume.push(room);
+  return room;
+}
+
+// Monsterstaerke gegen genau eine Person.
+function monsterStaerke(monsterName, player, mitMonstern) {
+  const m = findCard(monsterName, 'monster');
+  const room = makeRoom([player]);
+  room.combat = {
+    actorId: player.id, helperId: null,
+    monsterIds: [m.id].concat(mitMonstern || []),
+    actorModifier: 0, monsterModifier: 0, backstabs: {},
+  };
+  return combatTotals(room).monsterStrength;
+}
+
+const ORK = findCard('ORK', 'door_other');
+const ELF = findCard('ELF', 'race');
+const ZWERG = findCard('ZWERG', 'race');
+const DIEB = findCard('DIEB', 'class');
+const ZAUBERER = findCard('ZAUBERER', 'class');
+const KRIEGER = findCard('KRIEGER', 'class');
+const PRIESTER = findCard('PRIESTER', 'class');
+
+// --- Einfache Monsterboni ---------------------------------------------------
+[
+  ['KATZENMÄDCHEN', { races: [ORK.id] }, 5],
+  ['TEDDYBÄR', { races: [ORK.id] }, 5],
+  ['JUDGE FREDD', { classes: [DIEB.id] }, 5],
+  ['M.T.-ANZUG', { classes: [ZAUBERER.id] }, 5],
+  ['M.T.-ANZUG', { classes: [DIEB.id] }, 5],
+  ['DING MIT EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST', { classes: [KRIEGER.id] }, 5],
+  ['TENTAKELDÄMON', { classes: [PRIESTER.id] }, 5],
+  ['ROTZ-ELEMENTAR', { races: [ELF.id] }, 4],
+  ['JABBERWOCK', { races: [ZWERG.id] }, 3],
+  ['JABBERWOCK', { classes: [ZAUBERER.id] }, 3],
+  ['WEIHNACHTSMANN', { races: [ELF.id] }, -5],
+].forEach(([monster, merkmal, erwartet]) => {
+  const ohne = monsterStaerke(monster, makePlayer({}));
+  const mit = monsterStaerke(monster, makePlayer(merkmal));
+  assert.strictEqual(mit - ohne, erwartet,
+    `${monster}: erwartet ${erwartet}, gemessen ${mit - ohne}`);
+});
+
+// "+3 gegen Zwerge oder Zauberer. Ja, das macht +6 gegen Zwergenzauberer."
+{
+  const ohne = monsterStaerke('JABBERWOCK', makePlayer({}));
+  const beides = monsterStaerke('JABBERWOCK', makePlayer({ races: [ZWERG.id], classes: [ZAUBERER.id] }));
+  assert.strictEqual(beides - ohne, 6, 'Zwergenzauberer bekommen beide Boni');
+}
+
+// "+5 gegen Zauberer oder Diebe" nennt KEINE Addition - ein Zauberer-Dieb
+// bekommt den Bonus genau einmal.
+{
+  const ohne = monsterStaerke('M.T.-ANZUG', makePlayer({}));
+  const beides = monsterStaerke('M.T.-ANZUG', makePlayer({ classes: [ZAUBERER.id, DIEB.id] }));
+  assert.strictEqual(beides - ohne, 5, 'der Anzug addiert nicht');
+}
+
+// --- "Mensch" = keine Rassenkarte -------------------------------------------
+[
+  ['RIESENKAKERLAKE', 5],  // "+5 gegen Elfen oder Menschen."
+  ['GRASGNOLL', 5],        // "+5 gegen Menschen."
+].forEach(([monster, erwartet]) => {
+  const mitRasse = monsterStaerke(monster, makePlayer({ races: [ZWERG.id] }));
+  const ohneRasse = monsterStaerke(monster, makePlayer({}));
+  assert.strictEqual(ohneRasse - mitRasse, erwartet,
+    `${monster}: Menschen bekommen ${erwartet}`);
+});
+
+// Die Kakerlake trifft Elfen ebenso - aber nur einmal, nicht zusaetzlich.
+{
+  const zwerg = monsterStaerke('RIESENKAKERLAKE', makePlayer({ races: [ZWERG.id] }));
+  const elf = monsterStaerke('RIESENKAKERLAKE', makePlayer({ races: [ELF.id] }));
+  assert.strictEqual(elf - zwerg, 5, 'Elfen bekommen denselben Bonus');
+}
+
+// --- FEUERLÖSCHER: "Erhaelt +5, wenn dir niemand hilft." --------------------
+{
+  const m = findCard('FEUERLÖSCHER', 'monster');
+  const a = makePlayer({ level: 9 });
+  const b = makePlayer({ id: 'p2', name: 'B', level: 9 });
+  const room = makeRoom([a, b]);
+  room.combat = { actorId: a.id, helperId: null, monsterIds: [m.id], actorModifier: 0, monsterModifier: 0, backstabs: {} };
+  const allein = combatTotals(room).monsterStrength;
+  room.combat.helperId = b.id;
+  const mitHilfe = combatTotals(room).monsterStrength;
+  assert.strictEqual(allein - mitHilfe, 5, 'ohne Hilfe ist der Loescher 5 staerker');
+}
+
+// --- "Greift niemanden mit Stufe N oder niedriger an" -----------------------
+[
+  ['FEUERLÖSCHER', 2],
+  ['TENTAKELDÄMON', 2],
+  ['JABBERWOCK', 4],
+].forEach(([monster, grenze]) => {
+  const m = findCard(monster, 'monster');
+  assert.ok(monsterRefusesTarget(m.id, makePlayer({ level: grenze })),
+    `${monster} darf Stufe ${grenze} nicht angreifen`);
+  assert.ok(!monsterRefusesTarget(m.id, makePlayer({ level: grenze + 1 })),
+    `${monster} greift Stufe ${grenze + 1} an`);
+});
+
+// --- Weglauf-Modifikatoren --------------------------------------------------
+[
+  ['WERSCHILDKRÖTE', 2],   // "Greift seeehr langsam an. +2 fuer Weglaufen."
+  ['PESTRATTEN', -1],      // "Alle anderen muessen kaempfen und erhalten -1 fuer Weglaufen."
+].forEach(([monster, erwartet]) => {
+  const m = findCard(monster, 'monster');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  room.combat = { actorId: p.id, helperId: null, monsterIds: [m.id], actorModifier: 0, monsterModifier: 0 };
+  const summe = fleeModifierParts(room, p).reduce((s, t) => s + t.amount, 0);
+  assert.strictEqual(summe, erwartet, `${monster}: Weglauf-Modifikator ${erwartet}`);
+});
+
+// --- MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT -------------------------
+// "+4 gegen Zwerge, +2 gegen Frauen, -3 gegen Zauberer, -2 am Samstag."
+{
+  const NAME = 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT';
+  const basis = monsterStaerke(NAME, makePlayer({}));
+  assert.strictEqual(monsterStaerke(NAME, makePlayer({ races: [ZWERG.id] })) - basis, 4, 'Zwerge +4');
+  assert.strictEqual(monsterStaerke(NAME, makePlayer({ gender: 'w' })) - basis, 2, 'Frauen +2');
+  assert.strictEqual(monsterStaerke(NAME, makePlayer({ classes: [ZAUBERER.id] })) - basis, -3, 'Zauberer -3');
+  // Alle vier Klauseln greifen unabhaengig voneinander.
+  assert.strictEqual(
+    monsterStaerke(NAME, makePlayer({ races: [ZWERG.id], gender: 'w', classes: [ZAUBERER.id] })) - basis,
+    3, 'Zwergin mit Zaubererklasse: +4 +2 -3');
+}
+{
+  // Der Samstags-Malus haengt am echten Wochentag - geprueft mit gestelltem
+  // Date, damit der Test nicht vom Kalender abhaengt.
+  const NAME = 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT';
+  const echtesDate = global.Date;
+  const stelle = (wochentag) => {
+    class FakeDate extends echtesDate {
+      constructor(...args) { super(...(args.length ? args : [2026, 8, 12 + wochentag])); }
+      getDay() { return wochentag; }
+    }
+    global.Date = FakeDate;
+  };
+  try {
+    stelle(3); // Mittwoch
+    const mittwoch = monsterStaerke(NAME, makePlayer({}));
+    stelle(6); // Samstag
+    const samstag = monsterStaerke(NAME, makePlayer({}));
+    assert.strictEqual(samstag - mittwoch, -2, 'am Samstag ist es 2 schwaecher');
+  } finally {
+    global.Date = echtesDate;
+  }
+}
+
+// --- Schlimme Dinge: GEWALTIGER BAZILLUS ------------------------------------
+// "Du niest unaufhoerlich ... Lege zwei Karten (deiner Wahl) aus deiner Hand ab."
+{
+  const bazillus = findCard('GEWALTIGER BAZILLUS', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 4).map((c) => c.id);
+  const p = makePlayer({ hand: fueller.slice() });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  const spec = resolveConsequenceSpec(bazillus.name, bazillus.badstuff, p, room);
+  assert.ok(spec, 'der Bazillus braucht eine Automatik');
+  applyPrimitiveAction(room, p, spec);
+  for (let i = 0; i < 2; i++) {
+    assert.ok(room.pendingCardAction, `Wahl ${i + 1} von 2 muss offen sein`);
+    handleResolveCardCardChoice(room, p.id, room.pendingCardAction.candidateIds[0]);
+  }
+  assert.strictEqual(p.hand.length, 2, 'genau zwei Karten abgelegt');
+  assert.strictEqual(room.pendingCardAction, null, 'danach haengt nichts');
+}
+
+// --- Schlimme Dinge: MONDJUNGFERN -------------------------------------------
+// "Decke deine Hand auf und jeder andere Spieler darf eine Karte waehlen."
+{
+  const jungfern = findCard('MONDJUNGFERN', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 3).map((c) => c.id);
+  const opfer = makePlayer({ hand: fueller.slice() });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c2 = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([opfer, b, c2]);
+  applyPrimitiveAction(room, opfer, resolveConsequenceSpec(jungfern.name, jungfern.badstuff, opfer, room));
+  const nehmer = [];
+  while (room.pendingCardAction) {
+    nehmer.push(room.pendingCardAction.playerId);
+    handleResolveCardCardChoice(room, room.pendingCardAction.playerId, room.pendingCardAction.candidateIds[0]);
+  }
+  assert.deepStrictEqual(nehmer.sort(), ['p2', 'p3'], 'beide anderen duerfen je eine Karte nehmen');
+  assert.strictEqual(opfer.hand.length, 1, 'zwei Karten sind weg');
+  assert.strictEqual(b.hand.length + c2.hand.length, 2, 'und liegen bei den anderen');
+}
+
+// --- Monster, die bestimmte Leute gar nicht angreifen -----------------------
+{
+  // "Greift keine Frauen an oder Traeger des Stacheligen Genitalschoners."
+  const m = findCard('PSYCHO-EICHHÖRNCHEN', 'monster');
+  assert.ok(monsterRefusesTarget(m.id, makePlayer({ gender: 'w' })), 'Frauen werden nicht angegriffen');
+  assert.ok(!monsterRefusesTarget(m.id, makePlayer({ gender: 'm' })), 'Maenner schon');
+}
+{
+  // "Fluechtet vor Orks, statt anzugreifen und hinterlaesst den Schatz."
+  const m = findCard('PESTRATTEN', 'monster');
+  assert.ok(monsterRefusesTarget(m.id, makePlayer({ races: [ORK.id] })), 'vor Orks fluechten sie');
+  assert.ok(!monsterRefusesTarget(m.id, makePlayer({})), 'alle anderen muessen kaempfen');
+  // Verhaltensprüfung statt Tabellen-Check: MONSTER_REFUSES_TREASURE[...] ===
+  // m.treasureCount beweist nicht, dass beim Aufdecken auch wirklich Schaetze
+  // uebergeben werden - dafuer muss der echte Aufdeck-Pfad (handleDrawDoor)
+  // laufen.
+  const { handleDrawDoor } = require('../server.js');
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 5).map((c) => c.id);
+  const ork = makePlayer({ races: [ORK.id] });
+  const room = makeRoom([ork]);
+  room.turnPhase = 'tuer';
+  room.doorDeck = [m.id];
+  room.treasureDeck = schaetze.slice();
+  handleDrawDoor(room, ork.id);
+  assert.strictEqual(ork.hand.length, m.treasureCount,
+    'die Pestratten hinterlassen beim Aufdecken tatsaechlich ihren Schatzwert');
+  assert.strictEqual(room.turnPhase, 'aerger', 'der Zug laeuft trotzdem normal weiter');
+}
+
+// --- PTERODAKTYL: "Lege deine ganze Hand ODER alle kleinen Gegenstaende ab" -
+{
+  const ptero = findCard('PTERODAKTYL', 'monster');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
+  assert.strictEqual(spec.type, 'choice', 'die Karte laesst waehlen');
+  assert.strictEqual(spec.options.length, 2, 'genau zwei Moeglichkeiten');
+  const ids = spec.options.map((o) => o.action.type).sort();
+  assert.deepStrictEqual(ids, ['discardWholeHand', 'queuedDiscardOwn'].sort(),
+    'ganze Hand oder alle kleinen Gegenstaende');
+}
+{
+  // Die Hand-Variante wirkt auch wirklich.
+  const ptero = findCard('PTERODAKTYL', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 3).map((c) => c.id);
+  const p = makePlayer({ hand: fueller.slice() });
+  const room = makeRoom([p]);
+  const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, room);
+  assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
+  const handOption = spec.options.find((o) => o.action.type === 'discardWholeHand');
+  applyPrimitiveAction(room, p, handOption.action);
+  assert.strictEqual(p.hand.length, 0, 'die Hand ist weg');
+}
+{
+  // Der kleine Gegenstände-Zweig wird geprüft - ein großer und mehrere kleine
+  // Gegenstände. Der count muss die Anzahl der kleinen sein.
+  // Mit vertauschtem Filter-Vorzeichen würde count = 1 sein (nur der große).
+  // Damit wird sichergestellt dass isBigItem korrekt filtert.
+  const ptero = findCard('PTERODAKTYL', 'monster');
+  // Finde einen großen Gegenstand über isBigItem
+  const bigCard = ALL_CARDS.find((c) => c.type === 'treasure' && isBigItem(c));
+  assert.ok(bigCard, 'es gibt mindestens einen großen Gegenstand');
+  // Finde kleine Gegenstände explizit über isBigItem-Filter
+  const smallCards = ALL_CARDS.filter((c) => c.type === 'treasure' && !isBigItem(c)).slice(0, 2);
+  assert.ok(smallCards.length >= 2, 'es gibt mindestens zwei kleine Gegenstände zum Testen');
+  const e = newEquipped();
+  e.head = bigCard.id;        // großer Gegenstand
+  e.armor = smallCards[0].id; // erster kleiner Gegenstand
+  e.feet = smallCards[1].id;  // zweiter kleiner Gegenstand
+  const p = makePlayer({ equipped: e });
+  const testRoom = makeRoom([p]);
+  const expectedSmallCount = 2; // wir wählen genau 2 kleine
+  const spec = resolveConsequenceSpec(ptero.name, ptero.badstuff, p, testRoom);
+  assert.ok(spec, 'der PTERODAKTYL braucht eine Automatik');
+  const kleinOption = spec.options.find((o) => o.action.type === 'queuedDiscardOwn');
+  assert.ok(kleinOption, 'kleine Gegenstände-Option existiert');
+  assert.strictEqual(kleinOption.action.count, expectedSmallCount,
+    `count ist ${expectedSmallCount}: nur die kleinen zählen, der große nicht`);
+}
+
+// --- MONDJUNGFERN: "In diesem Kampf erhaeltst du keine Vorteile durch Waffen" ---
+// Bug (Review I1): der alte Code zog nur den GEDRUCKTEN Bonus der Hand-
+// gegenstaende ab. Kartenanhaenge, konditionale Item-Boni und rassen-
+// abhaengige Item-Boni an derselben Waffe ueberlebten den Abzug, weil sie aus
+// eigenen Summen kamen, die nie gefiltert wurden. Jeder Fall unten misst die
+// Differenz "ohne Mondjungfern" minus "mit Mondjungfern" und verlangt, dass
+// sie dem VOLLEN Waffenwert entspricht - nicht nur dem gedruckten Bonus.
+{
+  const waffe = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'hand' && c.bonus > 0);
+  const ruestung = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'armor' && c.bonus > 0);
+  assert.ok(waffe && ruestung, 'Testgegenstaende gefunden');
+
+  const staerkeMit = (monsterNamen, equipped, attachments) => {
+    const p = makePlayer({ equipped });
+    const room = makeRoom([p]);
+    if (attachments) room.itemAttachments = attachments;
+    room.combat = {
+      actorId: p.id, helperId: null,
+      monsterIds: monsterNamen.map((n) => findCard(n, 'monster').id),
+      actorModifier: 0, monsterModifier: 0, backstabs: {},
+    };
+    return combatTotals(room).playerStrength;
+  };
+
+  // Grundfall: gedruckter Waffenbonus faellt weg.
+  {
+    const eq = Object.assign(newEquipped(), { hands: [waffe.id, null], armor: ruestung.id });
+    assert.strictEqual(staerkeMit(['PESTRATTEN'], eq) - staerkeMit(['MONDJUNGFERN'], eq), waffe.bonus,
+      'gegen die Mondjungfern faellt genau der Waffenbonus weg');
+  }
+
+  // Ruestung und Stufe zaehlen weiter - echte Differenzmessung statt "> 0"
+  // (die Testfigur liegt schon durch ihre Stufe ueber null).
+  {
+    const mitRuestung = staerkeMit(['MONDJUNGFERN'], Object.assign(newEquipped(), { armor: ruestung.id }));
+    const ohneRuestung = staerkeMit(['MONDJUNGFERN'], newEquipped());
+    assert.strictEqual(mitRuestung - ohneRuestung, ruestung.bonus,
+      'Ruestungsbonus zaehlt trotz Mondjungfern unveraendert weiter');
+  }
+
+  // Leck 1: Feuer-Verdopplung (EISRIESE) an einer Waffe - die Verdopplung
+  // wurde addiert, aber beim Mondjungfern-Abzug nicht mit abgezogen.
+  {
+    const napalm = findCard('NAPALMSTAB');
+    const eq = Object.assign(newEquipped(), { hands: [napalm.id, null] });
+    const diff = staerkeMit(['EISRIESE'], eq) - staerkeMit(['MONDJUNGFERN', 'EISRIESE'], eq);
+    assert.strictEqual(diff, napalm.bonus * 2,
+      'die Eisriesen-Verdopplung des Napalmstabs faellt mit der Waffe komplett weg');
+  }
+
+  // Leck 2: Kartenanhang (VERGIFTET) an einer Waffe.
+  {
+    const keule = findCard('GENTLEMAN-KEULE');
+    const vergiftet = findCard('VERGIFTET');
+    const eq = Object.assign(newEquipped(), { hands: [keule.id, null] });
+    const attachments = { [keule.id]: [vergiftet.id] };
+    const diff = staerkeMit(['PESTRATTEN'], eq, attachments) - staerkeMit(['MONDJUNGFERN'], eq, attachments);
+    assert.strictEqual(diff, keule.bonus + vergiftet.bonus,
+      'die Vergiftet-Karte an der Waffe faellt mit der Waffe komplett weg');
+  }
+
+  // Leck 3: konditionaler Item-Bonus (VORPALE KLINGE gegen Monster mit J).
+  {
+    const klinge = findCard('VORPALE KLINGE');
+    const eq = Object.assign(newEquipped(), { hands: [klinge.id, null] });
+    const diff = staerkeMit(['JABBERWOCK'], eq) - staerkeMit(['MONDJUNGFERN', 'JABBERWOCK'], eq);
+    assert.strictEqual(diff, klinge.bonus + 10,
+      'der Vorpale-Klinge-Zusatzbonus gegen J-Monster faellt mit der Waffe komplett weg');
+  }
+
+  // Leck 4: rassenabhaengiger Item-Bonus (GNOM zaehlt G/N-Gegenstaende).
+  {
+    const gnom = findCard('GNOM', 'door_other');
+    const grillgabel = findCard('GRILLGABEL');
+    const eq = Object.assign(newEquipped(), { hands: [grillgabel.id, null] });
+    const staerkeAlsGnom = (monsterName) => {
+      const p = makePlayer({ races: [gnom.id], equipped: eq });
+      const room = makeRoom([p]);
+      room.combat = { actorId: p.id, helperId: null, monsterIds: [findCard(monsterName, 'monster').id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {} };
+      return combatTotals(room).playerStrength;
+    };
+    assert.strictEqual(staerkeAlsGnom('PESTRATTEN') - staerkeAlsGnom('MONDJUNGFERN'), grillgabel.bonus + 1,
+      'der Gnom-Bonus fuer die Grillgabel faellt mit der Waffe komplett weg');
+  }
+}
+
+// --- EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
+// Schaden." ------------------------------------------------------------------
+{
+  const feuer = findCard('FLAMMENDE RÜSTUNG');
+  const staerke = (monsterName) => {
+    const m = findCard(monsterName, 'monster');
+    const p = makePlayer({ equipped: Object.assign(newEquipped(), { armor: feuer.id }) });
+    const room = makeRoom([p]);
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [m.id], actorModifier: 0, monsterModifier: 0, backstabs: {} };
+    return combatTotals(room).playerStrength;
+  };
+  assert.strictEqual(staerke('EISRIESE') - staerke('PESTRATTEN'), feuer.bonus,
+    'gegen den Eisriesen zaehlt die Flammende Ruestung doppelt');
+}
+
+// --- FUNGUS: "Wenn der Fungus Gigantisch wird, erhaelt er +25 statt +10!" ---
+{
+  const fungus = findCard('FUNGUS', 'monster');
+  const gigantisch = findCard('GIGANTISCH');
+  const anderes = findCard('PESTRATTEN', 'monster');
+  const zuschlag = (monsterKarte) => {
+    const p = makePlayer({ hand: [gigantisch.id] });
+    const room = makeRoom([p]);
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [monsterKarte.id],
+      actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
+      treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+    const vorher = combatTotals(room).monsterStrength;
+    handlePlayCombatCard(room, p.id, gigantisch.id);
+    return combatTotals(room).monsterStrength - vorher;
+  };
+  assert.strictEqual(zuschlag(anderes), gigantisch.bonus, 'normal gibt GIGANTISCH seinen gedruckten Bonus');
+  assert.strictEqual(zuschlag(fungus), 25, 'auf dem Fungus sind es 25');
+}
+
+// --- FUNGUS + RAPIER-TROTTEL: die Logzeile darf nur den Zusatz nennen, der
+// tatsaechlich gegriffen hat (Review M3) --------------------------------------
+// Der Fungus hat Vorrang (fester Ersatzwert 25 statt einer Verdopplung) -
+// beide Zusaetze gleichzeitig zu nennen waere widerspruechlich, weil der
+// Trottel dann gar nichts mehr beitraegt.
+{
+  const fungus = findCard('FUNGUS', 'monster');
+  const trottel = findCard('RAPIER-TROTTEL', 'monster');
+  const gigantisch = findCard('GIGANTISCH');
+  const letzteLogzeile = (monsterIds) => {
+    const p = makePlayer({ hand: [gigantisch.id] });
+    const room = makeRoom([p]);
+    room.combat = { actorId: p.id, helperId: null, monsterIds,
+      actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
+      treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+    handlePlayCombatCard(room, p.id, gigantisch.id);
+    return room.logs[room.logs.length - 1].text;
+  };
+
+  // Nur der Trottel: Verdopplung des gedruckten Bonus.
+  const nurTrottel = letzteLogzeile([trottel.id]);
+  assert.ok(nurTrottel.includes(`+${gigantisch.bonus * 2} für das Monster`), 'der Trottel verdoppelt den gedruckten Bonus');
+  assert.ok(nurTrottel.includes('Rapier-Trottel verdoppelt'), 'nennt den Trottel-Zusatz');
+  assert.ok(!nurTrottel.includes('Fungus'), 'nennt keinen Fungus-Zusatz');
+
+  // Nur der Fungus: fester Ersatzwert +25.
+  const nurFungus = letzteLogzeile([fungus.id]);
+  assert.ok(nurFungus.includes('+25 für das Monster'), 'der Fungus ersetzt durch +25');
+  assert.ok(nurFungus.includes('Fungus erhält 25 statt 10'), 'nennt den Fungus-Zusatz');
+  assert.ok(!nurFungus.includes('Trottel'), 'nennt keinen Trottel-Zusatz');
+
+  // Beide zusammen: Fungus gewinnt, +25 - die Zeile nennt nur diesen Zusatz.
+  const beide = letzteLogzeile([fungus.id, trottel.id]);
+  assert.ok(beide.includes('+25 für das Monster'), 'bei beiden Monstern gilt weiterhin +25');
+  assert.ok(beide.includes('Fungus erhält 25 statt 10'), 'nennt den Fungus-Zusatz');
+  assert.ok(!beide.includes('Trottel'), 'nennt NICHT zusaetzlich den Trottel-Zusatz - das waere widerspruechlich');
+}
+
+// --- Verlauf und Einblendung muessen denselben Bonus nennen -----------------
+// Regressionstest: die Einblendung (room.cardPlay.hinweis) benutzte bisher
+// c.bonus statt des tatsaechlich angewandten zuschlag - beim GIGANTISCHEN
+// FUNGUS stand im Verlauf "+25", in der Einblendung "+10".
+{
+  const fungus = findCard('FUNGUS', 'monster');
+  const gigantisch = findCard('GIGANTISCH');
+  const p = makePlayer({ hand: [gigantisch.id] });
+  const room = makeRoom([p]);
+  room.combat = { actorId: p.id, helperId: null, monsterIds: [fungus.id],
+    actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
+    treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+  handlePlayCombatCard(room, p.id, gigantisch.id);
+  const letzterLogEintrag = room.logs[room.logs.length - 1].text;
+  const zahlImLog = letzterLogEintrag.match(/([+-]\d+) für das Monster/)[1];
+  const zahlInEinblendung = room.cardPlay.hinweis.match(/([+-]\d+) für das Monster/)[1];
+  assert.strictEqual(zahlInEinblendung, zahlImLog,
+    `Einblendung (${room.cardPlay.hinweis}) muss denselben Bonus nennen wie der Verlauf (${letzterLogEintrag})`);
+  assert.strictEqual(zahlInEinblendung, '+25', 'auf dem Fungus muss auch die Einblendung +25 zeigen');
+}
+
+// --- SL-Monster, Schlimme Dinge ---------------------------------------------
+// "Halblinge verlieren eine Stufe. Elfen verlieren zwei Stufen. Maenner
+// verlieren eine zusaetzliche Stufe und muessen eine Karte ablegen.
+// Diejenigen, die nicht unter die Kriterien oben fallen, muessen zwei Karten
+// ablegen."
+{
+  const NAME = 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT';
+  const sl = findCard(NAME, 'monster');
+  const HALBLING = findCard('HALBLING', 'race');
+  const stufenVerlust = (spieler) => {
+    const p = makePlayer(spieler);
+    const room = makeRoom([p]);
+    const vorher = p.level;
+    const spec = resolveConsequenceSpec(NAME, sl.badstuff, p, room);
+    assert.ok(spec, 'das SL-Monster braucht eine Automatik');
+    applyPrimitiveAction(room, p, spec);
+    return vorher - p.level;
+  };
+  assert.strictEqual(stufenVerlust({ races: [HALBLING.id], gender: 'w' }), 1, 'Halbling-Frau: 1 Stufe');
+  assert.strictEqual(stufenVerlust({ races: [ELF.id], gender: 'w' }), 2, 'Elfen-Frau: 2 Stufen');
+  assert.strictEqual(stufenVerlust({ races: [ELF.id], gender: 'm' }), 3, 'Elfen-Mann: 2 + 1 zusaetzlich');
+  assert.strictEqual(stufenVerlust({ gender: 'w' }), 0, 'Frau ohne Rasse: keine Stufe, dafuer Karten');
+}
+
+// --- KATZENMÄDCHEN: "Wirf den Wuerfel und lege so viele Karten ab." ---------
+{
+  const katze = findCard('KATZENMÄDCHEN', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 6).map((c) => c.id);
+  const p = makePlayer({ hand: fueller.slice() });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  const echtesRandom = Math.random;
+  Math.random = () => 0.5; // 6 * 0.5 = 3 -> Wurf 4
+  try {
+    const spec = resolveConsequenceSpec(katze.name, katze.badstuff, p, room);
+    assert.ok(spec, 'das KATZENMÄDCHEN braucht eine Automatik');
+    applyPrimitiveAction(room, p, spec);
+  } finally {
+    Math.random = echtesRandom;
+  }
+  let gewaehlt = 0;
+  while (room.pendingCardAction && gewaehlt < 10) {
+    handleResolveCardCardChoice(room, p.id, room.pendingCardAction.candidateIds[0]);
+    gewaehlt++;
+  }
+  assert.strictEqual(gewaehlt, 4, 'bei einer 4 werden vier Karten abgelegt');
+  assert.strictEqual(p.hand.length, 2, 'von sechs bleiben zwei');
+}
+
+// --- KATZENMÄDCHEN Randfall: Wurf groesser als Handkartenzahl -----------
+{
+  const katze = findCard('KATZENMÄDCHEN', 'monster');
+  const fueller = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 2).map((c) => c.id);
+  const p = makePlayer({ hand: fueller.slice() });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  const echtesRandom = Math.random;
+  Math.random = () => 0.99; // 6 * 0.99 = 5.94 -> Wurf 6
+  try {
+    const spec = resolveConsequenceSpec(katze.name, katze.badstuff, p, room);
+    assert.ok(spec, 'das KATZENMÄDCHEN braucht eine Automatik');
+    applyPrimitiveAction(room, p, spec);
+  } finally {
+    Math.random = echtesRandom;
+  }
+  let gewaehlt = 0;
+  while (room.pendingCardAction && gewaehlt < 10) {
+    handleResolveCardCardChoice(room, p.id, room.pendingCardAction.candidateIds[0]);
+    gewaehlt++;
+  }
+  assert.strictEqual(gewaehlt, 2, 'bei Wurf 6 aber nur 2 Karten in Hand werden 2 abgelegt');
+  assert.strictEqual(p.hand.length, 0, 'Hand ist leer');
+  assert.strictEqual(room.pendingCardAction, null, 'danach haengt nichts offen');
+}
+
+// --- KATZENMÄDCHEN Randfall: leere Hand ---------------------------------
+{
+  const katze = findCard('KATZENMÄDCHEN', 'monster');
+  const p = makePlayer({ hand: [] });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  const echtesRandom = Math.random;
+  Math.random = () => 0.5; // beliebiger Wurf, Hand ist leer
+  try {
+    const spec = resolveConsequenceSpec(katze.name, katze.badstuff, p, room);
+    assert.ok(spec, 'das KATZENMÄDCHEN braucht eine Automatik');
+    applyPrimitiveAction(room, p, spec);
+  } finally {
+    Math.random = echtesRandom;
+  }
+  assert.strictEqual(room.pendingCardAction, null, 'bei leerer Hand oeffnet sich kein Dialog');
+}
+
+// --- ROTZ-ELEMENTAR mit Laufender Nase / Schattennase -----------------------
+// "In Kombination mit der Laufenden Nase (oder dem Schatten), erhaelt JEDER
+// einen Bonus von +10." Regelentscheidung (Review I2): "jeder" heisst jedes
+// beteiligte Monster - mit einer Nase-Karte macht das +20 (Rotz und die Nase
+// bekommen je +10), mit beiden Nase-Karten +30.
+{
+  const nase = findCard('LAUFENDE NASE', 'monster');
+  const schatten = findCard('DIE SCHATTENNASE', 'monster');
+  const allein = monsterStaerke('ROTZ-ELEMENTAR', makePlayer({}));
+  const mitNase = monsterStaerke('ROTZ-ELEMENTAR', makePlayer({}), [nase.id]);
+  const mitBeiden = monsterStaerke('ROTZ-ELEMENTAR', makePlayer({}), [nase.id, schatten.id]);
+  assert.strictEqual(mitNase - allein - nase.level, 20,
+    'mit einer Nase-Karte bekommen Rotz UND die Nase je +10, macht +20');
+  assert.strictEqual(mitBeiden - allein - nase.level - schatten.level, 30,
+    'mit beiden Nase-Karten bekommt jede beteiligte Karte ihre +10, macht +30');
+}
+
+// --- DIE SCHATTENNASE: "Du kannst nicht fluechten" --------------------------
+// Verhaltensprüfung statt Tabellen-Check: FLEE_IMPOSSIBLE.has(...) allein
+// beweist nicht, dass eine Flucht tatsaechlich verweigert wird - dafuer muss
+// der echte Fluchtpfad (handleAttemptFlee) laufen. +9 macht den Wurf ohne die
+// Sperre garantiert erfolgreich (siehe FILZLAUSE-Test in card-passives.test.js).
+{
+  const { handleAttemptFlee } = require('../server.js');
+  const schatten = findCard('DIE SCHATTENNASE', 'monster');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  room.combat = { actorId: p.id, helperId: null, monsterIds: [schatten.id],
+    actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: true };
+  handleAttemptFlee(room, p.id, 9);
+  assert.strictEqual(room.dieRoll.success, false,
+    'vor dem Schatten gibt es kein Entkommen - auch mit +9 nicht');
+}
+
+// --- PIÑATA, Niederlage -----------------------------------------------------
+// "Der Spieler, der nach dem Opfer an der Reihe ist, waehlt einen der
+// Gegenstaende des Opfers, die im Spiel sind. Leg es ab."
+{
+  const pinata = findCard('PIÑATA', 'monster');
+  const ruestung = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'armor' && c.bonus > 0);
+  const opfer = makePlayer({ equipped: Object.assign(newEquipped(), { armor: ruestung.id }) });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c3 = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([opfer, b, c3]);
+  const spec = resolveConsequenceSpec(pinata.name, pinata.badstuff, opfer, room);
+  assert.ok(spec, 'die PIÑATA braucht eine Automatik');
+  applyPrimitiveAction(room, opfer, spec);
+  assert.ok(room.pendingCardAction, 'jemand muss waehlen');
+  assert.strictEqual(room.pendingCardAction.playerId, 'p2', 'und zwar die naechste Person');
+  handleResolveCardCardChoice(room, 'p2', room.pendingCardAction.candidateIds[0]);
+  assert.strictEqual(opfer.equipped.armor, null, 'der Gegenstand ist weg');
+  assert.ok(room.treasureDiscard.includes(ruestung.id), 'und liegt im Ablagestapel, nicht bei p2');
+  assert.strictEqual(b.hand.length, 0, 'p2 bekommt ihn nicht');
+}
+
+// --- PIÑATA, Sieg -----------------------------------------------------------
+// "Wenn Pinata besiegt wird, zieht jedes Gruppenmitglied einen Schatz
+// aufgedeckt. Es spielt keine Rolle, wer am Kampf teilgenommen hat."
+// Review I3: die kaempfende Person zog die Karte tatsaechlich (Handkarten
+// stimmten), aber lastReward.cardIds war leer und der Verlauf meldete
+// "0 Schatzkarte(n) gezogen" - die spaetere Zuweisung ueberschrieb die
+// Piñata-Belohnung kommentarlos.
+{
+  const { resolveCombatWin } = require('../server.js');
+  const pinata = findCard('PIÑATA', 'monster');
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 10).map((c) => c.id);
+  const a = makePlayer({});
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c4 = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([a, b, c4]);
+  room.treasureDeck = schaetze.slice();
+  room.combat = { actorId: a.id, helperId: null, monsterIds: [pinata.id], actorModifier: 0,
+    monsterModifier: 0, treasureDelta: 0, helperReward: 0, backstabs: {} };
+  resolveCombatWin(room);
+  assert.strictEqual(b.hand.length, 1, 'auch wer nicht mitgekaempft hat, bekommt einen Schatz');
+  assert.strictEqual(c4.hand.length, 1, 'und zwar alle');
+  assert.strictEqual(a.hand.length, 1, 'die kaempfende Person ebenfalls genau einen');
+  assert.strictEqual(a.lastReward.cardIds.length, 1, 'lastReward der kaempfenden Person nennt die gezogene Karte');
+  assert.strictEqual(a.lastReward.cardIds[0], a.hand[0], 'und zwar genau die, die in der Hand liegt');
+  const siegZeile = room.logs.find((l) => l.text.includes('besiegt PIÑATA'));
+  assert.ok(siegZeile, 'Siegzeile vorhanden');
+  assert.ok(!siegZeile.text.includes('0 Schatzkarte'), 'die Siegzeile darf nicht 0 Schatzkarten behaupten');
+  assert.ok(siegZeile.text.includes('1 Schatzkarte'), 'die Siegzeile nennt die tatsaechlich gezogene Piñata-Karte');
+}
+
+// --- PIÑATA, Sieg mit Helfer:in ----------------------------------------------
+// Dieselbe Ueberschreib-Gefahr bestand fuer eine Helfer:in mit Zusage - auch
+// ihre Piñata-Karte muss in lastReward auftauchen.
+{
+  const { resolveCombatWin } = require('../server.js');
+  const pinata = findCard('PIÑATA', 'monster');
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 10).map((c) => c.id);
+  const a = makePlayer({});
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([a, b]);
+  room.treasureDeck = schaetze.slice();
+  room.combat = { actorId: a.id, helperId: b.id, monsterIds: [pinata.id], actorModifier: 0,
+    monsterModifier: 0, treasureDelta: 0, helperReward: 1, backstabs: {} };
+  resolveCombatWin(room);
+  assert.strictEqual(b.hand.length, 1, 'die Helfer:in bekommt ihre Piñata-Karte');
+  assert.strictEqual(b.lastReward.cardIds.length, 1, 'und lastReward nennt sie auch');
+  assert.strictEqual(b.lastReward.cardIds[0], b.hand[0]);
+}
+
+// --- PIÑATA, Schatzstapel reicht nicht fuer alle -----------------------------
+// Die Log-Zeile behauptete bisher immer "jede:r am Tisch zieht 1
+// Schatzkarte", auch wenn der Stapel (und der leere Ablagestapel) das gar
+// nicht hergaben.
+{
+  const { resolveCombatWin } = require('../server.js');
+  const pinata = findCard('PIÑATA', 'monster');
+  const zweiSchaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 2).map((c) => c.id);
+  const a = makePlayer({});
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const c5 = makePlayer({ id: 'p3', name: 'C' });
+  const room = makeRoom([a, b, c5]);
+  room.treasureDeck = zweiSchaetze.slice();
+  room.treasureDiscard = [];
+  room.combat = { actorId: a.id, helperId: null, monsterIds: [pinata.id], actorModifier: 0,
+    monsterModifier: 0, treasureDelta: 0, helperReward: 0, backstabs: {} };
+  resolveCombatWin(room);
+  const pinataZeile = room.logs.find((l) => l.text.includes('Piñata platzt'));
+  assert.ok(pinataZeile, 'Piñata-Zeile vorhanden');
+  assert.ok(!pinataZeile.text.includes('jede:r am Tisch zieht 1 Schatzkarte.'),
+    'die Zeile darf nicht mehr Karten behaupten als tatsaechlich gezogen wurden');
+  assert.ok(pinataZeile.text.includes('2 von 3'), 'die Zeile nennt die tatsaechliche Zahl');
+}
+
+// --- Primitiv lingeringCurse: Monster-Schlimme-Dinge im Fluch-Tracker -------
+// Der Tracker activeCurses hing bisher nur am Fluch-Ziehpfad (handleDrawDoor
+// -> addActiveCurse -> LINGERING_CURSES). Das Primitiv oeffnet ihn fuer
+// Konsequenzen, ohne eine zweite Tabelle danebenzustellen.
+{
+  const { applyPrimitiveAction, clearActiveCurseByKind } = require('../server.js');
+  const p = makePlayer({});
+  const room = makeRoom([p]);
+  applyPrimitiveAction(room, p, {
+    type: 'lingeringCurse', name: 'TESTMONSTER', kind: 'noHandItemBonus',
+    dauer: 'naechsterKampf', hinweis: 'Testwirkung.',
+  });
+  assert.strictEqual(p.activeCurses.length, 1, 'das Primitiv traegt genau einen Eintrag ein');
+  assert.strictEqual(p.activeCurses[0].kind, 'noHandItemBonus');
+  assert.strictEqual(p.activeCurses[0].dauer, 'naechsterKampf');
+  assert.strictEqual(p.activeCurses[0].name, 'TESTMONSTER', 'der Name steht fuer die Anzeige mit drin');
+  assert.strictEqual(p.activeCurses[0].hinweis, 'Testwirkung.');
+  // Der WUNSCHRING loescht ueber clearActiveCurse nach INDEX - der Eintrag
+  // muss also ein ganz normaler Tracker-Eintrag sein, kein Sonderfall.
+  assert.strictEqual(clearActiveCurseByKind(p, 'noHandItemBonus'), true, 'gezieltes Loeschen meldet Erfolg');
+  assert.strictEqual(p.activeCurses.length, 0, 'und raeumt den Eintrag weg');
+  assert.strictEqual(clearActiveCurseByKind(p, 'noHandItemBonus'), false, 'ein zweiter Aufruf findet nichts mehr');
+}
+
+// --- RIESENSTINKTIER, Kampftext ---------------------------------------------
+// "Sie können dir nicht helfen, dich hintergehen, oder beliebige Karten für
+// oder gegen dich verwenden - außer Wandernde Monster und Monsterverstärker."
+// Weisse Liste: gesperrt ist alles, erlaubt sind genau die zwei Ausnahmen.
+{
+  const { handleRequestHelp, handleThiefBackstab, handlePlayCombatCard,
+    backstabMalus, handlePlayCurseFromHand } = require('../server.js');
+  const stinktier = findCard('RIESENSTINKTIER', 'monster');
+  const verstaerker = ALL_CARDS.find((c) => c.category === 'door_other'
+    && typeof c.bonus === 'number' && c.bonus !== 0 && /für\s+(das\s+)?Monster/i.test(c.text || ''));
+  assert.ok(verstaerker, 'Testvoraussetzung: es gibt einen Monsterverstaerker');
+  // ponytail: die urspruengliche Suche ueber ein numerisches bonus-Feld
+  // findet keinen Trank - echte Kampftraenke (FLAMMENDER GIFTTRANK & Co.)
+  // tragen ihren Bonus nur im Fliesstext (parseCombatPotion), bonus bleibt
+  // null. Deshalb hier eine konkrete, garantiert vorhandene Karte statt der
+  // Regex-Suche.
+  const trank = findCard('FLAMMENDER GIFTTRANK', 'treasure_other');
+
+  function stinktierKampf() {
+    const kaempfer = makePlayer({ id: 'p1', name: 'A' });
+    const dritter = makePlayer({ id: 'p2', name: 'B', classes: [findCard('DIEB', 'class').id] });
+    const room = makeRoom([kaempfer, dritter]);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [stinktier.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    return { room, kaempfer, dritter };
+  }
+
+  // 1. Keine Hilfe.
+  {
+    const { room, dritter } = stinktierKampf();
+    handleRequestHelp(room, 'p1', dritter.id, 0);
+    assert.ok(!room.combat.helperPending, 'gegen das Stinktier wird niemand um Hilfe gebeten');
+  }
+  // 2. Kein Hintergehen.
+  {
+    const { room, dritter } = stinktierKampf();
+    const ablage = ALL_CARDS[0].id;
+    dritter.hand.push(ablage);
+    handleThiefBackstab(room, dritter.id, ablage, 'p1');
+    assert.strictEqual(backstabMalus(room), 0, 'der Rueckenfall greift nicht');
+    assert.ok(dritter.hand.includes(ablage), 'und kostet auch keine Karte');
+  }
+  // 3. Eine dritte Person spielt eine beliebige Kampfkarte: gesperrt.
+  {
+    const { room, dritter } = stinktierKampf();
+    dritter.hand.push(trank.id);
+    const vorher = room.combat.actorModifier + room.combat.monsterModifier;
+    handlePlayCombatCard(room, dritter.id, trank.id);
+    assert.strictEqual(room.combat.actorModifier + room.combat.monsterModifier, vorher,
+      'eine fremde Kampfkarte bleibt wirkungslos');
+    assert.ok(dritter.hand.includes(trank.id), 'und bleibt auf der Hand');
+  }
+  // 4. Gegenprobe - die weisse Liste ist wirklich weiss: derselbe Weg mit
+  //    einem Monsterverstaerker MUSS durchgehen, sonst prueft Fall 3 nur,
+  //    dass handlePlayCombatCard ueberhaupt nichts tut.
+  {
+    const { room, dritter } = stinktierKampf();
+    dritter.hand.push(verstaerker.id);
+    handlePlayCombatCard(room, dritter.id, verstaerker.id);
+    assert.ok(room.combat.monsterModifier !== 0,
+      'ein Monsterverstaerker ist ausdruecklich erlaubt und wirkt');
+  }
+  // 5. Die kaempfende Person selbst ist NICHT gesperrt - der Text richtet
+  //    sich an "deine Freunde".
+  {
+    const { room, kaempfer } = stinktierKampf();
+    kaempfer.hand.push(trank.id);
+    handlePlayCombatCard(room, kaempfer.id, trank.id);
+    assert.ok(!kaempfer.hand.includes(trank.id),
+      'wer gegen das Stinktier kaempft, spielt seine eigenen Karten weiter');
+  }
+  // 6. "... oder beliebige Karten für oder gegen dich verwenden": auch ein
+  //    Fluch aus der Hand ist gesperrt. Die Sperre in
+  //    handlePlayCurseFromHand hatte bis 2026-09-17 keinen Test - mit
+  //    `if (false)` blieb die Suite gruen.
+  {
+    const huhn = findCard('HUHN AUF DEINEM KOPF');
+    const { room, kaempfer, dritter } = stinktierKampf();
+    dritter.hand.push(huhn.id);
+    handlePlayCurseFromHand(room, dritter.id, huhn.id, kaempfer.id);
+    assert.ok(dritter.hand.includes(huhn.id), 'die Fluchkarte bleibt auf der Hand');
+    assert.strictEqual(kaempfer.activeCurses.length, 0,
+      'und die kaempfende Person bekommt keinen Fluch-Eintrag');
+    // Gegenprobe: ohne das Stinktier im Kampf geht genau derselbe Weg durch -
+    // sonst prueft der Fall nur, dass handlePlayCurseFromHand nichts tut.
+    const ohneStinktier = stinktierKampf();
+    ohneStinktier.room.combat.monsterIds = [findCard('PESTRATTEN', 'monster').id];
+    ohneStinktier.dritter.hand.push(huhn.id);
+    handlePlayCurseFromHand(ohneStinktier.room, ohneStinktier.dritter.id, huhn.id, ohneStinktier.kaempfer.id);
+    assert.ok(!ohneStinktier.dritter.hand.includes(huhn.id), 'Gegenprobe: der Fluch ist spielbar');
+    assert.strictEqual(ohneStinktier.kaempfer.activeCurses.length, 1,
+      'Gegenprobe: und landet als Eintrag beim Ziel');
+  }
+}
+
+// --- RIESENSTINKTIER, Schlimme Dinge ----------------------------------------
+// "Besprüht! Niemand wird dir im Kampf helfen, bevor du nicht alle getragene
+// Kleidung und Rüstung ablegst. Der Goldwert ist halbiert."
+{
+  const { resolveConsequenceSpec, applyPrimitiveAction, handleSellItems,
+    handleUnequipItem, handleRequestHelp } = require('../server.js');
+  const stinktier = findCard('RIESENSTINKTIER', 'monster');
+  // Eine Ruestung und ein Gegenstand von zusammen mindestens 2000 GS, damit
+  // die Halbierung den Stufenaufstieg messbar von 2 auf 1 drueckt.
+  // Beide Seiten der Halbierung muessen ueber der 1000er-Schwelle liegen,
+  // sonst faellt handleSellItems in den fruehen Rueckgabezweig und verkauft
+  // GAR NICHTS - der Test waere dann gruen, ohne die Halbierung zu pruefen.
+  // 600 (Ruestung) + 4500 (fuenf teuerste Gegenstaende) = 5100: voll 5
+  // Stufen, halbiert 2550 und damit 2 Stufen.
+  const ruestung = ALL_CARDS.filter((c) => c.slotKind === 'armor' && (c.gold || 0) > 0)
+    .sort((a, b) => b.gold - a.gold)[0];
+  const teuerListe = ALL_CARDS.filter((c) => c.category === 'item' && (c.gold || 0) > 0
+    && c.slotKind !== 'armor').sort((a, b) => b.gold - a.gold).slice(0, 5);
+  assert.ok(ruestung && teuerListe.length === 5, 'Testvoraussetzung: Ruestung und fuenf teure Gegenstaende vorhanden');
+  const gesamtGold = (ruestung.gold || 0) + teuerListe.reduce((n, c) => n + c.gold, 0);
+  assert.ok(Math.floor(gesamtGold / 2) >= 1000,
+    'Testvoraussetzung: auch der halbierte Wert liegt ueber der Verkaufsschwelle');
+
+  function besprueht() {
+    const p = makePlayer({ level: 3 });
+    const room = makeRoom([p]);
+    p.equipped.armor = ruestung.id;
+    const spec = resolveConsequenceSpec(stinktier.name, stinktier.badstuff, p, room);
+    assert.ok(spec, 'das Stinktier hat jetzt eine kuratierte Konsequenz');
+    applyPrimitiveAction(room, p, spec);
+    return { p, room };
+  }
+
+  // 1. Die Strafe steht im Tracker.
+  {
+    const { p } = besprueht();
+    assert.ok(p.activeCurses.some((f) => f.kind === 'noHelpHalfGold'),
+      'nach dem Besprühen steht die Strafe im Tracker');
+  }
+  // 2. Niemand hilft.
+  {
+    const { p, room } = besprueht();
+    const helfer = makePlayer({ id: 'p2', name: 'B' });
+    room.players.push(helfer);
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    handleRequestHelp(room, p.id, helfer.id, 0);
+    assert.ok(!room.combat.helperPending, 'wer besprueht ist, bekommt keine Hilfe');
+  }
+  // 3. Halber Goldwert: 2 Stufen werden zu 1.
+  {
+    const { p, room } = besprueht();
+    room.turnPhase = 'kampf';
+    room.combat = null;
+    room.turnIndex = 0;
+    teuerListe.forEach((c) => p.hand.push(c.id));
+    const vorher = p.level;
+    handleSellItems(room, p.id, [ruestung.id].concat(teuerListe.map((c) => c.id)));
+    const erwartet = Math.floor(Math.floor(gesamtGold / 2) / 1000);
+    assert.strictEqual(p.level - vorher, erwartet,
+      `halbierter Goldwert: ${gesamtGold} GS bringen nur ${erwartet} Stufe(n)`);
+    assert.ok(erwartet > 0 && erwartet < Math.floor(gesamtGold / 1000),
+      'Gegenprobe: es wurde wirklich verkauft, aber fuer weniger Stufen als ohne Halbierung');
+  }
+  // 4. Die Strafe endet, sobald keine Kleidung/Ruestung mehr anliegt.
+  {
+    const { p, room } = besprueht();
+    room.turnPhase = 'kampf';
+    room.combat = null;
+    handleUnequipItem(room, p.id, ruestung.id);
+    assert.ok(!p.activeCurses.some((f) => f.kind === 'noHelpHalfGold'),
+      'nach dem Ablegen der letzten Ruestung ist die Strafe weg');
+  }
+  // 5. Hand-Gegenstaende zaehlen NICHT als Kleidung - eine Waffe allein
+  //    beendet die Strafe nicht.
+  {
+    const p = makePlayer({ level: 3 });
+    const room = makeRoom([p]);
+    const waffe = ALL_CARDS.find((c) => c.slotKind === 'hand' && c.handsCost === 1);
+    p.equipped.hands = [waffe.id, null];
+    const spec = resolveConsequenceSpec(stinktier.name, stinktier.badstuff, p, room);
+    applyPrimitiveAction(room, p, spec);
+    assert.ok(p.activeCurses.some((f) => f.kind === 'noHelpHalfGold'),
+      'eine Waffe ist keine Kleidung - die Strafe bleibt');
+  }
+  // 6. Regression: die Halbierung darf einen Verkauf, der VOR der Halbierung
+  //    ueber der 1000er-Schwelle liegt, DANACH aber druntersackt, komplett
+  //    scheitern lassen - ohne eine Logzeile, die einen Verkauf behauptet,
+  //    der nie stattfand. 600 (Ruestung) + 500 (GHOULPEITSCHE) = 1100 vor
+  //    der Halbierung (>= 1000, Verkauf waere ohne Fluch moeglich), 550
+  //    danach (< 1000, Verkauf muss ganz ausbleiben).
+  {
+    const { p, room } = besprueht();
+    room.turnPhase = 'kampf';
+    room.combat = null;
+    room.turnIndex = 0;
+    const kleinesItem = findCard('GHOULPEITSCHE', 'item');
+    p.hand.push(kleinesItem.id);
+    const summeVorHalbierung = (ruestung.gold || 0) + kleinesItem.gold;
+    assert.ok(summeVorHalbierung >= 1000 && summeVorHalbierung < 2000
+      && Math.floor(summeVorHalbierung / 2) < 1000,
+      'Testvoraussetzung: Summe liegt vor der Halbierung ueber, danach unter der Schwelle');
+    const vorher = p.level;
+    const logsVorher = room.logs.length;
+    handleSellItems(room, p.id, [ruestung.id, kleinesItem.id]);
+    assert.strictEqual(p.level, vorher,
+      'halbiert unter die Schwelle: kein Stufenaufstieg, der Verkauf scheitert ganz');
+    assert.ok(p.hand.includes(kleinesItem.id), 'und der Gegenstand bleibt auf der Hand');
+    assert.strictEqual(p.equipped.armor, ruestung.id, 'die Ruestung bleibt angelegt - nichts wurde verkauft');
+    // Die eigentliche Regression: keine Logzeile darf einen Verkauf
+    // behaupten, der wegen der Halbierung gar nicht stattfand.
+    const neueLogs = room.logs.slice(logsVorher);
+    assert.ok(!neueLogs.some((e) => /GS zählen nur/.test(e.text)),
+      'kein Log ueber eine Halbierung, wenn der Verkauf mangels Schwelle gar nicht stattfindet');
+  }
+}
+
+// --- LUSTMONSTER, Kampftext -------------------------------------------------
+// "Du musst dir von einem Charakter des anderen Geschlechts helfen lassen ...
+// Findest du keinen passenden Charakter, musst du leider flüchten."
+{
+  const { handleRespondHelp, resolveCombat } = require('../server.js');
+  const lust = findCard('LUSTMONSTER', 'monster');
+
+  function lustKampf(helferGender) {
+    const kaempfer = makePlayer({ id: 'p1', name: 'A', gender: 'm', level: 9 });
+    const helfer = makePlayer({ id: 'p2', name: 'B', gender: helferGender, level: 9 });
+    const room = makeRoom([kaempfer, helfer]);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [lust.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false,
+      helperPending: { targetId: 'p2', compelled: false, reward: 0 } };
+    return { room, kaempfer, helfer };
+  }
+
+  // 1. Gleiches Geschlecht: die Hilfe kommt nicht zustande.
+  {
+    const { room } = lustKampf('m');
+    handleRespondHelp(room, 'p2', true);
+    assert.strictEqual(room.combat.helperId, null,
+      'das Lustmonster verlangt das andere Geschlecht - gleiches zaehlt nicht');
+  }
+  // 2. Anderes Geschlecht: die Hilfe kommt zustande. (Gegenprobe zu 1 - ohne
+  //    sie wuerde Fall 1 auch gruen sein, wenn handleRespondHelp gar nichts
+  //    mehr taete.)
+  {
+    const { room } = lustKampf('w');
+    handleRespondHelp(room, 'p2', true);
+    assert.strictEqual(room.combat.helperId, 'p2', 'das andere Geschlecht darf helfen');
+  }
+  // 3. Geschlechtslos (STRICHMÄNNCHEN) ist fuer eine Regel, die ein
+  //    Geschlecht NENNT, keins von beiden.
+  {
+    const { room } = lustKampf(null);
+    handleRespondHelp(room, 'p2', true);
+    assert.strictEqual(room.combat.helperId, null,
+      'geschlechtslos erfuellt "anderes Geschlecht" nicht');
+  }
+  // 4. Ohne passende Hilfe ist der Kampf verloren - auch bei erdrueckender
+  //    Uebermacht.
+  {
+    const kaempfer = makePlayer({ id: 'p1', name: 'A', gender: 'm', level: 99 });
+    const room = makeRoom([kaempfer]);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [lust.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    resolveCombat(room);
+    assert.strictEqual(room.combat && room.combat.mustFlee, true,
+      'ohne passende Hilfe hilft auch Stufe 99 nicht - fliehen');
+  }
+  // 5. "Unabhaengig von der Kampfstaerke" gilt auch fuer den
+  //    Krieger-Gleichstandssieg - ein Gleichstand ist auch ein Sieg und darf
+  //    ohne passende Hilfe nicht durchgehen.
+  {
+    const KRIEGER = findCard('KRIEGER', 'class');
+    const kaempfer = makePlayer({ id: 'p1', name: 'A', gender: 'm', level: lust.level,
+      classes: [KRIEGER.id] });
+    const room = makeRoom([kaempfer]);
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [lust.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    const vorherLevel = kaempfer.level;
+    resolveCombat(room);
+    assert.strictEqual(room.combat && room.combat.mustFlee, true,
+      'Krieger-Gleichstand gewinnt nicht gegen das Lustmonster ohne passende Hilfe');
+    assert.strictEqual(kaempfer.level, vorherLevel,
+      'kein Stufenaufstieg - der Gleichstand wurde nicht als Sieg gewertet');
+  }
+  // 6. Die ALUFOLIE-Notloesung darf bei fehlender Hilfe nicht verbraucht
+  //    werden - sonst zahlt die Person eine Karte fuer einen Sieg, der im
+  //    selben Atemzug wieder in Flucht umschlaegt. ALUFOLIE liegt derzeit in
+  //    keinem Stapel dieses Sets (siehe Kommentar bei TIE_BREAKER_CARD in
+  //    server.js) - fuer den Test wird sie kurzzeitig in CARDS_BY_ID
+  //    eingetragen, damit findTieBreaker sie ueber den echten Pfad findet.
+  {
+    const { CARDS_BY_ID } = require('../server.js');
+    const fakeId = 'TEST_ALUFOLIE_LUSTMONSTER';
+    CARDS_BY_ID.set(fakeId, { id: fakeId, name: 'ALUFOLIE', type: 'treasure' });
+    try {
+      const kaempfer = makePlayer({ id: 'p1', name: 'A', gender: 'm', level: lust.level, hand: [fakeId] });
+      const room = makeRoom([kaempfer]);
+      room.combat = { actorId: 'p1', helperId: null, monsterIds: [lust.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+      resolveCombat(room);
+      assert.strictEqual(room.combat && room.combat.mustFlee, true,
+        'ohne passende Hilfe wird geflohen, auch mit ALUFOLIE auf der Hand');
+      assert.ok(kaempfer.hand.includes(fakeId),
+        'die ALUFOLIE bleibt auf der Hand - sie wird nicht verbraucht');
+      assert.ok(!room.treasureDiscard.includes(fakeId) && !room.doorDiscard.includes(fakeId),
+        'die ALUFOLIE landet in keinem Ablagestapel');
+    } finally {
+      CARDS_BY_ID.delete(fakeId);
+    }
+  }
+}
+
+// --- LUSTMONSTER, Schlimme Dinge --------------------------------------------
+// "Verliere eine Stufe … in deinem nächsten Kampf werden deine
+// Hand-Gegenstände nutzlos."
+{
+  const { resolveConsequenceSpec, applyPrimitiveAction, combatTotals } = require('../server.js');
+  const lust = findCard('LUSTMONSTER', 'monster');
+  const waffe = ALL_CARDS.find((c) => c.slotKind === 'hand' && c.handsCost === 1 && (c.bonus || 0) > 0);
+  assert.ok(waffe, 'Testvoraussetzung: einhaendige Waffe mit Bonus vorhanden');
+
+  function mitWaffe() {
+    const p = makePlayer({ level: 5 });
+    const room = makeRoom([p]);
+    p.equipped.hands = [waffe.id, null];
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    return { p, room };
+  }
+
+  // 1. Stufenverlust und Tracker-Eintrag.
+  {
+    const p = makePlayer({ level: 5 });
+    const room = makeRoom([p]);
+    const spec = resolveConsequenceSpec(lust.name, lust.badstuff, p, room);
+    assert.ok(spec, 'das Lustmonster hat jetzt eine kuratierte Konsequenz');
+    applyPrimitiveAction(room, p, spec);
+    assert.strictEqual(p.level, 4, 'eine Stufe weniger (levelDelta zieht ab)');
+    assert.ok(p.activeCurses.some((f) => f.kind === 'noHandItemBonus'),
+      'und die anhaltende Wirkung steht im Tracker');
+    assert.strictEqual(p.activeCurses[0].dauer, 'naechsterKampf',
+      'sie gilt genau fuer den naechsten Kampf');
+  }
+  // 2. Differenzmessung: derselbe Kampf mit und ohne den Eintrag.
+  {
+    const ohne = mitWaffe();
+    const basis = combatTotals(ohne.room).playerStrength;
+    const mit = mitWaffe();
+    mit.p.activeCurses.push({ cardId: null, name: 'LUSTMONSTER', kind: 'noHandItemBonus',
+      amount: 0, dauer: 'naechsterKampf', hinweis: '' });
+    const gemindert = combatTotals(mit.room).playerStrength;
+    assert.strictEqual(basis - gemindert, waffe.bonus,
+      `die Hand-Waffe (+${waffe.bonus}) zaehlt mit der Wirkung nicht mehr`);
+  }
+}
+
+// --- WEIHNACHTSMANN, Schlimme Dinge -----------------------------------------
+// "Du kommst auf die Störerliste. Du erhältst keine Schatzkarten … auch nicht
+// von anderen Spielern … bis du ein Monster ohne Hilfe tötest."
+{
+  const { resolveConsequenceSpec, applyPrimitiveAction, resolveCombatWin } = require('../server.js');
+  const mann = findCard('WEIHNACHTSMANN', 'monster');
+  const ratte = findCard('PESTRATTEN', 'monster');
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 8).map((c) => c.id);
+
+  function aufDerListe(extra) {
+    const p = makePlayer(Object.assign({ level: 5 }, extra || {}));
+    const room = makeRoom([p]);
+    const spec = resolveConsequenceSpec(mann.name, mann.badstuff, p, room);
+    assert.ok(spec, 'der Weihnachtsmann hat jetzt eine kuratierte Konsequenz');
+    applyPrimitiveAction(room, p, spec);
+    room.treasureDeck = schaetze.slice();
+    return { p, room };
+  }
+
+  // Setzt eine beliebige Person (Helfer:in eingeschlossen) auf die
+  // Stoererliste, ueber denselben kuratierten Weg wie aufDerListe.
+  function sperren(room, spieler) {
+    const spec = resolveConsequenceSpec(mann.name, mann.badstuff, spieler, room);
+    applyPrimitiveAction(room, spieler, spec);
+  }
+
+  // Kartenerhaltung ueber alle drei Orte, an denen ein Schatz stecken kann -
+  // beweist, dass beim Sperren keine Karte verschwindet (nicht in keinem
+  // Stapel und keiner Hand mehr existiert).
+  function schatzGesamt(room, spielerListe) {
+    const inHand = spielerListe.reduce((sum, p) => sum + p.hand.length, 0);
+    return room.treasureDeck.length + inHand + room.treasureDiscard.length;
+  }
+
+  // 1. Sieg MIT Hilfe: kein Schatz, und die Sperre bleibt stehen.
+  {
+    const { p, room } = aufDerListe();
+    const helfer = makePlayer({ id: 'p2', name: 'B' });
+    room.players.push(helfer);
+    room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    resolveCombatWin(room);
+    assert.strictEqual(p.hand.length, 0, 'auf der Stoererliste gibt es keinen Schatz');
+    assert.ok(p.activeCurses.some((f) => f.kind === 'noTreasure'),
+      'ein Sieg mit Hilfe loest die Sperre nicht');
+  }
+  // 2. Sieg OHNE Hilfe: die Sperre faellt, und der befreiende Kampf zahlt
+  //    schon aus.
+  {
+    const { p, room } = aufDerListe();
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    resolveCombatWin(room);
+    assert.ok(!p.activeCurses.some((f) => f.kind === 'noTreasure'),
+      'ein Monster ohne Hilfe getoetet - die Sperre ist weg');
+    assert.strictEqual(p.hand.length, ratte.treasureCount,
+      'und der befreiende Kampf zahlt schon aus');
+  }
+  // 3. Gegenprobe: ohne Sperre zahlt derselbe Kampf mit Hilfe normal aus.
+  {
+    const p = makePlayer({ level: 5 });
+    const helfer = makePlayer({ id: 'p2', name: 'B' });
+    const room = makeRoom([p, helfer]);
+    room.treasureDeck = schaetze.slice();
+    room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    resolveCombatWin(room);
+    assert.strictEqual(p.hand.length, ratte.treasureCount,
+      'ohne Sperre gibt es die Schaetze wie immer');
+  }
+  // 4. endCombatNoLevel/leavesTreasure (MAHLZEIT!/Traenke, die den Kampf ohne
+  //    Sieg beenden): nichts fuer die gesperrte Person, UND der Stapel
+  //    schrumpft nicht fuer ein Geschenk, das nie ankommt.
+  {
+    const { applyCombatPotionAction } = require('../server.js');
+    const { p, room } = aufDerListe();
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    const vorher = room.treasureDeck.length;
+    const desc = applyCombatPotionAction(room, p,
+      { type: 'endCombatNoLevel', leavesTreasure: true, fixedTreasures: 2 }, findCard('MAHLZEIT!'));
+    assert.strictEqual(p.hand.length, 0,
+      'auf der Stoererliste gibt es auch beim Trankende keinen Schatz');
+    assert.strictEqual(room.treasureDeck.length, vorher,
+      'der Schatzstapel schrumpft nicht fuer ein Geschenk, das nie ankommt');
+    assert.ok(/Störerliste/.test(desc),
+      'die Meldung nennt ehrlich die Stoererliste statt einen Schatz zu behaupten');
+  }
+  // 5. wegjagenMitSchatz (MÖCHTEGERN-VAMPIR-artig): dieselben zwei Haelften.
+  {
+    const { applyPrimitiveAction: applyPrimitive } = require('../server.js');
+    const { p, room } = aufDerListe();
+    const vorher = room.treasureDeck.length;
+    const desc = applyPrimitive(room, p, { type: 'wegjagenMitSchatz', cardId: ratte.id });
+    assert.strictEqual(p.hand.length, 0, 'kein Schatz fuers Wegjagen auf der Stoererliste');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt einen Schatz zu behaupten');
+  }
+  // 6. MONSTER_REFUSES_TREASURE ueber den echten Aufdeck-Pfad (handleDrawDoor):
+  //    die Pestratten fliehen vor Orks und liessen sonst ihren Schatz da.
+  {
+    const { handleDrawDoor } = require('../server.js');
+    const { p, room } = aufDerListe({ races: [ORK.id] });
+    room.turnPhase = 'tuer';
+    room.doorDeck = [ratte.id];
+    const vorher = room.treasureDeck.length;
+    handleDrawDoor(room, p.id);
+    assert.strictEqual(p.hand.length, 0,
+      'die Pestratten lassen fuer eine gesperrte Person nichts da');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    const zeile = room.logs[room.logs.length - 1].text;
+    assert.ok(/Störerliste/.test(zeile),
+      'der Verlauf ist ehrlich statt einen Schatz zu behaupten');
+  }
+  // 7. discardWholeHandWithBonusDraw (TEDDYBÄR): kein Bonus-Schatz fuer die
+  //    gesperrte Person, Stapel bleibt unberuehrt.
+  {
+    const { applyPrimitiveAction: applyPrimitive } = require('../server.js');
+    const { p, room } = aufDerListe();
+    p.hand = [schaetze[0], schaetze[1]];
+    const vorher = room.treasureDeck.length;
+    const desc = applyPrimitive(room, p, { type: 'discardWholeHandWithBonusDraw' });
+    assert.strictEqual(p.hand.length, 0, 'kein Bonus-Schatz fuer die gesperrte Person');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt einen Bonus-Schatz zu behaupten');
+  }
+  // 8. finishTrade LEHNT AB (Spec §6), statt die gesperrten Schatzkarten
+  //    herauszufiltern und den Rest zu tauschen. Gefiltert wurde bis
+  //    2026-09-17 - dabei gab die gesperrte Person ihre Seite her und bekam
+  //    nichts zurueck, was ein Gegner beliebig oft wiederholen konnte.
+  {
+    const { handleProposeTrade, handleRespondTrade } = require('../server.js');
+    // 8a. Die gesperrte Person soll eine Schatzkarte BEKOMMEN.
+    {
+      const { p, room } = aufDerListe();
+      const geber = makePlayer({ id: 'p2', name: 'B', hand: [schaetze[0], ORK.id] });
+      room.players.push(geber);
+      handleProposeTrade(room, geber.id, p.id, [schaetze[0], ORK.id]);
+      handleRespondTrade(room, p.id, room.trades[0].id, true, []);
+      assert.ok(geber.hand.includes(schaetze[0]) && geber.hand.includes(ORK.id),
+        'der Handel kommt gar nicht zustande - auch die Nicht-Schatzkarte bleibt liegen');
+      assert.strictEqual(p.hand.length, 0, 'und die gesperrte Person bekommt nichts');
+      assert.strictEqual(room.trades.length, 0, 'das Angebot ist damit vom Tisch');
+      assert.ok(!room.logs.some((l) => l.text.startsWith('Handel:')),
+        'kein Verlaufseintrag, der einen Tausch behauptet');
+      assert.ok(room.logs.some((l) => /kommt nicht zustande/.test(l.text) && /Störerliste/.test(l.text)),
+        'der Verlauf sagt, warum');
+    }
+    // 8b. Die gesperrte Person GIBT und bekaeme als Gegenleistung einen
+    //     Schatz - genau der farmbare Fall: ohne Ablehnung war ihr
+    //     Gegenstand weg und die Gegenleistung verfiel.
+    {
+      const { p, room } = aufDerListe();
+      const partner = makePlayer({ id: 'p2', name: 'B', hand: [schaetze[0]] });
+      room.players.push(partner);
+      p.hand.push(ORK.id);
+      handleProposeTrade(room, p.id, partner.id, [ORK.id]);
+      handleRespondTrade(room, partner.id, room.trades[0].id, true, [schaetze[0]]);
+      handleRespondTrade(room, p.id, room.trades[0].id, true);
+      assert.ok(p.hand.includes(ORK.id), 'die gesperrte Person behaelt ihre Karte');
+      assert.ok(partner.hand.includes(schaetze[0]), 'und die Gegenleistung bleibt beim Partner');
+      assert.ok(room.logs.some((l) => /kommt nicht zustande/.test(l.text)),
+        'auch diese Richtung wird abgelehnt');
+    }
+  }
+  // 9. Kartenerhaltung bei der Helfer:in-Zusage, alle vier Kombinationen aus
+  //    gesperrt/nicht gesperrt fuer kaempfende Person und Helfer:in. Nummer
+  //    9c ist der eigentliche Fehler: eine gesperrte Helfer:in durfte bisher
+  //    schon gezogene Karten mit in die Sperre reissen (fuerHelfer.length = 0
+  //    nach dem Ziehen statt vorher gar nicht erst zu ziehen).
+  {
+    // 9a. Niemand gesperrt: Regressionswaechter fuer die bestehende Aufteilung.
+    {
+      const p = makePlayer({ level: 5 });
+      const helfer = makePlayer({ id: 'p2', name: 'B' });
+      const room = makeRoom([p, helfer]);
+      room.treasureDeck = schaetze.slice();
+      const gesamtVorher = schatzGesamt(room, [p, helfer]);
+      room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 1, mustFlee: false };
+      resolveCombatWin(room);
+      assert.strictEqual(schatzGesamt(room, [p, helfer]), gesamtVorher,
+        'keine Karte verschwindet (9a, niemand gesperrt)');
+      assert.strictEqual(helfer.hand.length, 1, 'die Helfer:in bekommt die zugesagte Karte (9a)');
+      assert.strictEqual(p.hand.length, ratte.treasureCount - 1,
+        'der Rest geht an die kaempfende Person (9a)');
+    }
+    // 9b. Kaempfende Person gesperrt, Helfer:in nicht: die Zusage wird noch
+    //     eingeloest (das war schon vor diesem Fix-Round korrekt).
+    {
+      const p = makePlayer({ level: 5 });
+      const helfer = makePlayer({ id: 'p2', name: 'B' });
+      const room = makeRoom([p, helfer]);
+      room.treasureDeck = schaetze.slice();
+      sperren(room, p);
+      const gesamtVorher = schatzGesamt(room, [p, helfer]);
+      room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 1, mustFlee: false };
+      resolveCombatWin(room);
+      assert.strictEqual(schatzGesamt(room, [p, helfer]), gesamtVorher,
+        'keine Karte verschwindet (9b, kaempfende Person gesperrt)');
+      assert.strictEqual(p.hand.length, 0, 'die gesperrte kaempfende Person bekommt nichts (9b)');
+      assert.strictEqual(helfer.hand.length, 1,
+        'die Helfer:in bekommt trotzdem die zugesagte Karte (9b)');
+    }
+    // 9c. DER FEHLER: Helfer:in gesperrt, kaempfende Person nicht. Die
+    //     kaempfende Person behaelt alles, was gezogen wurde - keine Karte
+    //     wird vernichtet.
+    {
+      const p = makePlayer({ level: 5 });
+      const helfer = makePlayer({ id: 'p2', name: 'B' });
+      const room = makeRoom([p, helfer]);
+      room.treasureDeck = schaetze.slice();
+      sperren(room, helfer);
+      const gesamtVorher = schatzGesamt(room, [p, helfer]);
+      room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 1, mustFlee: false };
+      resolveCombatWin(room);
+      assert.strictEqual(schatzGesamt(room, [p, helfer]), gesamtVorher,
+        'keine Karte wird vernichtet (9c, Helfer:in gesperrt)');
+      assert.strictEqual(helfer.hand.length, 0,
+        'die gesperrte Helfer:in bekommt ihr Versprechen nicht eingeloest (9c)');
+      assert.strictEqual(p.hand.length, ratte.treasureCount,
+        'die kaempfende Person behaelt alles, was gezogen wurde (9c)');
+    }
+    // 9d. Beide gesperrt: niemand bekommt etwas, der Stapel bleibt unberuehrt.
+    {
+      const p = makePlayer({ level: 5 });
+      const helfer = makePlayer({ id: 'p2', name: 'B' });
+      const room = makeRoom([p, helfer]);
+      room.treasureDeck = schaetze.slice();
+      sperren(room, p);
+      sperren(room, helfer);
+      const deckVorher = room.treasureDeck.length;
+      const gesamtVorher = schatzGesamt(room, [p, helfer]);
+      room.combat = { actorId: p.id, helperId: helfer.id, monsterIds: [ratte.id],
+        actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 1, mustFlee: false };
+      resolveCombatWin(room);
+      assert.strictEqual(room.treasureDeck.length, deckVorher,
+        'der Schatzstapel bleibt unberuehrt (9d, beide gesperrt)');
+      assert.strictEqual(schatzGesamt(room, [p, helfer]), gesamtVorher,
+        'keine Karte verschwindet (9d)');
+      assert.strictEqual(p.hand.length, 0, 'niemand bekommt einen Schatz (9d)');
+      assert.strictEqual(helfer.hand.length, 0, 'niemand bekommt einen Schatz (9d)');
+    }
+  }
+  // 10. packratteGeschenk (PACKRATTE): kein Geschenk fuer die gesperrte
+  //     Person, Stapel bleibt unberuehrt.
+  {
+    const { applyPrimitiveAction: applyPrimitive } = require('../server.js');
+    const packratte = findCard('PACKRATTE', 'monster');
+    const { p, room } = aufDerListe();
+    const vorher = room.treasureDeck.length;
+    const desc = applyPrimitive(room, p, { type: 'packratteGeschenk', cardId: packratte.id });
+    assert.strictEqual(p.hand.length, 0, 'kein Geschenk fuer die gesperrte Person');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(!room.pendingCardAction, 'keine Wahl zwischen zwei Schaetzen, die es nie gab');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt ein Geschenk zu behaupten');
+  }
+  // 11. Flucht mit TUBA DER VERZAUBERUNG (FLEE_TREASURE_ITEMS): kein Schatz
+  //     fuer eine gesperrte Person, Stapel bleibt unberuehrt. Neu gefunden
+  //     beim Audit fuer den Choke-Point (Fix-Round 3).
+  {
+    const { handleAttemptFlee } = require('../server.js');
+    const tuba = findCard('TUBA DER VERZAUBERUNG', 'item');
+    const { p, room } = aufDerListe();
+    p.equipped.hands = [tuba.id, null];
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: true };
+    const vorher = room.treasureDeck.length;
+    handleAttemptFlee(room, p.id, 9);
+    assert.strictEqual(room.dieRoll.success, true, 'Testvoraussetzung: die Flucht gelingt');
+    assert.strictEqual(p.hand.length, 0, 'die Tuba bringt der gesperrten Person keinen Schatz mit');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(room.logs.some((l) => /Störerliste/.test(l.text)),
+      'der Verlauf ist ehrlich statt einen Schatz zu behaupten');
+  }
+  // 12. drawTreasureN (generische "ziehe N Schaetze"-Primitive, z.B.
+  //     SCHATZHORT!): nichts fuer die gesperrte Person, Stapel bleibt
+  //     unberuehrt. Neu gefunden beim Audit fuer den Choke-Point.
+  {
+    const { applyPrimitiveAction: applyPrimitive } = require('../server.js');
+    const { p, room } = aufDerListe();
+    const vorher = room.treasureDeck.length;
+    const desc = applyPrimitive(room, p, { type: 'drawTreasureN', n: 3 });
+    assert.strictEqual(p.hand.length, 0, 'kein Schatz fuer die gesperrte Person');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt Schaetze zu behaupten');
+  }
+  // 13. removeOneMonster/leavesTreasure (POLLYVERWANDLUNGSTRANK-artig, ein
+  //     Geschwister von endCombatNoLevel): nichts fuer die gesperrte Person,
+  //     Stapel bleibt unberuehrt. Neu gefunden beim Audit fuer den
+  //     Choke-Point.
+  {
+    const { applyCombatPotionAction } = require('../server.js');
+    const { p, room } = aufDerListe();
+    room.combat = { actorId: p.id, helperId: null, monsterIds: [ratte.id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, helperReward: 0, mustFlee: false };
+    const vorher = room.treasureDeck.length;
+    const desc = applyCombatPotionAction(room, p,
+      { type: 'removeOneMonster', monsterId: ratte.id, leavesTreasure: true }, null);
+    assert.strictEqual(p.hand.length, 0, 'kein Schatz fuer die gesperrte Person');
+    assert.strictEqual(room.treasureDeck.length, vorher, 'der Schatzstapel schrumpft nicht');
+    assert.ok(/Störerliste/.test(desc), 'die Meldung ist ehrlich statt einen Schatz zu behaupten');
+  }
+}
+
+// --- EISKALTES HÄNDCHEN: Wunschring statt Kampf -----------------------------
+// "Wenn du Eiskaltes Händchen einen Wunschring gibst, anstatt sie zu
+// bekämpfen, wird sie deine kleine Freundin. Lege den Ring ab; behalte diese
+// Karte und zähle die Hand als einen kleinen Gegenstand, der einen Bonus von
+// +3 im Kampf gibt."
+{
+  const { handleDrawDoor, handleResolveCardChoice, applyPrimitiveAction,
+    combatTotals, istGrosserGegenstand, handleEquipItem } = require('../server.js');
+  const haendchen = findCard('EISKALTES HÄNDCHEN', 'monster');
+  const ring = findCard('WUNSCHRING');
+
+  // 1. Ohne Ring gibt es keine Wahl - es wird gekaempft wie bisher.
+  {
+    const p = makePlayer({});
+    const room = makeRoom([p]);
+    room.turnPhase = 'tuer';
+    room.doorDeck = [haendchen.id];
+    handleDrawDoor(room, p.id);
+    assert.ok(!room.pendingCardAction, 'ohne Wunschring keine Wahl');
+    assert.ok(room.combat, 'stattdessen der normale Kampf');
+  }
+  // 2. Mit Ring auf der Hand erscheint die Wahl.
+  {
+    const p = makePlayer({ hand: [ring.id] });
+    const room = makeRoom([p]);
+    room.turnPhase = 'tuer';
+    room.doorDeck = [haendchen.id];
+    handleDrawDoor(room, p.id);
+    assert.ok(room.pendingCardAction, 'mit Wunschring gibt es die Wahl');
+    assert.strictEqual(room.pendingCardAction.options.length, 2, 'kaempfen oder den Ring geben');
+  }
+  // 3. Nach der Zusage: kein Kampf, Ring weg, Karte angelegt, +3 im Kampf.
+  {
+    const p = makePlayer({ hand: [ring.id] });
+    const room = makeRoom([p]);
+    room.turnPhase = 'tuer';
+    room.doorDeck = [haendchen.id];
+    handleDrawDoor(room, p.id);
+    const altOption = room.pendingCardAction.options.find((o) => o.id === 'alt');
+    assert.ok(altOption, 'die Alternative steht zur Wahl');
+    handleResolveCardChoice(room, p.id, altOption.id);
+    assert.ok(!room.combat, 'es findet kein Kampf statt');
+    assert.ok(!p.hand.includes(ring.id), 'der Ring ist abgegeben');
+    assert.ok(room.treasureDiscard.includes(ring.id),
+      'und liegt im Schatz-Ablagestapel (WUNSCHRING ist type: treasure)');
+    assert.ok((p.equipped.special || []).includes(haendchen.id),
+      'die Hand liegt als Spezialausruestung an');
+    assert.ok(!istGrosserGegenstand(room, haendchen.id), 'sie ist ein KLEINER Gegenstand');
+
+    // Der +3-Bonus zaehlt in einem spaeteren Kampf.
+    const ohne = makePlayer({ id: 'p9', name: 'C', level: p.level });
+    const raumOhne = makeRoom([ohne]);
+    raumOhne.combat = { actorId: ohne.id, helperId: null,
+      monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    room.combat = { actorId: p.id, helperId: null,
+      monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    assert.strictEqual(combatTotals(room).playerStrength - combatTotals(raumOhne).playerStrength, 3,
+      'die besaenftigte Hand gibt +3 im Kampf');
+  }
+  // 4. Die rohe Monsterkarte auf der Hand ist KEINE Ausruestung: sie kommt
+  //    ueber Beute, Erstausteilung, aufgedeckte Tueren und Leichenfunde in
+  //    Haende - ohne diese Sperre gaebe es den +3 gratis, ohne Wunschring.
+  {
+    const p = makePlayer({ hand: [haendchen.id] });
+    const room = makeRoom([p]);
+    room.turnPhase = 'ausruesten';
+    const ohne = makePlayer({ id: 'p9', name: 'C', level: p.level });
+    const raumOhne = makeRoom([ohne]);
+    handleEquipItem(room, p.id, haendchen.id);
+    assert.ok(p.hand.includes(haendchen.id), 'die Monsterkarte bleibt auf der Hand');
+    assert.strictEqual((p.equipped.special || []).length, 0, 'kein Spezialslot fuer die rohe Monsterkarte');
+    room.combat = { actorId: p.id, helperId: null,
+      monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    raumOhne.combat = { actorId: ohne.id, helperId: null,
+      monsterIds: [findCard('PESTRATTEN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, backstabs: {}, mustFlee: false };
+    assert.strictEqual(combatTotals(room).playerStrength - combatTotals(raumOhne).playerStrength, 0,
+      'und gibt keinen Kampfbonus, solange sie nicht besaenftigt ist');
+  }
+}
+
+// --- EISKALTES HÄNDCHEN: die besaenftigte Karte bleibt liegen ---------------
+// "behalte diese Karte": ablegen wuerde sie in die Hand legen, und von dort
+// kaeme sie nie zurueck (handleEquipItem weist Monsterkarten ab).
+{
+  const { handleDrawDoor, handleResolveCardChoice, handleUnequipItem } = require('../server.js');
+  const haendchen = findCard('EISKALTES HÄNDCHEN', 'monster');
+  const ring = findCard('WUNSCHRING');
+  const p = makePlayer({ hand: [ring.id] });
+  const room = makeRoom([p]);
+  room.turnPhase = 'tuer';
+  room.doorDeck = [haendchen.id];
+  handleDrawDoor(room, p.id);
+  handleResolveCardChoice(room, p.id, room.pendingCardAction.options.find((o) => o.id === 'alt').id);
+  handleUnequipItem(room, p.id, haendchen.id);
+  assert.ok((p.equipped.special || []).includes(haendchen.id), 'die Hand bleibt angelegt');
+  assert.ok(!p.hand.includes(haendchen.id), 'und wandert nicht in die Hand');
+}
+
+raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
+console.log('card-unnatural-monsters: ok');

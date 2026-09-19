@@ -94,7 +94,10 @@ function makeRoom(players, monsterIds) {
   const p = makePlayer({});
   assert.strictEqual(TREASURE_POWER_OVERRIDES['DER ANDERE RING'](p, makeRoom([p])), null, 'ohne Fluch nichts zu beenden');
   p.activeCurses = [{ name: 'HUHN AUF DEINEM KOPF', kind: 'rollMalus', amount: -1 }];
-  assert.deepStrictEqual(TREASURE_POWER_OVERRIDES['DER ANDERE RING'](p, makeRoom([p])), { type: 'clearCurse', index: 0 });
+  // Die Aktion nennt Wirkungsart und Namen statt eines Listenindex - siehe
+  // fluchBeendenSpec in src/cards/treasures.js.
+  assert.deepStrictEqual(TREASURE_POWER_OVERRIDES['DER ANDERE RING'](p, makeRoom([p])),
+    { type: 'clearCurse', kind: 'rollMalus', name: 'HUHN AUF DEINEM KOPF' });
 }
 
 // --- TYPOGRAFISCHER FEHLER: staerkstes Monster zaehlt als Stufe 1 ----------

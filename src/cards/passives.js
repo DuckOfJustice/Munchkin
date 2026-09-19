@@ -2,7 +2,9 @@
 // im Spiel ist. Kuratiert statt per Regex - die Formulierungen auf den Karten
 // sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6 gegen Elfen").
 module.exports = (ctx) => {
-  const { hasRace, hasClass, card, equippedItemIds, istGeschlecht } = ctx;
+  const {
+    hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
+  } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
   // SCHUTZSANDALEN: "Flüche, die du ziehst, nachdem du eine Tür
@@ -33,12 +35,25 @@ module.exports = (ctx) => {
     // das Geschlecht nur durch Karten - "geschlechtsumgewandelt" ist hier also
     // deckungsgleich mit "weiblich". Den Schatz gibt MONSTER_REFUSES_TREASURE.
     'AMAZONE': (p) => istGeschlecht(p, 'w'),
+    // --- Unnatural Axe ---
+    'FEUERLÖSCHER': (p) => p.level <= 2,   // "Greift niemanden mit Stufe 2 oder niedriger an."
+    'TENTAKELDÄMON': (p) => p.level <= 2,  // "Greift niemanden mit Stufe 2 oder niedriger an."
+    'JABBERWOCK': (p) => p.level <= 4,     // "Greift niemanden mit Stufe 4 oder niedriger an."
+    // "Greift keine Frauen an oder Traeger des Stacheligen Genitalschoners."
+    // ponytail: nur die Geschlechts-Klausel. Der STACHELIGE GENITALSCHONER
+    // liegt in den Rohdaten als treasure_other ohne slotKind und laesst sich
+    // deshalb gar nicht tragen - die Klausel kommt in der Runde nach, in der
+    // die Unnatural-Axe-Schatzkarten ihren Slot bekommen.
+    'PSYCHO-EICHHÖRNCHEN': (p) => istGeschlecht(p, 'w'),
+    // "Fluechtet vor Orks, statt anzugreifen und hinterlaesst den Schatz."
+    'PESTRATTEN': (p) => hasRace(p, 'ORK'),
   };
 
   // Monster aus MONSTER_REFUSES, die beim Weiterziehen trotzdem etwas
   // dalassen: Kartenname -> Anzahl Schatzkarten.
   const MONSTER_REFUSES_TREASURE = {
     'AMAZONE': 1,
+    'PESTRATTEN': 2,  // "... und hinterlaesst den Schatz." - die Karte nennt 2 Schaetze.
   };
 
   // --- Monster, die eine Rasse automatisch totstampft ----------------------
@@ -84,6 +99,14 @@ module.exports = (ctx) => {
       .some((id) => { const c = card(id); return c && (c.gold || 0) >= minGold; });
   }
 
+  // EISKALTES HÄNDCHEN: "Wenn du Eiskaltes Händchen einen Wunschring gibst".
+  // Geben heisst hergeben, nicht tragen - deshalb Hand UND Ausruestung, wie
+  // bei hatGegenstandAbGold.
+  function hatWunschring(player) {
+    return equippedItemIds(player).concat(player.hand)
+      .some((id) => (card(id) || {}).name === 'WUNSCHRING');
+  }
+
   const COMBAT_START_OPTIONS = {
     // "Statt zu kaempfen kann ein Priester den Moechtegern-Vampir wegjagen,
     // indem er 'Booga Booga' ruft und seinen Schatz nimmt. Steige keine Stufe
@@ -115,6 +138,18 @@ module.exports = (ctx) => {
       wennErfuellt: (p) => equippedItemIds(p).length === 0,
       label: 'Geschenk annehmen (2 offene Schaetze, einen behalten)',
       action: { type: 'packratteGeschenk' },
+    },
+    // "Wenn du Eiskaltes Händchen einen Wunschring gibst, anstatt sie zu
+    // bekämpfen, wird sie deine kleine Freundin. Lege den Ring ab; behalte
+    // diese Karte und zähle die Hand als einen kleinen Gegenstand, der einen
+    // Bonus von +3 im Kampf gibt." Wie die vier Optionen darueber ein eigenes
+    // Primitiv - dass es die Karte aus dem Monster- in den Ausruestungs-
+    // Zustand bringt, ist kein Bruch der Bauform: wegjagenMitSchatz verschiebt
+    // die Monsterkarte ebenfalls selbst.
+    'EISKALTES HÄNDCHEN': {
+      wennErfuellt: (p) => hatWunschring(p),
+      label: 'Einen Wunschring geben (kein Kampf, die Hand wird ein +3-Gegenstand)',
+      action: { type: 'haendchenBesaenftigen' },
     },
   };
 
@@ -152,8 +187,13 @@ module.exports = (ctx) => {
 
   // GNOM: "Du erhaeltst +1 fuer jeden nicht-einmal einsetzbaren Gegenstand,
   // der mit den Buchstaben G oder N beginnt."
+  // excludeIds (optional, von MONDJUNGFERN gesetzt - siehe combatTotals):
+  // Gegenstands-Ids, die hier nicht mitzaehlen duerfen, obwohl sie angelegt
+  // sind - sonst wuerde der Gnom seinen Waffenbonus ueber die Rasse
+  // zurueckholen, den die Mondjungfern gerade gestrichen hat.
   const RACE_ITEM_BONUS = {
-    'GNOM': (player) => equippedItemIds(player).filter((id) => {
+    'GNOM': (player, excludeIds) => equippedItemIds(player).filter((id) => {
+      if (excludeIds && excludeIds.has(id)) return false;
       const c = card(id);
       return c && /^[GN]/i.test(c.name) && !/nur\s+einmal\s+einsetzbar/i.test(c.text || '');
     }).length,
@@ -226,12 +266,18 @@ module.exports = (ctx) => {
   // keine Hand, siehe FREE_HAND_ITEMS) und zaehlt trotzdem mit.
   // ponytail: "Waffe" gegen "Schild" kennen die Kartendaten nicht - ein
   // Schild in der Hand zaehlt hier mit. Kuratierte Ausnahmeliste waere der
-  // Aufruestweg.
-  const waffenAnzahl = (p) => {
-    const ids = new Set((p.equipped.hands || []).filter(Boolean));
-    (p.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
-    return ids.size;
-  };
+  // Aufruestweg. Id-Menge kommt aus handItemIds (server.js) - dieselbe
+  // Definition wie bei MONDJUNGFERN, damit "Waffe" ueberall dasselbe meint.
+  const waffenAnzahl = (p) => handItemIds(p).size;
+
+  // "Mensch" ist in Munchkin keine Karte, sondern ihr Fehlen: wer keine
+  // Rassenkarte ausliegen hat, ist Mensch - deshalb player.races statt einer
+  // Aufzaehlung der Rassennamen, die ein neues Set stillschweigend veralten
+  // liesse (ORK/GNOM landen ebenfalls in races, siehe TRAIT_DOOR_CARDS).
+  // Dazu die Monsterbrille fuer den einen Gegenstand, der eine Rasse verleiht:
+  // wer FALSCHE OHREN traegt, gilt fuer Monster als Elf und damit nicht als
+  // Mensch (ITEM_GRANTS_TRAIT kennt sonst keine Rasse).
+  const istMensch = (p) => !p.races.length && !monsterSeesRace(p, 'ELF');
 
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
@@ -304,6 +350,68 @@ module.exports = (ctx) => {
       { wennErfuellt: (p) => !!p.raceCapCard, bonus: 5 },
     ],
     'KAMIKAZE-KOBOLDE': { classes: ['ZAUBERER'], bonus: 3 },                        // "+3 gegen Zauberer."
+    // --- Unnatural Axe ------------------------------------------------------
+    'KATZENMÄDCHEN': { races: ['ORK'], bonus: 5 },                                 // "Toedlich niedlich. +5 gegen Orks."
+    'TEDDYBÄR': { races: ['ORK'], bonus: 5 },                                      // "Schrecklich niedlich. +5 gegen Orks."
+    'JUDGE FREDD': { classes: ['DIEB'], bonus: 5 },                                // "+5 gegen Diebe."
+    'M.T.-ANZUG': { classes: ['ZAUBERER', 'DIEB'], bonus: 5 },                     // "+5 gegen Zauberer oder Diebe." - "oder", also einmal.
+    'DING MIT EINEM ÜBERLANGEN NAMEN, DESSEN BILD NICHT AUF DIE KARTE PASST': { classes: ['KRIEGER'], bonus: 5 }, // "+5 gegen Krieger."
+    'TENTAKELDÄMON': { classes: ['PRIESTER'], bonus: 5 },                          // "Eine Hoellenkreatur. +5 gegen Priester."
+    // "+4 gegen Elfen (uuuaaaah). In Kombination mit der Laufenden Nase (oder
+    // dem Schatten), erhaelt JEDER einen Bonus von +10." Regelentscheidung
+    // (Review I2): "jeder" heisst jedes beteiligte Monster, nicht "einmal pro
+    // Kampf" - deshalb steht dieselbe Klausel an allen drei Karten (hier,
+    // sowie bei LAUFENDE NASE und DIE SCHATTENNASE weiter unten). Jede Karte
+    // traegt ihren eigenen +10, monsterTraitBonusSum addiert sie: Rotz + eine
+    // Nase macht +20, Rotz + beide Nasen +30 - konsistent mit der Regel, dass
+    // JEDE beteiligte Karte den Bonus fuer sich bekommt.
+    'ROTZ-ELEMENTAR': [
+      { races: ['ELF'], bonus: 4 },
+      { wennErfuellt: (p, room) => !!room.combat && room.combat.monsterIds.some((id) => {
+        const m = card(id);
+        return !!m && (m.name === 'LAUFENDE NASE' || m.name === 'DIE SCHATTENNASE');
+      }), bonus: 10 },
+    ],
+    // Gegenstueck zur ROTZ-ELEMENTAR-Klausel oben: dieselbe Regelentscheidung
+    // ("jeder" = jedes beteiligte Monster) verlangt denselben +10 auch hier,
+    // sobald der Rotz-Elementar mit im Kampf steht.
+    'LAUFENDE NASE': {
+      wennErfuellt: (p, room) => !!room.combat
+        && room.combat.monsterIds.some((id) => (card(id) || {}).name === 'ROTZ-ELEMENTAR'),
+      bonus: 10,
+    },
+    // Gegenstueck zur ROTZ-ELEMENTAR-Klausel oben, siehe dort.
+    'DIE SCHATTENNASE': {
+      wennErfuellt: (p, room) => !!room.combat
+        && room.combat.monsterIds.some((id) => (card(id) || {}).name === 'ROTZ-ELEMENTAR'),
+      bonus: 10,
+    },
+    // "+5 gegen Elfen oder Menschen." - eine Regel, nicht zwei: ein Elf ist
+    // kein Mensch, die Faelle schliessen sich aus.
+    'RIESENKAKERLAKE': { wennErfuellt: (p) => monsterSeesRace(p, 'ELF') || istMensch(p), bonus: 5 },
+    'GRASGNOLL': { wennErfuellt: (p) => istMensch(p), bonus: 5 },   // "+5 gegen Menschen."
+    // "Greift mit zahlreichen Koepfen an. Erhaelt +5, wenn dir niemand hilft."
+    // Haengt am Kampf, nicht an der Person - deshalb ueber den Raum.
+    'FEUERLÖSCHER': { wennErfuellt: (p, room) => !(room.combat && room.combat.helperId), bonus: 5 },
+    // "+4 gegen Zwerge, +2 gegen Frauen, -3 gegen Zauberer, -2 am Samstag."
+    // Vier unabhaengige Klauseln, also vier Regeln. Der Samstag ist der echte
+    // Wochentag - das ist der Gag der Karte.
+    // ponytail: dadurch aendert sich die Monsterstaerke ueber Mitternacht
+    // hinweg. Wer das nicht will, streicht die letzte Regel.
+    'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT': [
+      { races: ['ZWERG'], bonus: 4 },
+      { wennErfuellt: (p) => istGeschlecht(p, 'w'), bonus: 2 },
+      { classes: ['ZAUBERER'], bonus: -3 },
+      { wennErfuellt: () => new Date().getDay() === 6, bonus: -2 },
+    ],
+    // "+3 gegen Zwerge oder Zauberer. Ja, das macht +6 gegen Zwergenzauberer."
+    // Die Karte sagt die Addition ausdruecklich - deshalb zwei Regeln.
+    'JABBERWOCK': [{ races: ['ZWERG'], bonus: 3 }, { classes: ['ZAUBERER'], bonus: 3 }],
+    'WEIHNACHTSMANN': { races: ['ELF'], bonus: -5 },                               // "-5 gegen Elfen. Der Narr vertraut den Elfen."
+    // ponytail: nur der Kampfbonus oben ist verdrahtet. Die Schlimmen Dinge
+    // ("kein Schatz, bis du ein Monster allein toetest") sind bewusst
+    // manuell - siehe Kommentar bei CONSEQUENCE_OVERRIDES in
+    // src/cards/consequences.js (Design-Spec §6, Welle 3).
   };
 
   // --- Monster, die die Kampfrechnung selbst verändern ---------------------
@@ -314,11 +422,34 @@ module.exports = (ctx) => {
   // GUMMI-GOLEM: "Er klebt an deinen Waffen ... du kannst nur auf deiner
   // Stufe kaempfen, ohne weitere Boni."
   const MONSTER_IGNORES_BONUSES = new Set(['GEMEINE GHOULE', 'GUMMI-GOLEM']);
+  // --- Monster, gegen die Waffen nichts bringen ----------------------------
+  // MONDJUNGFERN: "Du musst sie mit leeren Haenden bestrafen. In diesem Kampf
+  // erhaeltst du keine Vorteile durch Waffen." Kleiner Bruder von
+  // MONSTER_IGNORES_BONUSES, das ALLE Boni streicht.
+  // ponytail: "Waffe" heisst hier wie in waffenAnzahl "belegt eine Hand" -
+  // ein Schild zaehlt also mit. Kuratierte Ausnahmeliste waere der Aufruestweg.
+  const MONSTER_IGNORES_WEAPONS = new Set(['MONDJUNGFERN']);
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
   const MONSTER_FORBIDS_HELP = new Set(['PAVILLON']);
   // Die ersten beiden Regeln gelten für die ganze Munchkin-Seite: sobald
   // jemand mithilft, kämpfen beide gegen dasselbe Monster, also trifft die
   // Einschränkung auch die Helfer:in.
+  //
+  // RIESENSTINKTIER: "Deine 'Freunde' kommen nicht dichter als 20 Meter ...
+  // Sie können dir nicht helfen, dich hintergehen, oder beliebige Karten für
+  // oder gegen dich verwenden - außer Wandernde Monster und
+  // Monsterverstärker." Bewusst NICHT in MONSTER_FORBIDS_HELP: das Set sperrt
+  // nur die Hilfe, hier ist alles gesperrt ausser zwei Ausnahmen. Umgesetzt
+  // als weisse Liste in stinktierSperre/handlePlayCombatCard (server.js) -
+  // gesperrt ist, wer nicht selbst kaempft.
+  const MONSTER_LOCKS_OTHERS = new Set(['RIESENSTINKTIER']);
+  //
+  // LUSTMONSTER: "Du musst dir von einem Charakter des anderen Geschlechts
+  // helfen lassen ... sonst kannst du das Lustmonster nicht besiegen. Findest
+  // du keinen passenden Charakter, musst du leider flüchten." Bewusst NICHT
+  // in FLEE_AUTOMATIC: das Set laesst eine Flucht GELINGEN, hier geht es
+  // darum, dass der Kampf nicht GEWONNEN werden kann (siehe resolveCombat).
+  const MONSTER_REQUIRES_OTHER_GENDER = new Set(['LUSTMONSTER']);
 
   // --- Weglaufen -------------------------------------------------------------
   // Feste Modifikatoren, die ohne Zutun gelten. Der Zauberer-Flugzauber ("+1
@@ -337,10 +468,14 @@ module.exports = (ctx) => {
     'GALLERT-OKTAEDER': 1,     // "Du hast +1 auf Weglaufen."
     'LAHMER GOBLIN': 1,        // "Du hast +1 auf Weglaufen."
     'DIE TROLLE VOM TOTEN MEER': 1, // "Jeder erhaelt +1 auf Weglaufen."
+    'WERSCHILDKRÖTE': 2,  // "Greift seeehr langsam an. +2 fuer Weglaufen."
+    'PESTRATTEN': -1,     // "Alle anderen muessen kaempfen und erhalten -1 fuer Weglaufen."
   };
   // FILZLAUSE: "Denen kannst du nicht entkommen!"
   // LAUFENDE NASE: "Verlierst du den Kampf, kannst du nicht fliehen."
-  const FLEE_IMPOSSIBLE = new Set(['FILZLAUSE', 'LAUFENDE NASE']);
+  const FLEE_IMPOSSIBLE = new Set(['FILZLAUSE', 'LAUFENDE NASE',
+    'DIE SCHATTENNASE',  // "Du kannst nicht fluechten und wirst automatisch gefangen."
+  ]);
   // TOPFPFLANZE, Schlimme Dinge: "Keine. Automatische Flucht."
   // GOLDFISCH: "Greift nicht an und du fliehst automatisch, aber ..."
   const FLEE_AUTOMATIC = new Set(['TOPFPFLANZE', 'GOLDFISCH']);
@@ -464,6 +599,10 @@ module.exports = (ctx) => {
     // SCHRECKLICHE SOCKEN: "Du kannst die Socken unter anderem Schuhwerk
     // tragen, aber wenn du dein Schuhwerk verlierst, sind sie auch weg."
     'SCHRECKLICHE SOCKEN': { slot: 'special', mitSlot: 'feet' },
+    // Keine Ausruestungskarte, sondern die besaenftigte Monsterkarte selbst -
+    // sie hat in den Rohdaten weder slotKind noch bonus, deshalb steht der
+    // Bonus hier an der Regel (siehe equippedBonusSum).
+    'EISKALTES HÄNDCHEN': { slot: 'special', bonus: 3 },
   };
   // Ein Spezialplatz ist ein Sammelbereich: beliebig viele Karten liegen dort
   // nebeneinander (anders als Kopf/Ruestung/Schuhe/Haende).
@@ -474,7 +613,8 @@ module.exports = (ctx) => {
   return {
     CURSE_PROOF_ITEMS, MONSTER_REFUSES, MONSTER_REFUSES_TREASURE, MONSTER_AUTO_KILL_BY_RACE,
     MONSTER_PASS_OPTION, MONSTER_TRAIT_BONUS, MONSTER_IGNORES_LEVEL,
-    MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS,
+    MONSTER_IGNORES_WEAPONS, MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, MONSTER_LOCKS_OTHERS,
+    FLEE_ITEM_BONUS,
     FLEE_MONSTER_MOD, FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY,
     FLEE_TREASURE_ITEMS, MONSTER_EXTRA_LEVEL, FIRE_ITEMS,
     CLASS_COMBAT_DISCARD, UNDEAD_MONSTERS, CLASS_FLEE_DISCARD,
@@ -482,6 +622,6 @@ module.exports = (ctx) => {
     COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS,
     TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
     GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
-    BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT,
+    BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
   };
 };

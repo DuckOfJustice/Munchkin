@@ -1098,3 +1098,152 @@ Dinge aller. Mit dem Nutzer abgestimmt, eigene Runde.
 `GUARANTEED_FLEE_CARDS` beenden weiterhin nur die eigene Flucht ohne
 Stufenstrafe und ohne Kleberfläschchen-Fenster (`// ponytail:` am Code) — neu
 ist nur, dass danach die Helfer:in trotzdem selbst laufen muss.
+
+---
+
+## 11. Unnatural Axe: Monsterkarten (Runde vom 2026-09-16)
+
+Drittes Set, gleiche Bauform wie Clerical Errors. Spec und Plan:
+`docs/superpowers/specs/2026-09-16-unnatural-axe-monster-design.md` und
+`docs/superpowers/plans/2026-09-16-unnatural-axe-monster.md` (16 Tasks,
+alle abgehakt).
+
+### 11.1 Was jetzt läuft
+
+- **Monsterboni** über `MONSTER_TRAIT_BONUS` (src/cards/passives.js): der
+  Normalfall bleibt `{ races/classes: [...], bonus }`, alles Textliche ohne
+  Rasse/Klasse (Geschlecht, Wochentag, Ausrüstungszahl, Kampfzustand) läuft
+  über `{ wennErfuellt: (p, room) => bool, bonus }`.
+- **Stufengrenzen** (`monsterRefusesTarget`/`MONSTER_REFUSES`) und
+  **Weglauf-Modifikatoren** (`FLEE_MONSTER_MOD`, `FLEE_IMPOSSIBLE`) um die
+  Unnatural-Axe-Monster erweitert (FEUERLÖSCHER, TENTAKELDÄMON, JABBERWOCK,
+  PSYCHO-EICHHÖRNCHEN, PESTRATTEN, DIE SCHATTENNASE).
+- **`istMensch(p)`** (src/cards/passives.js): "keine Rassenkarte" - für
+  RIESENKAKERLAKE und GRASGNOLL, die beide gegen Menschen bonusieren.
+- **`wennErfuellt` bekommt jetzt den Raum** (zweiter Parameter, optional),
+  nicht nur den Spieler - nötig für alles, was am Kampfzustand statt an der
+  Person hängt: FEUERLÖSCHER ("+5 ohne Hilfe"), ROTZ-ELEMENTAR mit LAUFENDE
+  NASE/DIE SCHATTENNASE im selben Kampf.
+- **Würfel-Ablege-Primitiv** `diceDiscardHand` (server.js, `applyPrimitiveAction`):
+  würfelt und legt so viele Handkarten ab wie gewürfelt, gedeckelt auf die
+  tatsächliche Handkartenzahl. Träger: KATZENMÄDCHEN.
+- **Waffen-Ausblendung** `MONSTER_IGNORES_WEAPONS` (Set): MONDJUNGFERN zählt
+  keinen Waffenbonus - "Waffe" heißt wie bei `waffenAnzahl` "belegt eine
+  Hand", ein Schild zählt mit.
+- **Feuer-Verdopplung**: `conditionalItemBonusSum` verdoppelt gegen den
+  EISRIESEN jeden Gegenstand aus `FIRE_ITEMS` (Feuer/Flamme-Text), generisch
+  statt kuratierte Liste - neue Feuergegenstände zählen automatisch mit.
+- **Gigantischer Fungus**: `handlePlayCombatCard` erkennt GIGANTISCH auf
+  einem FUNGUS und gibt +25 statt der gedruckten +10 (`zuschlag` statt
+  `c.bonus`, siehe Commit "Einblendung im Kampf nennt jetzt denselben Bonus
+  wie der Verlauf" - Verlauf und `room.cardPlay.hinweis` bezogen sich vorher
+  auf unterschiedliche Werte).
+- **PIÑATA**: Niederlage kostet die nachfolgende Person die Wahl eines
+  Gegenstands des Opfers (der Gegenstand geht in den Ablagestapel, nicht an
+  die wählende Person - Spiegelbild zu `queuedTakeItem`, siehe
+  `discardVictim`). Sieg gibt einen Sieg-Hook für den **ganzen Tisch**:
+  `resolveCombatWin` erkennt PIÑATA unter den Monstern und lässt jede Person
+  am Tisch einen Schatz ziehen, unabhängig von der Kampfteilnahme.
+
+### 11.2 Was bewusst nur teilweise abgedeckt ist
+
+Markiert im Code mit `// ponytail:`, jeweils mit Aufrüstweg:
+
+- **Gigantischer Fungus, Strafenverdopplung** (`src/cards/consequences.js`,
+  Eintrag `'FUNGUS'`): die Schlimmen Dinge verdoppeln sich laut Text
+  ebenfalls, wenn der Fungus Gigantisch ist - die Konsequenz-Funktion sieht
+  aber nur `player`, nicht den Verstärker-Zustand des Kampfs. Aufrüstweg: den
+  Verstärker-Zustand in die Konsequenz durchreichen.
+- **GRASGNOLL, Trank-Rückgabe** (`src/cards/consequences.js`, Eintrag
+  `'GRASGNOLL'`): "+1 Stufe zurück je sofort abgelegtem Trank" fehlt - dafür
+  bräuchte es ein Zeitfenster für freiwilliges Ablegen während der Konsequenz,
+  das es aktuell nicht gibt. Nur der garantierte Basis-Verlust (3 Stufen)
+  läuft.
+- **PSYCHO-EICHHÖRNCHEN, Genitalschoner-Klausel** (`src/cards/passives.js`,
+  `MONSTER_REFUSES`): "Greift keine Frauen an oder Träger des Stacheligen
+  Genitalschoners" - nur die Geschlechts-Klausel ist umgesetzt. Der
+  STACHELIGE GENITALSCHONER liegt in den Rohdaten als `treasure_other` ohne
+  `slotKind` und lässt sich deshalb gar nicht anlegen; die Klausel kommt erst
+  in der Runde, in der die Unnatural-Axe-Schatzkarten ihren Ausrüstungsplatz
+  bekommen.
+
+### 11.3 Welle 3 (Runde vom 2026-09-17)
+
+Die vier Karten aus der alten Fassung dieses Abschnitts laufen jetzt
+vollständig. Spec und Plan:
+`docs/superpowers/specs/2026-09-17-unnatural-axe-welle3-design.md` und
+`docs/superpowers/plans/2026-09-17-unnatural-axe-welle3.md` (9 Tasks, alle
+abgehakt).
+
+**Befund, der die Runde klein gehalten hat:** zugübergreifenden Zustand gab
+es schon (`player.activeCurses`), es fehlte nur der Zugang dazu. Neu sind
+ein Primitiv (`lingeringCurse`), drei `kind`s (`noHelpHalfGold`,
+`noHandItemBonus`, `noTreasure`) und eine Kampfsperre nach dem Vorbild von
+`kartenSperreAktiv` (EINSTWEILIGE VERFÜGUNG).
+
+- **RIESENSTINKTIER**: Kampfsperre (niemand darf helfen, hintergehen oder
+  Karten für/gegen die kämpfende Person spielen, weiße Liste in
+  `stinktierSperre`) und Schlimme Dinge (`noHelpHalfGold` - keine Hilfe,
+  bis alle Kleidung und Rüstung abgelegt ist; halbierter Goldwert).
+- **LUSTMONSTER**: Kampftext (Hilfe des anderen Geschlechts zwingend, sonst
+  automatische Flucht) und Schlimme Dinge (Stufenverlust plus
+  Kampf-Fluch `noHandItemBonus` auf Hand-Gegenstände).
+- **WEIHNACHTSMANN**: Schlimme Dinge (`noTreasure`, "Störerliste" - kein
+  Schatz mehr, auch nicht von anderen, bis ein Monster ohne Hilfe getötet
+  wird). Der Kampfbonus (-5 gegen Elfen) lief schon seit Task 1 der
+  vorigen Runde.
+- **EISKALTES HÄNDCHEN**: neuer `COMBAT_START_OPTIONS`-Eintrag - ein
+  Wunschring statt Kampf macht die Karte zu einem +3-Gegenstand in der Hand
+  (`haendchenBesaenftigen`).
+
+`node tools/coverage-scan.js unnaturalaxe` zeigt im Abschnitt MONSTER jetzt
+keine der vier Karten mehr.
+
+**Auslegungen, die nicht wörtlich aus dem Kartentext folgen** - jemand
+könnte sie später anders entscheiden:
+
+- Das Stinktier sperrt die *anderen* am Tisch, nicht die kämpfende Person
+  selbst.
+- Ein Weihnachtsmann-Sieg ohne Hilfe zahlt schon aus; die Störerliste
+  greift erst für den nächsten Fund, nicht rückwirkend auf den gerade
+  gewonnenen Schatz.
+- Der halbierte Goldwert des Stinktiers trifft die Endsumme beim Verkauf,
+  nicht den einzelnen Gegenstand.
+
+Der WUNSCHRING beendet alle drei Monsterstrafen (Stinktier, Lustmonster,
+Weihnachtsmann) mit - bewusst so entschieden (`clearActiveCurseByKind`).
+
+**Zwei Stellen, an denen die Runde über die eigene Spec hinausging:**
+
+- **Spec §4.2** versprach "eine Prüfstelle statt fünf Aufräumstellen" für
+  die Stinktier-Strafe. Das ist nicht mehr ganz richtig: ein Read-and-Clear
+  räumt nur auf, wenn jemand liest, deshalb ruft auch `handleUnequipItem`
+  `stinktierStrafeAktiv` - drei Lesestellen derselben gemeinsamen Funktion
+  statt einer. Immer noch deutlich weniger als fünf eigene Aufräumstellen,
+  aber die Spec-Formulierung ist überholt.
+- **Spec §6** nannte für die Weihnachtsmann-Störerliste nur zwei
+  Aufrufstellen (`resolveCombatWin`, `finishTrade`). Zwei Audit-Runden
+  fanden sieben weitere Wege, auf denen Schätze eine Hand erreichen -
+  PESTRATTEN, weggejagte Monster, das AMAZONE-Geschenk, PACKRATTE-Bonuszüge
+  und mehr. Statt zehn weitere Ad-hoc-Guards zu verteilen, wurde daraus ein
+  Choke-Point: `zieheSchaetzeFuer(room, player, n)` zieht gar nicht erst,
+  wenn die Person gesperrt ist. Alle zwölf `drawTreasure`-Aufrufstellen in
+  `server.js` sind damit Bestand geführt; zwei bleiben bewusst außen vor
+  (die Anfangsverteilung bei Spielstart, `schatzTauschen`).
+
+**Bewusst nur teilweise abgedeckt** (siehe `ponytail:`-Kommentar über
+`zieheSchaetzeFuer` in `server.js`): DIEB "Diebstahl" (`stealItemFrom`) und
+ENTE DER VIELEN SACHEN ("klauen") verschieben Schatzkarten direkt von einer
+Hand in die andere, ohne über `drawTreasure` zu laufen - die Störerliste
+greift dort nicht. Ein sauberer Fix bräuchte ein Audit der gesamten
+`.hand.push(`-Fläche in `server.js` (~30 Stellen), nicht nur dieser zwei.
+Beide Auslöser sind seltener als PESTRATTEN oder das AMAZONE-Geschenk, an
+denen eine Halbumsetzung am Tisch sofort auffallen würde.
+
+### 11.4 Der Konsequenz-Wächter in `auto-consequence.test.js`
+
+Der frühere Wartungshinweis ist erledigt: der Wächter misst seit dieser
+Runde direkt, dass `parseAutoConsequence` eine feste Liste von
+Kartentexten (`PARSER_TABU`) nicht auflöst, statt eine Untergrenze auf der
+Anzahl manuell gebliebener Karten zu ziehen. Er muss deshalb nicht mehr je
+Runde nachgezogen werden.

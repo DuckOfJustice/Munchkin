@@ -8,7 +8,14 @@ module.exports = (ctx) => {
   const {
     card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
     equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
+    getrageneSlotKarte,
   } = ctx;
+
+  // "alle kleinen Gegenstaende": die Anzahl steht erst im Moment der
+  // Konsequenz fest, weil Anhaenge (NÜTZLICHE GRIFFE) aus einem Grossen einen
+  // kleinen machen koennen.
+  const kleineGegenstaendeAnzahl = (player, room) =>
+    equippedItemIds(player).filter((id) => !istGrosserGegenstand(room, id)).length;
 
   const CONSEQUENCE_OVERRIDES = {
     // --- Eindeutiger Tod in ungewöhnlicher Formulierung ---
@@ -56,22 +63,30 @@ module.exports = (ctx) => {
 
     // --- Rassen-bedingte Stufenzahl ---
     'ZUNGENDÄMON': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 3 : 2 }),
-    // Verdopplung bei angehängtem "Gigantisch" wird nicht erkannt (dafür gibt
-    // es kein Datenfeld an dieser Stelle) - Basis-Effekt wird trotzdem berechnet:
+    // ponytail: "Verdoppelt die Strafe, wenn der Fungus Gigantisch ist" fehlt -
+    // die Konsequenz weiss nicht, welche Verstaerker im Kampf lagen. Aufruestweg:
+    // den Verstaerker-Zustand in die Konsequenz durchreichen.
     'FUNGUS': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 2 : 1 }),
 
     // --- Bedingt auf aktuellen Ausrüstungszustand (zum Zeitpunkt der Konsequenz bekannt) ---
-    'FEDERFEIND': (player) => (player.equipped.head ? { type: 'discardSlot', slot: 'head' } : { type: 'levelDelta', amount: 2 }),
-    'SABBERNDER SCHLEIM': (player) => (player.equipped.feet ? { type: 'discardSlot', slot: 'feet' } : { type: 'levelDelta', amount: 1 }),
-    'ÜBERBÄR': (player) => (player.equipped.armor ? { type: 'noEffect' } : { type: 'levelDelta', amount: 1 }),
+    // getrageneSlotKarte statt player.equipped[slot]: ein geschummelter
+    // Gegenstand liegt auf dem Spezialplatz, wird aber getragen (server.js) -
+    // sonst fragt die Bedingung am selben Gegenstand vorbei, den das
+    // anschliessende discardSlot sehr wohl findet.
+    'FEDERFEIND': (player) => (getrageneSlotKarte(player, 'head') ? { type: 'discardSlot', slot: 'head' } : { type: 'levelDelta', amount: 2 }),
+    'SABBERNDER SCHLEIM': (player) => (getrageneSlotKarte(player, 'feet') ? { type: 'discardSlot', slot: 'feet' } : { type: 'levelDelta', amount: 1 }),
+    'ÜBERBÄR': (player) => (getrageneSlotKarte(player, 'armor') ? { type: 'noEffect' } : { type: 'levelDelta', amount: 1 }),
     'GESICHTSSAUGER': () => ({ type: 'combo', actions: [{ type: 'discardSlot', slot: 'head' }, { type: 'levelDelta', amount: 1 }] }),
 
     // --- Würfelbasiert ---
     '3.872 ORKS': () => ({ type: 'diceThresholdDeath', deathValues: [1, 2] }), // "bei 1/2 Tod, sonst so viele Stufen wie gewürfelt"
     'DIE TROLLE VOM TOTEN MEER': () => ({ type: 'diceLevelLoss' }),
     'FEUERLÖSCHER': () => ({ type: 'diceLevelLoss' }),
-    // "+1 Stufe zurück je sofort abgelegtem Trank" wird nicht erkannt (kein
-    // Datenfeld für "Trank") - nur der garantierte Basis-Verlust:
+    // "Kratzer und Allergien. Wirf den Wuerfel und lege so viele Karten aus
+    // deiner Hand ab."
+    'KATZENMÄDCHEN': () => ({ type: 'diceDiscardHand', cardName: 'KATZENMÄDCHEN' }),
+    // ponytail: "Du erhaeltst eine Stufe zurueck fuer jeden Trank, den du SOFORT
+    // ablegst" fehlt - ein Zeitfenster fuer freiwilliges Ablegen gibt es nicht.
     'GRASGNOLL': () => ({ type: 'levelDelta', amount: 3 }),
 
     // --- Werte-/textbasierter Gegenstandsverlust ---
@@ -167,6 +182,55 @@ module.exports = (ctx) => {
       return { type: 'noEffect' };
     },
 
+    // --- Unnatural Axe: Schlimme Dinge mit freier Auswahl -------
+    // "Du niest unaufhoerlich und laesst deine Karten fallen. Lege zwei Karten
+    // (deiner Wahl) aus deiner Hand ab."
+    'GEWALTIGER BAZILLUS': () => ({ type: 'queuedDiscardOwn', count: 2, quelle: 'hand',
+      cardName: 'GEWALTIGER BAZILLUS', prompt: 'Eine Handkarte ablegen' }),
+    // "Decke deine Hand auf und jeder andere Spieler darf eine Karte waehlen."
+    // Gleiche Bauform wie HIPPOGREIF/ANWALT - das Aufdecken selbst braucht
+    // keinen eigenen Schritt, der Waehler zeigt die Hand ohnehin.
+    'MONDJUNGFERN': () => ({ type: 'queuedTakeFromHand', mode: 'allOthers' }),
+    // "Er hebt dich auf und laesst dich aus grosser Hoehe fallen. Lege deine
+    // ganze Hand oder alle kleinen Gegenstaende ab ... Du hast die Wahl."
+    // Die Zahl der kleinen Gegenstaende steht erst beim Ausspielen fest,
+    // deshalb queuedDiscardOwn ueber die ganze Menge statt einer festen Zahl.
+    'PTERODAKTYL': (player, room) => ({
+      type: 'choice',
+      options: [
+        { id: 'hand', label: 'Die ganze Hand ablegen', action: { type: 'discardWholeHand' } },
+        { id: 'klein', label: 'Alle kleinen Gegenstaende ablegen',
+          action: { type: 'queuedDiscardOwn', count: kleineGegenstaendeAnzahl(player, room),
+            quelle: 'kleineGegenstaende', cardName: 'PTERODAKTYL',
+            prompt: 'Einen kleinen Gegenstand ablegen' } },
+      ],
+    }),
+    // "Besprüht! Niemand wird dir im Kampf helfen, bevor du nicht alle
+    // getragene Kleidung und Rüstung ablegst. Der Goldwert ist halbiert."
+    // Beide Wirkungen haengen an EINEM Tracker-Eintrag, weil sie dieselbe
+    // Löschbedingung teilen (siehe stinktierStrafeAktiv in server.js).
+    'RIESENSTINKTIER': () => ({
+      type: 'lingeringCurse', name: 'RIESENSTINKTIER', kind: 'noHelpHalfGold',
+      dauer: 'dauerhaft',
+      hinweis: 'Besprüht: niemand hilft dir, und dein Goldwert ist halbiert - bis du alle Kleidung und Rüstung abgelegt hast.',
+    }),
+    // "Verliere eine Stufe … in deinem nächsten Kampf werden deine
+    // Hand-Gegenstände nutzlos." levelDelta ZIEHT AB - amount: 1 ist der
+    // Stufenverlust.
+    'LUSTMONSTER': () => ({ type: 'combo', actions: [
+      { type: 'levelDelta', amount: 1 },
+      { type: 'lingeringCurse', name: 'LUSTMONSTER', kind: 'noHandItemBonus',
+        dauer: 'naechsterKampf',
+        hinweis: 'Im nächsten Kampf zählen deine Hand-Gegenstände nicht.' },
+    ] }),
+    // "Du kommst auf die Störerliste. Du erhältst keine Schatzkarten … auch
+    // nicht von anderen Spielern … bis du ein Monster ohne Hilfe tötest."
+    'WEIHNACHTSMANN': () => ({
+      type: 'lingeringCurse', name: 'WEIHNACHTSMANN', kind: 'noTreasure',
+      dauer: 'dauerhaft',
+      hinweis: 'Störerliste: keine Schatzkarten (auch nicht von anderen), bis du ein Monster ohne Hilfe tötest.',
+    }),
+
     // --- Echte Entweder-Oder-Wahl: zwei Buttons statt Rechnerei ---
     'ENTIKOR': () => ({
       type: 'choice',
@@ -182,6 +246,23 @@ module.exports = (ctx) => {
         { id: 'items', label: 'Alle Gegenstände verlieren', action: { type: 'discardAllEquipped' } },
       ],
     }),
+    // "Halblinge verlieren eine Stufe. Elfen verlieren zwei Stufen. Maenner
+    // verlieren eine zusaetzliche Stufe und muessen eine Karte ablegen.
+    // Diejenigen, die nicht unter die Kriterien oben fallen, muessen zwei
+    // Karten ablegen."
+    'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT': (player) => {
+      const stufen = (hasRace(player, 'ELF') ? 2 : 0) + (hasRace(player, 'HALBLING') ? 1 : 0)
+        + (istGeschlecht(player, 'm') ? 1 : 0);
+      // "nicht unter die Kriterien oben" = weder Halbling noch Elf noch Mann.
+      const karten = stufen === 0 ? 2 : (istGeschlecht(player, 'm') ? 1 : 0);
+      const actions = [];
+      if (stufen) actions.push({ type: 'levelDelta', amount: stufen });
+      if (karten) actions.push({ type: 'queuedDiscardOwn', count: karten, quelle: 'hand',
+        cardName: 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT', prompt: 'Eine Handkarte ablegen' });
+      // Kein Leerfall moeglich: stufen===0 erzwingt karten=2, stufen!=0
+      // liefert selbst schon einen Eintrag - actions ist nie leer.
+      return actions.length === 1 ? actions[0] : { type: 'combo', actions };
+    },
 
     // "Verliere 1 Stufe" + Sonderklausel bei "ausdrücklich an den Knien
     // getragenem" Gegenstand - dafür gibt es kein Datenfeld, nur die
@@ -224,7 +305,7 @@ module.exports = (ctx) => {
     'RASSE WECHSELN': () => ({ type: 'replaceTraitFromDiscard', arrField: 'races', capField: 'raceCapCard', category: 'race', label: 'Rasse' }),
     // "Du darfst kein Schuhwerk tragen. Wenn du gerade Schuhwerk trägst, wird
     // es zerstört ...":
-    'QUANTEN': (player) => (player.equipped.feet ? { type: 'discardSlot', slot: 'feet' } : { type: 'noEffect' }),
+    'QUANTEN': (player) => (getrageneSlotKarte(player, 'feet') ? { type: 'discardSlot', slot: 'feet' } : { type: 'noEffect' }),
     'REGELN DER NEUAUFLAGE': () => ({ type: 'levelDeltaAllPlayers', amount: 1 }), // Wunschring-Sonderfall bleibt manuell
     // "Du kannst keine Gegenstände tragen, die mehr als eine Hand benötigen." -
     // Dauereffekt, den dieser Server (wie andere Dauer-Mali) nicht mechanisch
@@ -294,6 +375,9 @@ module.exports = (ctx) => {
     // hast" - wertvoll = Goldwert (dasselbe Primitiv wie bei der PACKRATTE),
     // "ausliegen" = angelegt; Handkarten bleiben unangetastet.
     'DU STOLPERST ÜBER DEINE EIGENE TRUHE': () => ({ type: 'discardMaxGoldItem' }),
+    // "Der Spieler, der nach dem Opfer an der Reihe ist, waehlt einen der
+    // Gegenstaende des Opfers, die im Spiel sind. Leg es ab."
+    'PIÑATA': () => ({ type: 'queuedDiscardItemOfVictim', cardName: 'PIÑATA' }),
   };
 
   // Karten, die in den Rohdaten als "door_other" geführt werden, aber - anders
