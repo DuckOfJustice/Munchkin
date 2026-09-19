@@ -833,6 +833,31 @@ function endTurn(room) {
   // Der HALBLING-Doppelverkauf gilt "pro Runde" - siehe handleSellItems.
   room.players.forEach((p) => { p.halblingSaleUsed = false; });
   room.turnPhase = 'tuer';
+  
+  if (room.bumerangReturns) {
+    const cp = currentPlayer(room);
+    if (room.bumerangReturns[cp.id] && room.bumerangReturns[cp.id].length > 0) {
+      room.bumerangReturns[cp.id].forEach(id => {
+        const c = card(id);
+        if (!c) return;
+        const currentHolder = room.players.find(p => p.hand.includes(id) || equippedItemIds(p).includes(id));
+        if (currentHolder) {
+          if (currentHolder.id !== cp.id) {
+             if (!currentHolder.hand.includes(id)) unequipSlotCard(currentHolder, id);
+             removeFromHand(currentHolder, id);
+             cp.hand.push(id);
+             log(room, `"${c.name}" kehrt magisch zu ${cp.name} zurück!`);
+          }
+        } else if (room.treasureDiscard.includes(id)) {
+          room.treasureDiscard = room.treasureDiscard.filter(x => x !== id);
+          cp.hand.push(id);
+          log(room, `"${c.name}" kehrt aus dem Ablagestapel zu ${cp.name} zurück!`);
+        }
+      });
+      delete room.bumerangReturns[cp.id];
+    }
+  }
+  
   room.combatHappenedThisTurn = false;
   // lastCombatWinnerId wird bewusst NICHT sofort hier geleert (anders als bis
   // eben): HEIMSE DIE LORBEEREN EIN reagiert auf einen fremden Sieg, der per
@@ -966,7 +991,7 @@ function handleDrawDoor(room, playerId) {
       room.turnPhase = 'aerger';
       log(room, `Fluch "${c.name}" - aber ${player.name} trägt "${card(shield).name}": keine Wirkung. Phase 2: Auf Ärger aus sein.`, [id, shield]);
     } else {
-      fluchZiel(room, player, c, (opfer) => {
+      fluchZiel(room, player, player.id, c, (opfer) => {
         if (!opfer) {
           room.turnPhase = 'aerger';
           log(room, `Fluch "${c.name}" verpufft. Phase 2: Auf Ärger aus sein.`, [id]);
@@ -1015,8 +1040,16 @@ function handleDrawDoor(room, playerId) {
 // ponytail: die Wuerfe des PRÄCHTIGEN HUTS bleiben ohne Fenster - das sind
 // mehrere Wuerfe mehrerer Personen gleichzeitig, und room.pendingRoll traegt
 // genau einen. Aufruestweg: eine Kette aus Einzelfenstern.
-function fluchZiel(room, ziel, c, weiter) {
+function fluchZiel(room, ziel, casterId, c, weiter) {
   const traegt = (p, name) => equippedItemIds(p).find((id) => (card(id) || {}).name === name);
+
+  const alu = traegt(ziel, 'ALUFOLIEN-HUT');
+  if (alu && ziel.id !== casterId) {
+    // Alufolien-Hut wehrt Flüche ANDERER Spieler komplett ab.
+    log(room, `"${c.name}" prallt am Alufolien-Hut von ${ziel.name} ab und verpufft.`, [alu]);
+    weiter(null);
+    return;
+  }
 
   const hut = traegt(ziel, 'PRÄCHTIGER HUT');
   if (hut) {
@@ -1095,7 +1128,7 @@ function handlePlayCurseFromHand(room, playerId, cardId, targetId) {
   removeFromHand(player, cardId);
   discardCard(room, cardId);
   // PRÄCHTIGER HUT / AMULETT koennen den Fluch umlenken oder ganz abwehren.
-  fluchZiel(room, target, c, (opfer) => {
+  fluchZiel(room, target, player.id, c, (opfer) => {
     if (!opfer) {
       log(room, `${player.name} spielt den Fluch "${c.name}" gegen ${target.name} - er verpufft.`, [cardId]);
       refreshCombatReady(room);
@@ -1186,6 +1219,10 @@ function handleApplyConsequenceAction(room, playerId, action) {
 function discardCard(room, cardId) {
   const c = card(cardId);
   if (!c) return;
+  if (c.name === 'BUMERANGDOLCH' && room.pendingConsequence && room.pendingConsequence.kind === 'curse') {
+    room.bumerangReturns = room.bumerangReturns || {};
+    room.bumerangReturns[room.pendingConsequence.playerId] = (room.bumerangReturns[room.pendingConsequence.playerId] || []).concat(cardId);
+  }
   if (c.type === 'door') room.doorDiscard.push(cardId);
   else room.treasureDiscard.push(cardId);
   // SCHUMMELN!: "Lege diese Karte ab, wenn du den geschummelten Gegenstand
@@ -1327,6 +1364,49 @@ function slotLabelDe(slot) {
 // zurück.
 function applyPrimitiveAction(room, player, action) {
   switch (action.type) {
+    case 'flohmarktSelectTarget1': {
+      if (player.hand.includes(action.discardedId)) {
+        removeFromHand(player, action.discardedId);
+      } else {
+        unequipSlotCard(player, action.discardedId);
+      }
+      discardCard(room, action.discardedId);
+      
+      const v = card(action.discardedId).gold || 0;
+      const discards = room.treasureDiscard.filter(id => card(id) && typeof card(id).gold === 'number' && card(id).gold <= v);
+      const options = discards.map(id => ({
+        id,
+        label: `"${card(id).name}" (${card(id).gold} G) ziehen`,
+        action: { type: 'flohmarktSelectTarget2', v, firstId: id }
+      }));
+      options.push({ id: 'none', label: 'Keinen Schatz ziehen', action: { type: 'flohmarktFinish' } });
+      
+      openCardChoice(room, player, 'FLOHMARKT (1. Schatz)', options);
+      return `wirft "${card(action.discardedId).name}" ab und wählt Schätze aus dem Ablagestapel`;
+    }
+    case 'flohmarktSelectTarget2': {
+      room.treasureDiscard = room.treasureDiscard.filter(x => x !== action.firstId);
+      player.hand.push(action.firstId);
+      const remV = action.v;
+      const discards = room.treasureDiscard.filter(id => card(id) && typeof card(id).gold === 'number' && card(id).gold <= remV);
+      const options = discards.map(id => ({
+        id,
+        label: `"${card(id).name}" (${card(id).gold} G) ziehen`,
+        action: { type: 'flohmarktFinish', secondId: id }
+      }));
+      options.push({ id: 'none', label: 'Keinen weiteren Schatz ziehen', action: { type: 'flohmarktFinish' } });
+      
+      openCardChoice(room, player, 'FLOHMARKT (2. Schatz)', options);
+      return `zieht "${card(action.firstId).name}" und wählt einen weiteren Schatz`;
+    }
+    case 'flohmarktFinish': {
+      if (action.secondId) {
+        room.treasureDiscard = room.treasureDiscard.filter(x => x !== action.secondId);
+        player.hand.push(action.secondId);
+        return `zieht "${card(action.secondId).name}"`;
+      }
+      return 'beendet die Schatzsuche';
+    }
     case 'findeEineKarteSort1': {
       const pa = room.pendingCardAction;
       const oldContext = action.context;
@@ -2060,6 +2140,10 @@ function applyPrimitiveAction(room, player, action) {
     case 'stealItemFrom': {
       const opfer = findPlayer(room, action.targetId);
       if (!opfer || !equippedItemIds(opfer).includes(action.cardId)) return 'Gegenstand nicht (mehr) getragen';
+      if (card(action.cardId).name === 'BUMERANGDOLCH') {
+        room.bumerangReturns = room.bumerangReturns || {};
+        room.bumerangReturns[opfer.id] = (room.bumerangReturns[opfer.id] || []).concat(action.cardId);
+      }
       unequipSlotCard(opfer, action.cardId);
       clearCheatIfLost(opfer, action.cardId);
       player.hand.push(action.cardId);
@@ -2682,7 +2766,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn', 'juckpulverDiscard']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -3593,7 +3677,8 @@ function classDiscardPower(room, player) {
   if (!c) return null;
   const flee = !!c.mustFlee;
   const table = flee ? CLASS_FLEE_DISCARD : CLASS_COMBAT_DISCARD;
-  const name = Object.keys(table).find((n) => hasClass(player, n));
+  const isPriestViaHammer = !flee && equippedItemIds(player).some(id => (card(id)||{}).name === 'GESEGNETER HAMMER VON ST. UUUAAAAH');
+  const name = Object.keys(table).find((n) => hasClass(player, n) || (n === 'PRIESTER' && isPriestViaHammer));
   if (!name) return null;
   const rule = table[name];
   if (rule.requiresUndead && !combatHasUndead(room)) return null;
@@ -3686,6 +3771,11 @@ function handleThiefBackstab(room, playerId, discardCardId, targetId) {
   const stichOMat = dieb && equippedItemIds(dieb).some((id) => BACKSTAB_ITEMS.has((card(id) || {}).name));
   if (!dieb || !opfer || (!hasClass(dieb, 'DIEB') && !stichOMat)) return;
   if (dieb.id === opfer.id) return;                                     // nicht sich selbst
+  if (equippedItemIds(opfer).some((id) => (card(id) || {}).name === 'HELM FÜR PERIPHERES SEHEN')) {
+    log(room, `${dieb.name} kann ${opfer.name} nicht in den Rücken fallen - der Helm für peripheres Sehen schützt.`);
+    touchRoom(room);
+    return;
+  }
   if (stinktierSperre(room, playerId)) {
     log(room, `${dieb.name} kommt am Riesenstinktier nicht vorbei - kein Rückenfall.`);
     touchRoom(room);
@@ -3740,6 +3830,11 @@ function handleThiefSteal(room, playerId, discardCardId, targetId) {
   if (!dieb || !opfer || dieb.id === opfer.id) return;
   if (!hasClass(dieb, 'DIEB') || !dieb.hand.includes(discardCardId)) return;
   if (room.pendingCardAction || room.pendingRoll) return; // keine fremde Auswahl ueberschreiben
+  if (equippedItemIds(opfer).some((id) => (card(id) || {}).name === 'HELM FÜR PERIPHERES SEHEN')) {
+    log(room, `${dieb.name} kann ${opfer.name} nicht bestehlen - der Helm für peripheres Sehen schützt.`);
+    touchRoom(room);
+    return;
+  }
   removeFromHand(dieb, discardCardId);
   discardCard(room, discardCardId);
   log(room, `${dieb.name} (Dieb) legt "${card(discardCardId).name}" ab und versucht, ${opfer.name} zu bestehlen.`, [discardCardId]);
@@ -4180,6 +4275,13 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     case 'forceFlee': {
       c.mustFlee = true;
       return 'die Munchkins müssen weglaufen';
+    }
+    case 'juckpulverDiscard': {
+      const p = findPlayer(room, action.playerId);
+      unequipSlotCard(p, action.itemId);
+      removeFromHand(p, action.itemId);
+      discardCard(room, action.itemId);
+      return `${p.name} muss "${card(action.itemId).name}" ablegen`;
     }
     case 'modifier': {
       const amount = isAlchemistDoubled ? action.amount * 2 : action.amount;
@@ -5949,6 +6051,10 @@ function handleSellItems(room, playerId, cardIds) {
   if (halblingBonus) player.halblingSaleUsed = true;
   const levels = Math.floor(total / 1000);
   removable.forEach((id) => {
+    if (card(id).name === 'BUMERANGDOLCH') {
+      room.bumerangReturns = room.bumerangReturns || {};
+      room.bumerangReturns[player.id] = (room.bumerangReturns[player.id] || []).concat(id);
+    }
     if (player.hand.includes(id)) removeFromHand(player, id); else unequipSlotCard(player, id);
     discardCard(room, id);
   });

@@ -12,6 +12,8 @@ const {
   // Welle A Schätze:
   fleeModifierParts, monsterRefusesTarget, monsterSeesRace, hasRace,
   handleAttachCard, attachmentBonusSum,
+  handleThiefSteal, handleThiefBackstab, handlePlayCurseFromHand,
+  handleUseClassCombatDiscard
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -869,6 +871,73 @@ function makeRoom(players) {
   assert.strictEqual(p1.equipped.hands.length, 2, 'Hände wieder auf 2 geschrumpft');
   assert.strictEqual(p1.equipped.hands.filter(Boolean).length, 2, '2 Hände weiterhin belegt');
   assert.ok(p1.hand.includes(s1.id) || p1.hand.includes(w2.id) || p1.hand.includes(w1.id), 'Überzählige Gegenstände sind auf der Hand');
+}
+
+// --- WELLE C SCHÄTZE: HELM FÜR PERIPHERES SEHEN ---
+{
+  const p1 = makePlayer({ id: 'P1', name: 'P1' });
+  const p2 = makePlayer({ id: 'P2', name: 'P2' });
+  p2.classes.push('DIEB'); // P2 ist Dieb
+  const room = makeRoom([p1, p2]);
+  
+  const helm = findCard('HELM FÜR PERIPHERES SEHEN');
+  p1.hand.push(helm.id);
+  handleEquipItem(room, p1.id, helm.id);
+  
+  const dummy = findCard('KLEBERFLÄSCHCHEN'); // Zum Abwerfen
+  p2.hand.push(dummy.id);
+  
+  // Diebstahl versuchen
+  handleThiefSteal(room, p2.id, dummy.id, p1.id);
+  assert.ok(p2.hand.includes(dummy.id), 'Bestehlen wurde geblockt (Kosten nicht abgezogen)');
+  
+  // Rücken fallen versuchen
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  handleThiefBackstab(room, p2.id, dummy.id, p1.id);
+  assert.ok(p2.hand.includes(dummy.id), 'Rücken fallen wurde geblockt');
+}
+
+// --- WELLE C SCHÄTZE: ALUFOLIEN-HUT ---
+{
+  const p1 = makePlayer({ id: 'P1', name: 'P1' });
+  const p2 = makePlayer({ id: 'P2', name: 'P2' });
+  const room = makeRoom([p1, p2]);
+  
+  const hut = findCard('ALUFOLIEN-HUT');
+  p1.hand.push(hut.id);
+  handleEquipItem(room, p1.id, hut.id);
+  
+  const fluch = findCard('VERLIERE 1 STUFE');
+  p2.hand.push(fluch.id);
+  
+  // P2 spielt Fluch auf P1
+  handlePlayCurseFromHand(room, p2.id, fluch.id, p1.id);
+  assert.ok(!room.pendingConsequence, 'Fluch verpufft an Alufolien-Hut');
+}
+
+// --- WELLE C SCHÄTZE: GESEGNETER HAMMER VON ST. UUUAAAAH ---
+{
+  const p1 = makePlayer({ id: 'P1', name: 'P1' });
+  const room = makeRoom([p1]);
+  
+  const hammer = findCard('GESEGNETER HAMMER VON ST. UUUAAAAH');
+  p1.hand.push(hammer.id);
+  handleEquipItem(room, p1.id, hammer.id);
+  
+  // Kampf gegen WIGHT BROTHERS (Untot)
+  const monster = findCard('MR. BONES');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  
+  const dummy1 = findCard('KLEBERFLÄSCHCHEN');
+  const dummy2 = findCard('WUNSCHRING');
+  p1.hand.push(dummy1.id, dummy2.id);
+  
+  const bVorher = combatTotals(room).playerStrength;
+  handleUseClassCombatDiscard(room, p1.id, dummy1.id);
+  assert.strictEqual(combatTotals(room).playerStrength, bVorher + 3, 'GESEGNETER HAMMER gibt Priester-Bonus gegen Untote (+3)');
+  handleUseClassCombatDiscard(room, p1.id, dummy2.id);
+  assert.strictEqual(combatTotals(room).playerStrength, bVorher + 6, 'GESEGNETER HAMMER gibt Priester-Bonus für zweite Karte (+6)');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
