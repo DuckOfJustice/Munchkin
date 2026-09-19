@@ -1247,3 +1247,60 @@ Runde direkt, dass `parseAutoConsequence` eine feste Liste von
 Kartentexten (`PARSER_TABU`) nicht auflöst, statt eine Untergrenze auf der
 Anzahl manuell gebliebener Karten zu ziehen. Er muss deshalb nicht mehr je
 Runde nachgezogen werden.
+
+### 11.5 Tuerkarten Welle A (Runde vom 2026-09-18)
+
+Fuenf der zwoelf offenen Unnatural-Axe-Tuerkarten laufen. Spec und Plan:
+`docs/superpowers/specs/2026-09-18-unnatural-axe-tuerkarten-welle-a-design.md`
+und `docs/superpowers/plans/2026-09-18-unnatural-axe-tuerkarten-welle-a.md`
+(13 Tasks).
+
+Neue Wirkungsarten im vorhandenen Fluch-Tracker (`player.activeCurses`):
+
+- **STINKER** (`noHelp`, naechster Kampf) - niemand hilft. Wird jemand
+  mitten im Kampf verflucht, verlaesst die Helfer:in ihn straffrei, und
+  LAUFENDE NASE / DIE SCHATTENNASE fliehen und lassen ihren Schatz da.
+- **NARRENGOLD** (`noCombatTreasure`, naechster Kampf) - keine Kampfbeute.
+  Bewusst NICHT in `zieheSchaetzeFuer`: der Fluch sperrt nur die Beute,
+  nicht Geschenke oder Bonuszuege. Das unterscheidet ihn von der
+  Stoererliste des WEIHNACHTSMANNS (`noTreasure`), die jede Schatzkarte
+  sperrt und deshalb im Choke-Point sitzt.
+- **TODESANGST** (`fearUndead`, dauerhaft) - drei Klauseln: keine Zusage
+  gegen Untote, Rauswurf der helfenden Person, sobald Untote dazukommen,
+  und der eigene Kampf gegen Untote ist unabhaengig von der Kampfstaerke
+  verloren (gleicher Pfad wie beim LUSTMONSTER).
+- **VERFLUCHTER GEGENSTAND** (`cursedItem`, dauerhaft) - haengt an einer
+  Gegenstands-Id am Eintrag selbst. Das Opfer waehlt; Kraefte zaehlen
+  nicht mehr (dieselbe Ausschlussmenge wie MONDJUNGFERN, also samt
+  Anhaengen); ablegen, verkaufen und handeln sind gesperrt; beim
+  Pluendern einer Leiche wandert der Fluch mit der Karte.
+
+Dazu ist **EISKALTES HÄNDCHEN (KLEINE FREUNDIN)** anlegbar (Spezialplatz,
++3) - die Deckkarte zur besaenftigten Monsterseite aus Welle 3.
+
+**Auslegungen, die jemand anders entscheiden koennte:**
+
+- Fluchziel sind nur ANGELEGTE Gegenstaende - eine Handkarte verleiht
+  keine Kraefte.
+- "Besondere Kraft" wird ueber die neun vorhandenen Gegenstands-Tabellen
+  bestimmt (`gegenstandHatSonderkraft`), nicht ueber eine eigene Liste.
+  Dadurch faellt der Begriff etwas weiter aus als der Kartentext ihn
+  vermutlich meint: ein blosser Weglauf-Bonus zaehlt mit.
+- `cursedItemIds` misst am BESITZ (Hand oder angelegt), nicht am
+  Getragenen - sonst waere die Uebertragung beim Pluendern wirkungslos.
+- TODESANGST endet nur per WUNSCHRING. Jeder Untoten-Kampf ist bis dahin
+  automatisch verloren.
+- Eine per NARRENGOLD gesperrte Person bekommt ihre PIÑATA-Karte
+  weiterhin (die laeuft ueber `zieheSchaetzeFuer`, wo nur die
+  Stoererliste sperrt).
+
+**Nebenbei mitgefixt:** der Verstaerker-Zweig in `handlePlayCombatCard`
+rief `refreshCombatReady` nicht - Bereit-Meldungen blieben nach einem
+gespielten "+X fuers Monster" faelschlich stehen.
+
+**Offen im Set:** 21 Karten, davon 7 Tuerkarten (EDELMUT, TOD,
+ABGEBRANNT, SCHICKSALHAFTE KARTEN, FINDE EINE KARTE, FREUNDLICH, MAMI -
+geplant als Wellen B und C) und 14 Schatzkarten. Drei davon (SÜSSER
+SCHULTERDRACHE, STACHELIGER GENITALSCHONER, TASCHE MIT KRÄHENFÜSSEN)
+haben keinen `slotKind` und sind deshalb gar nicht anlegbar; daran haengt
+die Halbumsetzung beim PSYCHO-EICHHÖRNCHEN.

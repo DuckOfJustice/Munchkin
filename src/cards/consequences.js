@@ -8,7 +8,7 @@ module.exports = (ctx) => {
   const {
     card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
     equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
-    getrageneSlotKarte,
+    getrageneSlotKarte, specialSlotRule, gegenstandHatSonderkraft, cursedItemIds,
   } = ctx;
 
   // "alle kleinen Gegenstaende": die Anzahl steht erst im Moment der
@@ -28,9 +28,29 @@ module.exports = (ctx) => {
     // eine Stufe." Der Tod kostet nur die Karten, die Stufe bleibt (siehe
     // applyDeathConsequence) - die zusaetzliche Stufe ist also spuerbar.
     'SIEBENJÄHRIGER LICH': () => ({ type: 'combo', actions: [{ type: 'death' }, { type: 'levelDelta', amount: 1 }] }),
-    // Enthält zwar "stirbst", bezieht sich aber auf einen ZUKÜNFTIGEN Tod
-    // (persistenter Fluch) - explizit NICHT automatisch:
-    'VERFLUCHTER GEGENSTAND': () => null,
+    // "Ein Gegenstand, der dir einen Kampfbonus oder eine besondere Kraft
+    // verleiht, ist nun verflucht." Kandidat ist nur ANGELEGTE Ausruestung -
+    // eine Karte auf der Hand verleiht keine Kraefte. Das Opfer waehlt selbst
+    // (Ruling 2026-09-18), bei genau einem Kandidaten ohne Dialog.
+    'VERFLUCHTER GEGENSTAND': (player, room, cardId) => {
+      // Schon Verfluchtes faellt raus - sonst bietet die Karte an, denselben
+      // Gegenstand ein zweites Mal zu verfluchen.
+      const schonVerflucht = cursedItemIds(player);
+      const kandidaten = equippedItemIds(player).filter((id) => {
+        const c = card(id);
+        if (!c || schonVerflucht.has(id)) return false;
+        return (c.bonus || 0) > 0 || gegenstandHatSonderkraft(c.name) || !!(specialSlotRule(c) || {}).bonus;
+      });
+      if (!kandidaten.length) return { type: 'noEffect' };
+      const aktion = (id) => ({ type: 'curseItem', itemId: id, cardId: cardId || null });
+      if (kandidaten.length === 1) return aktion(kandidaten[0]);
+      return {
+        type: 'choice',
+        options: kandidaten.map((id) => ({
+          id: `verflucht-${id}`, label: `"${card(id).name}" verfluchen`, action: aktion(id),
+        })),
+      };
+    },
 
     // --- Reine Flavor-Texte ohne Spielmechanik ---
     'GOLDFISCH': () => ({ type: 'noEffect' }), // "Du musst den Hohn der anderen Spieler ertragen."
@@ -362,11 +382,14 @@ module.exports = (ctx) => {
     // (LINGERING_CURSES) - kein Sofort-Effekt:
     'ZWERGENBIER': () => null,
     'STINKER': () => null,
+    // TODESANGST wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES) - kein Sofort-Effekt:
+    'TODESANGST': () => null,
     // Braucht Datenpunkte/Mechaniken, die es hier nicht gibt (freie Handel-
     // Reihenfolge, wiederkehrender Rundenend-Hook, neue Kampfauslösung
     // mitten in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-
     // Status) - bleiben bewusst manuell:
-    'EDELMUT': () => null,
+    'EDELMUT': () => ({ type: 'curseEdelmut' }),
     'HUNGRIGER RUCKSACK': () => null,
     'KLEINER FEHLER': () => null,
     'TEMPORÄRE ANMNESIE': () => null,
@@ -395,7 +418,7 @@ module.exports = (ctx) => {
     'KLASSE WECHSELN', 'RASSE WECHSELN', 'QUANTEN', 'REGELN DER NEUAUFLAGE',
     'WINZIGE HÄNDE', 'VERLIERE ZWEI KARTEN', 'VERLIERE 1 GROSSEN GEGENSTAND',
     'VERLIERE 1 KLEINEN GEGENSTAND', 'GESCHLECHTSUMWANDLUNG',
-    'HUHN AUF DEINEM KOPF', 'NARRENGOLD',
+    'HUHN AUF DEINEM KOPF', 'NARRENGOLD', 'TODESANGST',
     'TOURISTENFALLE', 'EDELMUT', 'HUNGRIGER RUCKSACK', 'KLEINER FEHLER',
     'TEMPORÄRE ANMNESIE', 'DU STOLPERST ÜBER DEINE EIGENE TRUHE',
     'ENTE DES SCHRECKENS', 'MIESER SPIEGEL', 'STINKER', 'ZWERGENBIER',

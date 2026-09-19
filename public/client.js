@@ -1647,6 +1647,7 @@
       box.appendChild(tile);
     });
     updateSellBar();
+    updateMultiSelectionBar();
   }
 
   function handActionsFor(id, p) {
@@ -1738,7 +1739,17 @@
       const btn = mkBtn('✨ Sonderkraft nutzen', () => socket.emit('useCardPower', { cardId: id }));
       wrap.appendChild(btn);
     }
-    if (typeof c.gold === 'number' && c.gold > 0) {
+    if (state.pendingCardAction && state.pendingCardAction.kind === 'multiCardSelection') {
+      const label = document.createElement('label');
+      label.style.margin = '0'; label.style.display = 'inline-flex'; label.style.gap = '4px'; label.style.alignItems = 'center';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.style.width = 'auto';
+      cb.checked = multiSelection.has(id);
+      cb.onchange = () => { if (cb.checked) multiSelection.add(id); else multiSelection.delete(id); updateMultiSelectionBar(); };
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode('Abwerfen'));
+      wrap.appendChild(label);
+    } else if (typeof c.gold === 'number' && c.gold > 0) {
       const label = document.createElement('label');
       label.style.margin = '0'; label.style.display = 'inline-flex'; label.style.gap = '4px'; label.style.alignItems = 'center';
       const cb = document.createElement('input');
@@ -1958,6 +1969,23 @@
     return b;
   }
 
+  function updateMultiSelectionBar() {
+    for (const id of Array.from(multiSelection)) {
+      if (!myInfo.hand.includes(id)) multiSelection.delete(id);
+    }
+    const count = multiSelection.size;
+    const multiSum = $('multiSelectionSum');
+    if (multiSum) multiSum.textContent = count + (count === 1 ? ' Karte' : ' Karten') + ' ausgewählt';
+    const btnD = $('btnMultiDoor');
+    const btnT = $('btnMultiTreasure');
+    if (btnD) {
+      btnD.onclick = () => { socket.emit('resolveMultiCardSelection', { cardIds: Array.from(multiSelection), deck: 'door' }); multiSelection.clear(); updateMultiSelectionBar(); };
+    }
+    if (btnT) {
+      btnT.onclick = () => { socket.emit('resolveMultiCardSelection', { cardIds: Array.from(multiSelection), deck: 'treasure' }); multiSelection.clear(); updateMultiSelectionBar(); };
+    }
+  }
+
   function updateSellBar() {
     // ungültige Auswahl (Karte nicht mehr auf der Hand) entfernen
     for (const id of Array.from(sellSelection)) {
@@ -2145,3 +2173,20 @@
       .replace(/&lt;br\s*\/?&gt;/gi, '<br>');
   }
 })();
+
+  function updateMultiSelectionBar() {
+    for (const id of Array.from(multiSelection)) {
+      if (!myInfo.hand.includes(id)) multiSelection.delete(id);
+    }
+    const count = multiSelection.size;
+    const multiSum = multiSelectionSum;
+    if (multiSum) multiSum.textContent = count + (count === 1 ? ' Karte' : ' Karten') + ' ausgewählt';
+    const btnD = btnMultiDoor;
+    const btnT = btnMultiTreasure;
+    if (btnD) {
+      btnD.onclick = () => { socket.emit('resolveMultiCardSelection', { cardIds: Array.from(multiSelection), deck: 'door' }); multiSelection.clear(); updateMultiSelectionBar(); };
+    }
+    if (btnT) {
+      btnT.onclick = () => { socket.emit('resolveMultiCardSelection', { cardIds: Array.from(multiSelection), deck: 'treasure' }); multiSelection.clear(); updateMultiSelectionBar(); };
+    }
+  }

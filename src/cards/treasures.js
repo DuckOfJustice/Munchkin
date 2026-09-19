@@ -21,12 +21,21 @@ module.exports = (ctx) => {
   const fluchBeendenSpec = (player) => {
     const flueche = player.activeCurses || [];
     if (!flueche.length) return null; // nichts zu beenden
-    const beenden = (f) => ({ type: 'clearCurse', kind: f.kind, name: f.name });
+    // itemId wandert mit, wo es eine gibt (VERFLUCHTER GEGENSTAND): sonst
+    // sind zwei Gegenstandsfluechen weder unterscheidbar noch einzeln zu
+    // beenden - beide heissen gleich.
+    const beenden = (f) => (f.itemId
+      ? { type: 'clearCurse', kind: f.kind, name: f.name, itemId: f.itemId }
+      : { type: 'clearCurse', kind: f.kind, name: f.name });
     if (flueche.length === 1) return beenden(flueche[0]);
     return {
       type: 'choice',
       options: flueche.map((f, i) => ({
-        id: `fluch-${i}`, label: `"${f.name}" beenden`, action: beenden(f),
+        id: `fluch-${i}`,
+        label: f.itemId && card(f.itemId)
+          ? `"${f.name}" auf "${card(f.itemId).name}" beenden`
+          : `"${f.name}" beenden`,
+        action: beenden(f),
       })),
     };
   };
@@ -252,6 +261,18 @@ module.exports = (ctx) => {
   // Tuerkarten mit eigener Kampfwirkung, die keine Monster-Verstaerker sind
   // (die laufen ueber isMonsterEnhancerCard). Jede:r am Tisch darf sie spielen.
   const DOOR_COMBAT_CARDS = {
+    'TOD': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
+    'ABGEBRANNT': () => ({ type: 'zeroMonsterTreasure' }),
+    'FREUNDLICH': () => ({ type: 'freundlichChoice' }),
+    'MAMI': (player, room) => {
+      const validMonsterIds = room.combat.monsterIds.filter((m) => {
+        const lv = card(m).level || 0;
+        const hasBaby = (room.combat.enhancerIds || []).some(id => (card(id)||{}).name === 'BABY');
+        return lv <= 5 || hasBaby;
+      });
+      if (validMonsterIds.length === 0) return null;
+      return { type: 'duplicateMonsterMommy', validMonsterIds };
+    },
     // "Das Monster in diesem Raum hat Mittagspause. ... Der kaempfende Spieler
     // legt alle ihn angreifenden Monster ab und zieht sofort 2 Schaetze."
     // Feste 2 Schaetze - nicht der treasureCount der Monster.

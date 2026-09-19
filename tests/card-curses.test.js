@@ -160,7 +160,7 @@ function run() {
   // CONSEQUENCE_OVERRIDES bleibt fuer die vier Karten "bewusst manuell" -
   // der Tracker kommt zusaetzlich, nicht als Ersatz.
   // -------------------------------------------------------------------
-  ['MIESER SPIEGEL', 'HUHN AUF DEINEM KOPF'].forEach((name) => {
+  ['MIESER SPIEGEL', 'HUHN AUF DEINEM KOPF', 'TODESANGST'].forEach((name) => {
     const spec = CONSEQUENCE_OVERRIDES[name](makePlayer(), makeRoom());
     assert.strictEqual(spec, null, `${name}: weiterhin kein Sofort-Effekt`);
   });

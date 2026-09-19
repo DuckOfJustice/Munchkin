@@ -83,8 +83,11 @@ function run() {
   assert.strictEqual(entikorSpec.type, 'choice');
   assert.strictEqual(entikorSpec.options.length, 2);
 
-  // Explizit unterdrückt trotz "stirbst" im Text (zukünftiger, nicht aktueller Tod):
-  assert.strictEqual(resolveConsequenceSpec('VERFLUCHTER GEGENSTAND', 'Und wenn du stirbst, wird der Fluch übertragen.', humanPlayer, room), null);
+  // Seit Task 9 (Unnatural Axe) loest CONSEQUENCE_OVERRIDES die Karte selbst
+  // auf, statt sie an den generischen Textparser durchzureichen - "stirbst"
+  // im Text darf trotzdem nicht den Tod-Fallback ausloesen: ohne angelegten
+  // Kandidaten (humanPlayer traegt nichts) bleibt es bei 'noEffect'.
+  assert.deepStrictEqual(resolveConsequenceSpec('VERFLUCHTER GEGENSTAND', 'Und wenn du stirbst, wird der Fluch übertragen.', humanPlayer, room), { type: 'noEffect' });
 
   // ---------------------------------------------------------------------
   // Tatsächliche Zustandsänderung (applyDeathConsequence-Pfad, Ausrüstung, Hand)

@@ -491,8 +491,9 @@ function run() {
     const regel = SPECIAL_SLOT_ITEMS[name];
     const bringtWas = (typeof c.bonus === 'number' && c.bonus !== 0)
       || (typeof regel.bonus === 'number' && regel.bonus !== 0)
-      || !!ITEM_GRANTS_TRAIT[name];
-    assert.ok(bringtWas, `${name}: Spezialausrüstung ohne Kampfbonus und ohne verliehene Rasse/Klasse`);
+      || !!ITEM_GRANTS_TRAIT[name]
+      || !!FLEE_ITEM_BONUS[name];
+    assert.ok(bringtWas, `${name}: Spezialausrüstung ohne Kampfbonus, Fluchtbonus und ohne verliehene Rasse/Klasse`);
     assert.ok(SPECIAL_SLOTS[regel.slot], `${name}: verweist auf einen unbekannten Platz`);
   });
 
