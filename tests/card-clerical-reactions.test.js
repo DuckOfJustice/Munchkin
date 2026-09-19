@@ -77,7 +77,7 @@ function makeRoom(players, extra) {
     const p = makePlayer({ level: 5 });
     p.equipped.special = [amulett.id];
     const room = makeRoom([p]);
-    let ziel; fluchZiel(room, p, fluch, (o) => { ziel = o; });
+    let ziel; fluchZiel(room, p, null, fluch, (o) => { ziel = o; });
     if (ziel === null) {
       geblockt++;
       assert.ok(p.equipped.special.includes(amulett.id), 'beim Blocken bleibt das Amulett');
@@ -101,12 +101,12 @@ function makeRoom(players, extra) {
   const c = makePlayer({ id: 'p3', name: 'C' });
   const room = makeRoom([a, b, c]);
   for (let i = 0; i < 50; i++) {
-    let ziel; fluchZiel(room, a, fluch, (o) => { ziel = o; });
+    let ziel; fluchZiel(room, a, null, fluch, (o) => { ziel = o; });
     assert.ok(ziel && ziel.id !== a.id, 'der Hut traegt den Fluch immer weiter');
   }
   // Allein am Tisch gibt es niemanden, auf den zurueckgeworfen werden koennte.
   const allein = makeRoom([a]);
-  let alleinZiel; fluchZiel(allein, a, fluch, (o) => { alleinZiel = o; });
+  let alleinZiel; fluchZiel(allein, a, null, fluch, (o) => { alleinZiel = o; });
   assert.strictEqual(alleinZiel.id, a.id);
 }
 

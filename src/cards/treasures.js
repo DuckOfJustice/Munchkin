@@ -41,6 +41,20 @@ module.exports = (ctx) => {
   };
 
   const TREASURE_POWER_OVERRIDES = {
+    // --- Unnatural Axe ---
+    'FLOHMARKT': (player, room) => {
+      const items = [...player.hand, ...equippedItemIds(player)]
+        .filter(id => card(id) && typeof card(id).gold === 'number');
+      if (items.length === 0) return null; // Needs an item
+      return {
+        type: 'choice',
+        options: items.map(id => ({
+          id,
+          label: `"${card(id).name}" (${card(id).gold} Gold) abwerfen`,
+          action: { type: 'flohmarktSelectTarget1', discardedId: id }
+        }))
+      };
+    },
     // --- Ziel-Auswahl (Spieler-Picker) ---
     // "Wähle den Spieler aus, von dem du eine Stufe stehlen willst. Du
     // steigst eine auf und der Gegenspieler steigt eine ab."
@@ -166,6 +180,25 @@ module.exports = (ctx) => {
       leavesTreasure: room.combat.monsterIds.length === 1,
       keepTreasureForWin: room.combat.monsterIds.length > 1,
     }),
+    'JUCKPULVER': (player, room) => {
+      const c = room.combat;
+      if (!c) return null;
+      const targets = [c.actorId, c.helperId].filter(Boolean).map(id => room.players.find(p => p.id === id));
+      const options = [];
+      targets.forEach(t => {
+        const e = t.equipped;
+        [e.head, e.armor, e.feet].filter(Boolean).forEach(itemId => {
+          options.push({
+            id: itemId,
+            label: `${t.name}: "${card(itemId).name}" ablegen`,
+            action: { type: 'juckpulverDiscard', playerId: t.id, itemId }
+          });
+        });
+      });
+      if (options.length === 0) return { type: 'modifier', side: 'both', amount: 0 };
+      return { type: 'choice', options };
+    },
+
     // --- Clerical Errors ---------------------------------------------------
     // "+5 fuer beide Seiten. Nur einmal einsetzbar." Der Text nennt keinen
     // Spielzeitpunkt ("im Kampf"), deshalb greift COMBAT_PLAYABLE_RE nicht
