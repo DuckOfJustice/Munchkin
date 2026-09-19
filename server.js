@@ -3485,6 +3485,15 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
     // "Elfen ziehen 1 zusätzlichen Schatz, nachdem sie besiegt wurde."
     if (m.name === 'TOPFPFLANZE' && hasRace(actor, 'ELF')) treasures += 1;
   });
+  
+  if (c && c.mommyMonsterId) {
+    levels += 1;
+    treasures += 1;
+    if (c.monsterBonuses && c.monsterBonuses.some(b => b.monsterId === c.mommyMonsterId && b.name === 'BABY')) {
+      treasures += 1; // BABY gab -1 Basis-Schatz, MAMI gleicht aus
+    }
+  }
+
   // ORK: "Wenn ein Ork, der alleine kaempft, ein Monster um mehr als 10
   // Punkte besiegt, steigt er eine zusaetzliche Stufe auf."
   if (!helper && hasRace(actor, 'ORK')) {
@@ -4264,6 +4273,14 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     case 'freundlichFightOn': {
       c.treasureDelta = (c.treasureDelta || 0) + 2;
       return 'lässt den Kampf weitergehen (Monster gibt +2 Schätze)';
+    }
+    case 'duplicateMonsterMommy': { console.log('MAMI TRIGGERED', action.validMonsterIds);
+      const mid = action.monsterId || action.validMonsterIds[0];
+      c.monsterIds.push(mid);
+      c.mommyMonsterId = mid;
+      c.monsterModifier += 10;
+      refreshCombatReady(room);
+      return `ruft die MAMI von "${card(mid).name}" (+10 auf Mami)`;
     }
     case 'combatAddMonster': {
       removeFromHand(player, action.cardId);

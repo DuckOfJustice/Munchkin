@@ -558,6 +558,37 @@ function makeRoom(players) {
   assert.strictEqual(room.pendingCardAction, null, 'Wahl beendet');
 }
 
+﻿
+// --- Welle B: MAMI ----------------------------------------------------------
+{
+  const { startCombat, handlePlayCombatCard, handlePassCombat, monsterVictoryExtras } = require('../server.js');
+  const p1 = makePlayer({ id: 'p1', name: 'Spieler 1' });
+  const room = makeRoom([p1]);
+  raeume.push(room);
+
+  // Basis-Monster
+  const nase = findCard('LAHMER GOBLIN').id; // Lvl 1
+  startCombat(room, p1.id, [nase], { fromHand: true });
+  
+  // MAMI + BABY spielen! Wait, we don't have BABY yet but we can test MAMI.
+  const mami = findCard('MAMI').id;
+  p1.hand.push(mami);
+  handlePlayCombatCard(room, p1.id, mami);
+  
+  // MAMI fügt eine weitere Kopie der LAUFENDE NASE hinzu (als 'mommyMonsterId')
+  assert.strictEqual(room.combat.monsterIds.length, 2);
+  assert.ok(room.combat.mommyMonsterId);
+  assert.strictEqual(room.combat.mommyMonsterId, nase);
+  
+  // Mami gibt +10 auf den Modifikator, und das verdoppelte Monster 
+  // wurde hinzugefügt (Lvl +2 = 12 total bonus vom Duplikat).
+  assert.strictEqual(room.combat.monsterModifier, 10);
+  
+  const extras = monsterVictoryExtras(room, p1, null, [findCard('LAHMER GOBLIN'), findCard('LAHMER GOBLIN')]);
+  assert.strictEqual(extras.levels, 1, 'Mami gibt 1 Extra-Stufe');
+  assert.strictEqual(extras.treasures, 1, 'Mami gibt 1 Extra-Schatz');
+}
+
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
 console.log('card-unnatural-doors: ok');
 

@@ -264,6 +264,16 @@ module.exports = (ctx) => {
     'TOD': () => ({ type: 'removeOneMonster', leavesTreasure: true }),
     'ABGEBRANNT': () => ({ type: 'zeroMonsterTreasure' }),
     'FREUNDLICH': () => ({ type: 'freundlichChoice' }),
+    'MAMI': (player, room) => {
+      console.log('MAMI CALLED', room.combat.monsterIds.map(m => card(m).level));
+      const validMonsterIds = room.combat.monsterIds.filter((m) => {
+        const lv = card(m).level || 0;
+        const hasBaby = (room.combat.monsterBonuses || []).some(b => b.monsterId === m && b.name === 'BABY');
+        return lv <= 5 || hasBaby;
+      });
+      if (validMonsterIds.length === 0) return null;
+      return { type: 'duplicateMonsterMommy', validMonsterIds };
+    },
     // "Das Monster in diesem Raum hat Mittagspause. ... Der kaempfende Spieler
     // legt alle ihn angreifenden Monster ab und zieht sofort 2 Schaetze."
     // Feste 2 Schaetze - nicht der treasureCount der Monster.
