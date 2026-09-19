@@ -4966,7 +4966,14 @@ function resolveCombat(room) {
   // koenntest." Gleiche Bauform wie lustOhneHilfe - die Kampfstaerke spielt
   // keine Rolle mehr, also vor Krieger-Gleichstand und ALUFOLIE.
   const angstVorUntoten = combatHasUndead(room) && hatUntotenAngst(findPlayer(room, c.actorId));
-  const kampfVerloren = lustOhneHilfe || angstVorUntoten;
+  // ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT: "Hast du dieses Schwert
+  // ausgespielt und triffst auf Krakzilla, musst du versuchen, Wegzulaufen!"
+  const krakzillaSchwertZwang = room.combat.monsterIds.some(
+    (id) => (card(id) || {}).name === 'KRAKZILLA'
+  ) && equippedItemIds(findPlayer(room, c.actorId)).some(
+    (id) => (card(id) || {}).name === 'ALLES AUSSER KRAKZILLA ABSCHLACHTENDES SCHWERT'
+  );
+  const kampfVerloren = lustOhneHilfe || angstVorUntoten || krakzillaSchwertZwang;
   // KRIEGER: "Bei Gleichstand im Kampf gewinnst du." Greift vor der
   // ALUFOLIE-Notlösung, damit die Karte nicht unnötig verbraucht wird.
   const warrior = !kampfVerloren && playerStrength === monsterStrength
@@ -4996,7 +5003,9 @@ function resolveCombat(room) {
       ? `Die Todesangst vor den Untoten ist stärker als jede Waffe. Fliehen nötig!${wer}`
       : (lustOhneHilfe
         ? `Ohne Hilfe eines Charakters des anderen Geschlechts ist das Lustmonster nicht zu besiegen. Fliehen nötig!${wer}`
-        : `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`));
+        : (krakzillaSchwertZwang
+          ? `Das Schwert zwingt ${findPlayer(room, c.actorId).name} zur Flucht vor Krakzilla!${wer}`
+          : `Kampfstärke reicht nicht (${playerStrength} vs. ${monsterStrength}). Fliehen nötig!${wer}`)));
     touchRoom(room);
   }
 }
