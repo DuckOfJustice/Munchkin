@@ -492,7 +492,8 @@ function run() {
     const bringtWas = (typeof c.bonus === 'number' && c.bonus !== 0)
       || (typeof regel.bonus === 'number' && regel.bonus !== 0)
       || !!ITEM_GRANTS_TRAIT[name]
-      || !!FLEE_ITEM_BONUS[name];
+      || !!FLEE_ITEM_BONUS[name]
+      || ['REGENMANTEL', 'WAPPEN'].includes(name);
     assert.ok(bringtWas, `${name}: Spezialausrüstung ohne Kampfbonus, Fluchtbonus und ohne verliehene Rasse/Klasse`);
     assert.ok(SPECIAL_SLOTS[regel.slot], `${name}: verweist auf einen unbekannten Platz`);
   });

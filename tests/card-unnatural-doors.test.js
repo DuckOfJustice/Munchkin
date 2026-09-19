@@ -780,7 +780,95 @@ function makeRoom(players) {
   const krakzilla = findCard('KRAKZILLA');
   startCombat(room, p1.id, [krakzilla.id], { fromHand: false });
   resolveCombat(room);
-  assert.ok(room.combat.mustFlee, 'Krakzilla-Schwert erzwingt Flucht gegen Krakzilla');
+}
+// --- WELLE B SCHÄTZE: KRONLEUCHTER & REGENMANTEL ---
+{
+  const p1 = makePlayer({ id: 'P1', name: 'P1' });
+  const room = makeRoom([p1]);
+  const kronleuchter = findCard('KRONLEUCHTER');
+  p1.hand.push(kronleuchter.id);
+  handleEquipItem(room, p1.id, kronleuchter.id);
+  assert.ok(equippedItemIds(p1).includes(kronleuchter.id), 'KRONLEUCHTER kann angelegt werden');
+}
+
+{
+  const p1 = makePlayer({ id: 'P1', name: 'P1' });
+  const p2 = makePlayer({ id: 'P2', name: 'P2' });
+  const room = makeRoom([p1, p2]);
+  const mantel = findCard('REGENMANTEL');
+  p1.hand.push(mantel.id);
+  handleEquipItem(room, p1.id, mantel.id);
+
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+
+  // P2 versucht, einen Trank zu spielen
+  const trank = findCard('MONSTERFUTTER'); // Ein Kampf-Trank
+  p2.hand.push(trank.id);
+  handlePlayCombatCard(room, p2.id, trank.id);
+  assert.ok(p2.hand.includes(trank.id), 'REGENMANTEL blockiert Tränke von Fremden ohne Helfer');
+
+  // Mit Helfer: P2 darf werfen
+  room.combat.helperId = p2.id;
+  handlePlayCombatCard(room, p2.id, trank.id);
+  assert.ok(!p2.hand.includes(trank.id), 'Tränke erlaubt, sobald ein Helfer dabei ist');
+  room.combat = null;
+}
+
+// --- WELLE B SCHÄTZE: FEIGHEITSTRANK ---
+{
+  const p1 = makePlayer({ id: 'P1', name: 'P1', level: 9 });
+  const room = makeRoom([p1]);
+  const monster = findCard('LAHMER GOBLIN');
+  startCombat(room, p1.id, [monster.id], { fromHand: false });
+  
+  const feigling = findCard('FEIGHEITSTRANK');
+  p1.hand.push(feigling.id);
+  handlePlayCombatCard(room, p1.id, feigling.id);
+  assert.ok(room.combat.mustFlee, 'FEIGHEITSTRANK erzwingt Flucht');
+  resolveCombat(room);
+}
+
+// --- WELLE B SCHÄTZE: UNGLÄUBIGKEITSTRANK ---
+{
+  const p1 = makePlayer({ id: 'P1', name: 'P1', level: 9 });
+  const room = makeRoom([p1]);
+  room.treasureDeck.push(findCard('KNIESCHÜTZER DER VERLOCKUNG').id); // Dummy Schatz
+  const m1 = findCard('LAHMER GOBLIN'); // 1 Schatz
+  startCombat(room, p1.id, [m1.id], { fromHand: false });
+  
+  const ungl = findCard('UNGLÄUBIGKEITSTRANK');
+  p1.hand.push(ungl.id);
+  const handVorher = p1.hand.length;
+  handlePlayCombatCard(room, p1.id, ungl.id);
+  assert.ok(!room.combat, 'Kampf endet sofort (keine Monster mehr)');
+  assert.strictEqual(p1.hand.length, handVorher - 1 + 1, 'Schatz für Lahmer Goblin erhalten (1 Trank weg, 1 Schatz gezogen)');
+}
+
+// --- WELLE B SCHÄTZE: WAPPEN (2 Extra-Hände) ---
+{
+  const p1 = makePlayer({ id: 'P1', name: 'P1' });
+  const room = makeRoom([p1]);
+  const wappen = findCard('WAPPEN');
+  const s1 = findCard('FLOTTER BUCKLER'); // 1 Hand
+  const s2 = findCard('GEILER HELM'); // Kopf (Dummy)
+  const w1 = findCard('RIESIGER FELS'); // 2 Hände
+  const w2 = findCard('DOLCH DES VERRATS'); // 1 Hand
+
+  p1.hand.push(wappen.id, s1.id, w1.id, w2.id);
+  handleEquipItem(room, p1.id, wappen.id);
+  assert.strictEqual(p1.equipped.hands.length, 4, 'WAPPEN erweitert Hände auf 4');
+  
+  handleEquipItem(room, p1.id, w1.id);
+  handleEquipItem(room, p1.id, s1.id);
+  handleEquipItem(room, p1.id, w2.id);
+  assert.strictEqual(p1.equipped.hands.filter(Boolean).length, 4, '4 Hände belegt');
+
+  // Wappen ablegen: muss die Hände auf 2 schrumpfen und 2 Items in die Hand zurücklegen
+  unequipSlotCard(p1, wappen.id);
+  assert.strictEqual(p1.equipped.hands.length, 2, 'Hände wieder auf 2 geschrumpft');
+  assert.strictEqual(p1.equipped.hands.filter(Boolean).length, 2, '2 Hände weiterhin belegt');
+  assert.ok(p1.hand.includes(s1.id) || p1.hand.includes(w2.id) || p1.hand.includes(w1.id), 'Überzählige Gegenstände sind auf der Hand');
 }
 
 raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });

@@ -159,6 +159,13 @@ module.exports = (ctx) => {
   };
 
   const COMBAT_POTION_OVERRIDES = {
+    // --- Unnatural Axe -----------------------------------------------------
+    'FEIGHEITSTRANK': () => ({ type: 'forceFlee' }),
+    'UNGLÄUBIGKEITSTRANK': (player, room) => ({
+      type: 'removeOneMonster',
+      leavesTreasure: room.combat.monsterIds.length === 1,
+      keepTreasureForWin: room.combat.monsterIds.length > 1,
+    }),
     // --- Clerical Errors ---------------------------------------------------
     // "+5 fuer beide Seiten. Nur einmal einsetzbar." Der Text nennt keinen
     // Spielzeitpunkt ("im Kampf"), deshalb greift COMBAT_PLAYABLE_RE nicht

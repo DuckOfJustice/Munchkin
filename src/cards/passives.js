@@ -591,7 +591,10 @@ module.exports = (ctx) => {
     'AM FUSS BEFESTIGTER STREITKOLBEN': { slot: 'special' },
     // Beide haben in den Rohdaten keinen Platz, gehoeren aber angelegt:
     'FALSCHE OHREN': { slot: 'special' },
-    'ZAUBERCOUCH': { slot: 'special' },
+    'ZAUBERCOUCH': { slot: 'special', bonus: null },
+    'KRONLEUCHTER': { slot: 'special', mitSlot: 'head' },
+    'REGENMANTEL': { slot: 'special', mitSlot: 'armor' },
+    'WAPPEN': { slot: 'special' },
     // Zwei Karten, die ausdruecklich ZUSAETZLICH zu einem belegten Platz
     // getragen werden. Ein zweiter Gegenstand im selben Slot ginge nicht (die
     // Plaetze sind je ein festes Feld), der Sammelplatz "Spezialausruestung"
