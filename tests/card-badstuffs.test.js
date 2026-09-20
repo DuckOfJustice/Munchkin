@@ -260,7 +260,10 @@ const CARD_C = idByName('KLASSE WECHSELN');
   const knapp = ps[2]; // c: hat gar nichts von Wert
   const room = makeRoom(ps, 0);
 
-  const desc = applyPrimitiveAction(room, zieher, { type: 'curseIncomeTax', mode: 'allOthers' });
+  const desc1 = applyPrimitiveAction(room, zieher, { type: 'curseIncomeTax', mode: 'allOthers' });
+  assert.strictEqual(room.pendingCardAction.kind, 'choice');
+  const action = room._pendingCardActionResolvers[room.pendingCardAction.options[0].id];
+  const desc = applyPrimitiveAction(room, zieher, action);
   assert.strictEqual(zieher.equipped.head, null, 'die ziehende Person legt ihren Gegenstand ab');
   assert.ok(room.treasureDiscard.includes(TUCH));
 

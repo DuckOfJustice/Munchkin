@@ -108,9 +108,17 @@ module.exports = () => {
     'ÜBERFALLTRANK': { kind: 'handOverCombat' },
   };
 
+  // TROJANISCHER PFERD: "Spiele diese Karte zusammen mit einem Monster aus
+  // deiner Hand aus, wenn jemand gerade nach dem Kampf einen Schatz ziehen
+  // will. Die Person erhält keinen Schatz. Stattdessen geht es in den Kampf
+  // gegen dein Monster. (Oder spiele diese Karte ohne Monster, um einfach
+  // den Schatz wegzunehmen.)"
+  const TREASURE_REACTION_CARDS = new Set(['TROJANISCHER PFERD']);
+
   return {
     ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ROLL_REACTION_OWN_ROLL_ONLY,
     ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
     LINGERING_CURSES, COMBAT_REACTION_CARDS,
+    TREASURE_REACTION_CARDS,
   };
 };

@@ -1734,6 +1734,31 @@ function applyPrimitiveAction(room, player, action) {
       player.equipped = { head: null, armor: null, feet: null, hands: [null, null] };
       return `Ausrüstung abgelegt (${ids.map((id) => card(id).name).join(', ')})`;
     }
+    case 'curseKleinerFehler': {
+      let monsterIdx = -1;
+      for (let i = room.doorDiscard.length - 1; i >= 0; i--) {
+        if ((card(room.doorDiscard[i]) || {}).category === 'monster') {
+          monsterIdx = i;
+          break;
+        }
+      }
+      if (monsterIdx === -1) {
+        return 'verpufft mangels Monster im Ablagestapel';
+      }
+      const monsterId = room.doorDiscard.splice(monsterIdx, 1)[0];
+      const mc = card(monsterId);
+      
+      if (room.combat) {
+        room.combat.monsterIds.push(monsterId);
+        room.combat.hasUndeadCurse = true;
+        refreshCombatReady(room);
+        return `belebt "${mc.name}" als Untoten wieder und wirft es in den Kampf`;
+      } else {
+        startCombat(room, player.id, [monsterId], { fromHand: false });
+        room.combat.hasUndeadCurse = true;
+        return `belebt "${mc.name}" aus dem Ablagestapel als Untoten wieder - ein Kampf beginnt`;
+      }
+    }
     case 'curseEdelmut': {
       const victim = (action.victim ? findPlayer(room, action.victim) : player) || player;
       const others = playerQueueFrom(room, victim, 'after').filter((id) => id !== victim.id);
@@ -2107,22 +2132,25 @@ function applyPrimitiveAction(room, player, action) {
       return `Geschlecht: ${wort(alt)} -> ${wort(player.gender)}`;
     }
     case 'curseIncomeTax': {
-      // FLUCH! EINKOMMENSSTEUER: "Lege einen Gegenstand deiner Wahl ab. Jeder
-      // andere Spieler muss nun einen oder mehrere Gegenstaende ablegen,
-      // deren Wert mindestens dem entspricht, den du abgelegt hast. Sollten
-      // sie nicht genug haben, um die ganze Steuer zu zahlen, muessen sie
-      // alle ihre Gegenstaende ablegen und verlieren eine Stufe."
-      // ponytail: "Gegenstand deiner Wahl" wird automatisch der TEUERSTE
-      // eigene Gegenstand gewaehlt statt einer echten Auswahl - Aufruestweg:
-      // eigene chooseCard-Runde fuer diese erste Wahl, analog zu
-      // 'discardSpecificItem' oben, sobald dafuer eine Anzeige existiert.
       const ownIds = equippedItemIds(player).concat(player.hand).filter((id) => (card(id) || {}).gold > 0);
       if (!ownIds.length) return 'kein Gegenstand zum Ablegen - Fluch wirkungslos';
-      let chosen = ownIds[0];
-      ownIds.forEach((id) => { if ((card(id).gold || 0) > (card(chosen).gold || 0)) chosen = id; });
+      
+      const options = ownIds.map(id => ({
+        id,
+        label: `"${card(id).name}" (${card(id).gold} GS) ablegen`,
+        action: { type: 'curseIncomeTaxStep2', cardId: id, mode: action.mode }
+      }));
+      
+      openCardChoice(room, player, 'FLUCH! EINKOMMENSSTEUER', options);
+      return 'wählt einen Gegenstand aus, um die Steuer festzulegen';
+    }
+    
+    case 'curseIncomeTaxStep2': {
+      const chosen = action.cardId;
       const gold = card(chosen).gold || 0;
       if (player.hand.includes(chosen)) removeFromHand(player, chosen); else unequipSlotCard(player, chosen);
       discardCard(room, chosen);
+      
       const betroffene = playerQueueFrom(room, player, action.mode).map((pid) => findPlayer(room, pid)).filter(Boolean);
       const teile = betroffene.map((target) => {
         const { summe, weg } = pickItemsWorthGold(target, gold);
@@ -2422,6 +2450,7 @@ const {
   ROLL_REACTION_CARDS, ROLL_REROLL_CARDS, ROLL_REACTION_OWN_ROLL_ONLY,
   ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS,
   LINGERING_CURSES, COMBAT_REACTION_CARDS,
+  TREASURE_REACTION_CARDS,
 } = reactionsFactory();
 
 // Eine Aktion, die mehrere Personen NACHEINANDER betrifft. specFor(playerId)
@@ -3381,6 +3410,7 @@ function monsterSeesRace(player, race) {
 function combatHasUndead(room) {
   if (!room.combat) return false;
   if (combatHasMonster(room, UNDEAD_MONSTERS)) return true;
+  if (room.combat.hasUndeadCurse) return true;
   return (room.combat.enhancerIds || []).some((id) => { const c = card(id); return c && c.name === 'UNTOT'; });
 }
 
@@ -3577,6 +3607,42 @@ function handlePlayReactionCard(room, playerId, cardId, value) {
     touchRoom(room);
     handleAttemptFlee(room, actor.id, combat.fleeManualModifier || 0);
   }
+}
+
+// TROJANISCHER PFERD: Spieler spielt die Karte (optional mit einem Monster
+// aus der Hand). monsterId ist null (nur Schatz wegnehmen) oder die ID eines
+// Handmonsters (neuer Kampf gegen dieses Monster).
+function handlePlayTrojaner(room, playerId, cardId, monsterId) {
+  const combat = room.combat;
+  if (!combat || !combat.trojanerOffer || !combat.trojanerOffer.includes(playerId)) return;
+  const p = findPlayer(room, playerId);
+  const c = card(cardId);
+  if (!p || !c || !p.hand.includes(cardId) || !TREASURE_REACTION_CARDS.has(c.name)) return;
+  const actor = findPlayer(room, combat.actorId);
+  removeFromHand(p, cardId);
+  discardCard(room, cardId);
+  combat.trojanerOffer = null;
+  combat.trojanerDone = true;
+  if (monsterId && p.hand.includes(monsterId)) {
+    const m = card(monsterId);
+    if (m && m.category === 'door_monster') {
+      removeFromHand(p, monsterId);
+      // Kampf gewonnen, aber Schätze gestrichen → Monster ablegen, Level geben,
+      // dann neuen Kampf starten gegen das Trojaner-Monster.
+      // Levels und Sieg-Check laufen in finishCombatWin; der Schatz wird aber
+      // NICHT gezogen, weil wir trojanerNoTreasure setzen.
+      combat.trojanerNoTreasure = true;
+      combat.trojanerMonsterId = monsterId;
+      combat.trojanerPlayerId = p.id;
+      log(room, `${p.name} spielt "${c.name}" mit "${m.name}": ${actor.name} bekommt keinen Schatz und muss stattdessen gegen "${m.name}" kämpfen!`, [cardId, monsterId]);
+      finishCombatWin(room);
+      return;
+    }
+  }
+  // Ohne Monster: einfach keinen Schatz
+  combat.trojanerNoTreasure = true;
+  log(room, `${p.name} spielt "${c.name}": ${actor.name} bekommt keinen Schatz!`, [cardId]);
+  finishCombatWin(room);
 }
 
 // Eine Person faellt weg (Verbindung verloren): sie kann auf nichts mehr
@@ -5131,6 +5197,23 @@ function resolveCombat(room) {
 }
 
 function resolveCombatWin(room) {
+  const c = room.combat;
+  // TROJANISCHER PFERD: "wenn jemand gerade nach dem Kampf einen Schatz
+  // ziehen will." Das Fenster öffnet sich einmal; wurde es schon gezeigt
+  // (trojanerDone), geht es direkt weiter.
+  if (!c.trojanerDone) {
+    const holders = reactionHolders(room, TREASURE_REACTION_CARDS);
+    if (holders.length) {
+      c.trojanerOffer = holders;
+      log(room, `Kampf gewonnen - es darf noch ein TROJANISCHES PFERD gespielt werden.`);
+      touchRoom(room);
+      return;
+    }
+  }
+  finishCombatWin(room);
+}
+
+function finishCombatWin(room) {
   const c = room.combat;
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
