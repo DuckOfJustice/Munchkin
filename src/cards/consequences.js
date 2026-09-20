@@ -391,7 +391,7 @@ module.exports = (ctx) => {
     // Status) - bleiben bewusst manuell:
     'EDELMUT': () => ({ type: 'curseEdelmut' }),
     'HUNGRIGER RUCKSACK': () => null,
-    'KLEINER FEHLER': () => null,
+    'KLEINER FEHLER': () => ({ type: 'curseKleinerFehler' }),
     'TEMPORÄRE ANMNESIE': () => null,
 
     // "Du verlierst deinen wertvollsten Gegenstand, den du im Spiel ausliegen
