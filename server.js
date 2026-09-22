@@ -1220,6 +1220,11 @@ function handleApplyConsequenceAction(room, playerId, action) {
     log(room, `${player.name}: Stufe ${action.delta >= 0 ? '+' : ''}${action.delta} -> jetzt Stufe ${player.level}.`);
   } else if (action.type === 'discardCard') {
     const cardId = action.cardId;
+    // HUHN AUF DEINEM KOPF: dieses Werkzeug laeuft nur waehrend einer
+    // offenen room.pendingConsequence (siehe Guard oben), also immer als
+    // Folge eines Fluchs oder Schlimmer Dinge - nie freiwillig. Die
+    // Kopfbedeckung faellt hier also unter huhnMitKopfbedeckung.
+    const hatteKopf = !!getrageneSlotKarte(player, 'head');
     if (player.hand.includes(cardId)) {
       removeFromHand(player, cardId);
       discardCard(room, cardId);
@@ -1227,6 +1232,7 @@ function handleApplyConsequenceAction(room, playerId, action) {
       unequipSlotCard(player, cardId);
       discardCard(room, cardId);
     } else return;
+    huhnMitKopfbedeckung(room, player, hatteKopf);
     const c = card(cardId);
     log(room, `${player.name} legt "${c ? c.name : cardId}" ab.`, [cardId]);
   } else if (action.type === 'death') {
@@ -2380,10 +2386,18 @@ function resolveConsequenceSpec(name, text, player, room) {
 // einzige Quelle, wird stattdessen `pendingConsequence.choice` gesetzt und
 // auf die Antwort der Spielerin gewartet (siehe handleResolveConsequenceChoice).
 // HUHN AUF DEINEM KOPF: "Jeder Fluch oder alle Schlimmen Dinge, die deine
-// Kopfbedeckung entfernen, nehmen das Huhn mit." Geprueft an den zwei
-// Stellen, ueber die JEDER Fluch und jedes Miese Zeug laeuft - so zaehlt
-// jede Karte, die den Kopf-Slot leert, auch kuenftige. Freiwilliges Ablegen
-// laeuft hier nicht durch und nimmt das Huhn deshalb nicht mit.
+// Kopfbedeckung entfernen, nehmen das Huhn mit." Geprueft an den drei
+// Stellen, ueber die ein automatisch oder manuell aufgeloester Fluch/Miese
+// Dinge den Kopf-Slot leeren kann: autoApplyLossConsequence (automatische
+// Anwendung), handleResolveConsequenceChoice (Wahlmoeglichkeit) und der
+// discardCard-Zweig von handleApplyConsequenceAction (manuelles "Trust"-
+// Werkzeug) - alle drei laufen nur waehrend einer offenen
+// room.pendingConsequence. NICHT geprueft: Gegenstand-Waehler, die ueber
+// handleResolveCardChoice aufgeloest werden (z.B. FLUCH! EINKOMMENSSTEUER) -
+// diese generische Weiche bedient auch beliebige freiwillige Kartenkraefte,
+// eine "gehoert zu einem Fluch"-Erkennung waere dort nicht zuverlaessig.
+// Freiwilliges Ablegen laeuft durch keine dieser Stellen und nimmt das Huhn
+// deshalb nicht mit.
 function huhnMitKopfbedeckung(room, player, hatteKopf) {
   if (!hatteKopf || getrageneSlotKarte(player, 'head')) return;
   const vorher = (player.activeCurses || []).length;
@@ -2725,13 +2739,13 @@ function applyTargetAction(room, actor, target, action) {
     case 'handOverCombat': {
       const c = room.combat;
       if (!c) return 'kein Kampf im Gange';
+      // Die Karte darf auch von Aussenstehenden gespielt werden (kein
+      // nurImKampf) - `actor` ist dann die Kartenspielerin, NICHT die
+      // bisher kaempfende Person. Fuer Log und Zaubercouch zaehlt aber die
+      // bisher kaempfende Person, deshalb hier ueber c.actorId lesen, bevor
+      // er ueberschrieben wird.
+      const vorherigerKaempfer = findPlayer(room, c.actorId);
       c.originalActorId = c.originalActorId || c.actorId;
-      // ZAUBERCOUCH: eine Uebergabe zaehlt als neue kaempfende Person - die
-      // alte Antwort (kaempfende Person UND abgeloeste Hilfe) verfaellt,
-      // die neue kaempfende Person bekommt die Frage (Ruling der Kontrolle).
-      const vorherigeHilfe = findPlayer(room, c.helperId);
-      delete actor.zaubercouch;
-      if (vorherigeHilfe) delete vorherigeHilfe.zaubercouch;
       c.actorId = target.id;
       c.helperId = null;
       c.helperPending = null;
@@ -2740,8 +2754,12 @@ function applyTargetAction(room, actor, target, action) {
       c.helperReward = 0;
       c.ready = {};
       zaubercouchFragen(target);
+      // ZAUBERCOUCH: eine Uebergabe zaehlt als neue kaempfende Person - die
+      // alte Antwort (kaempfende Person UND abgeloeste Hilfe) verfaellt, weil
+      // beide jetzt keine combatParticipants mehr sind (refreshCombatReady
+      // raeumt das auf), die neue kaempfende Person bekommt oben die Frage.
       refreshCombatReady(room);
-      return `${target.name} kämpft jetzt anstelle von ${actor.name}`;
+      return `${target.name} kämpft jetzt anstelle von ${vorherigerKaempfer ? vorherigerKaempfer.name : 'der vorherigen Person'}`;
     }
     default:
       return '';
@@ -4104,7 +4122,11 @@ function zaubercouchZuruecksetzen(room) {
   room.players.forEach((p) => { delete p.zaubercouch; });
 }
 function zaubercouchOffen(room) {
-  return combatParticipants(room).filter((p) => p.zaubercouch === 'offen');
+  // combatReadyRequired ignoriert Getrennte aus demselben Grund: eine
+  // unbeantwortete Frage einer Person, die nicht mehr am Geraet ist, darf
+  // den Kampf nicht auf ewig blockieren - sie zaehlt (wie ueberall sonst
+  // bei Zaubercouch) automatisch als "Nein".
+  return combatParticipants(room).filter((p) => p.zaubercouch === 'offen' && p.connected);
 }
 function handleAnswerZaubercouch(room, playerId, benutzen) {
   const p = findPlayer(room, playerId);
@@ -4220,6 +4242,16 @@ function refreshCombatReady(room) {
     c.ready = {};
     c.readySignature = sig;
   }
+  // ZAUBERCOUCH: wer den Kampf verlassen hat (Uebergabe, entfernte Hilfe,
+  // Todesangst, Stinker-Rueckzug, ...), ist keine kaempfende Person mehr und
+  // verliert Zauberer-Klasse und Weglauf-Malus sofort - nicht erst beim
+  // naechsten Kampf. Zentral hier statt an jeder einzelnen Austrittsstelle,
+  // aus demselben Grund wie oben bei Todesangst: refreshCombatReady laeuft
+  // nach jeder davon.
+  const teilnehmendeIds = new Set(combatParticipants(room).map((p) => p.id));
+  room.players.forEach((p) => {
+    if (p.zaubercouch && !teilnehmendeIds.has(p.id)) delete p.zaubercouch;
+  });
 }
 
 function handleSetCombatReady(room, playerId, ready) {
@@ -4596,6 +4628,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const helper = findPlayer(room, c.helperId);
       c.helperId = null;
       c.helperReward = 0; // mit der Helfer:in faellt auch ihre Zusage weg
+      refreshCombatReady(room); // ZAUBERCOUCH: die Hilfe ist keine combatParticipant mehr
       return `${helper ? helper.name : 'Helfer'} verlässt den Kampf`;
     }
     // POLLYVERWANDLUNGSTRANK/TRANK DER IRRELEVANZ/ENTLASSUNGSGLOCKE nennen

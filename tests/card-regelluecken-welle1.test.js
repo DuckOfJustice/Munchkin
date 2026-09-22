@@ -308,5 +308,91 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(ziel.zaubercouch, 'offen', 'die neue kaempfende Person bekommt die Frage');
 }
 
+// --- 6. ZAUBERCOUCH: eine getrennte Person mit offener Couch-Frage blockiert
+// den Kampf nicht ewig - genau wie combatReadyRequired Getrennte ignoriert,
+// zaehlt eine unbeantwortete Frage als "Nein" (siehe itemGrantsTrait/
+// FLEE_ITEM_BONUS oben, die 'offen' ohnehin wie 'nein' behandeln).
+{
+  const couch = findCard('ZAUBERCOUCH').id;
+  const goblin = findCard('LAHMER GOBLIN', 'monster').id;
+  const a = makePlayer({ id: 'p1', name: 'A', level: 5 });
+  const h = makePlayer({ id: 'p2', name: 'B' });
+  h.equipped.special = [couch];
+  const room = makeRoom([a, h]);
+  S.startCombat(room, 'p1', [goblin], { fromHand: false });
+  room.combat.helperId = 'p2';
+  h.zaubercouch = 'offen';
+  h.connected = false;
+  const logsVorher = room.logs.length;
+  S.handleEvaluateCombat(room, 'p1');
+  assert.ok(!room.logs.slice(logsVorher).some((l) => /Zaubercouch/.test(l.text)),
+    'eine getrennte Person mit offener Couch-Frage blockiert die Auswertung nicht');
+  assert.strictEqual(room.combat, null, 'Stufe 5 gegen den LAHMEN GOBLIN: der Kampf wertet aus');
+}
+
+// --- 7. ÜBERFALLTRANK von einer aussenstehenden Person gespielt: "actor" in
+// handOverCombat ist die Kartenspielerin, nicht die bisher kaempfende
+// Person - deren Zaubercouch-Antwort muss trotzdem verfallen (root cause:
+// refreshCombatReady raeumt am Kampfende jeder Aenderung alle Nicht-
+// Teilnehmenden auf), und die Log-Zeile muss die bisher kaempfende Person
+// nennen, nicht die Kartenspielerin.
+{
+  const couch = findCard('ZAUBERCOUCH').id;
+  const goblin = findCard('LAHMER GOBLIN', 'monster').id;
+  const trank = findCard('ÜBERFALLTRANK').id;
+  const mitCouch3 = (o) => { const p = makePlayer(o); p.equipped.special = [couch]; return p; };
+  const a = mitCouch3({ id: 'p1', name: 'A' });
+  const bystander = makePlayer({ id: 'p2', name: 'B', hand: [trank] });
+  const ziel = mitCouch3({ id: 'p3', name: 'C' });
+  const room = makeRoom([a, bystander, ziel]);
+  S.startCombat(room, 'p1', [goblin], { fromHand: false });
+  S.handleAnswerZaubercouch(room, 'p1', true);
+  assert.ok(S.hasClass(a, 'ZAUBERER'), 'Testvoraussetzung: A ist Zauberer');
+  S.handlePlayCombatCard(room, 'p2', trank);
+  S.handleResolveCardTarget(room, 'p2', 'p3');
+  assert.strictEqual(room.combat.actorId, 'p3', 'C kaempft jetzt');
+  assert.ok(!S.hasClass(a, 'ZAUBERER'),
+    'A (nicht mehr im Kampf) verliert die Zauberer-Klasse auch bei Uebergabe durch eine aussenstehende Person');
+  assert.strictEqual(ziel.zaubercouch, 'offen', 'C bekommt die Frage');
+  assert.ok(room.logs.some((l) => /C kämpft jetzt anstelle von A/.test(l.text)),
+    'die Log-Zeile nennt die bisher kaempfende Person, nicht die Kartenspielerin B');
+}
+
+// --- 8. TRANK DER APATHIE (removeHelper): die entfernte Hilfe verliert die
+// Zauberer-Klasse sofort, nicht erst beim naechsten Kampf.
+{
+  const couch = findCard('ZAUBERCOUCH').id;
+  const goblin = findCard('LAHMER GOBLIN', 'monster').id;
+  const a = makePlayer({ id: 'p1', name: 'A' });
+  const h = makePlayer({ id: 'p2', name: 'B' });
+  h.equipped.special = [couch];
+  const room = makeRoom([a, h]);
+  S.startCombat(room, 'p1', [goblin], { fromHand: false });
+  room.combat.helperId = 'p2';
+  h.zaubercouch = 'ja';
+  assert.ok(S.hasClass(h, 'ZAUBERER'), 'Testvoraussetzung: Helfer ist Zauberer');
+  S.applyCombatPotionAction(room, a, { type: 'removeHelper' }, null);
+  assert.strictEqual(room.combat.helperId, null, 'Helfer verlaesst den Kampf');
+  assert.ok(!S.hasClass(h, 'ZAUBERER'), 'entfernte Hilfe verliert die Zauberer-Klasse sofort');
+}
+
+// --- 9. HUHN AUF DEINEM KOPF beim manuellen "Trust"-Werkzeug
+// (handleApplyConsequenceAction, discardCard-Zweig): laeuft nur waehrend
+// einer offenen room.pendingConsequence, zaehlt also wie automatisch
+// aufgeloeste Konsequenzen.
+{
+  const helm = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'head').id;
+  const huhn = findCard('HUHN AUF DEINEM KOPF').id;
+  const p = makePlayer();
+  p.equipped.head = helm;
+  const room = makeRoom([p]);
+  S.addActiveCurse(room, p, 'HUHN AUF DEINEM KOPF', huhn);
+  room.pendingConsequence = { playerId: 'p1', kind: 'curse', cardId: huhn, text: '', autoApplied: null, choice: null };
+  S.handleApplyConsequenceAction(room, 'p1', { type: 'discardCard', cardId: helm });
+  assert.strictEqual(p.equipped.head, null, 'Testvoraussetzung: Kopfbedeckung per Trust-Tool abgelegt');
+  assert.ok(!p.activeCurses.some((f) => f.name === 'HUHN AUF DEINEM KOPF'),
+    'auch beim manuellen Trust-Tool nimmt der Verlust der Kopfbedeckung das Huhn mit');
+}
+
 fertig();
 console.log('card-regelluecken-welle1: alle Checks gruen');
