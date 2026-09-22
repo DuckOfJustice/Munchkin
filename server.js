@@ -450,13 +450,7 @@ function equippedBonusSum(player, room, excludeIds) {
     // Rueckfall auf den Bonus der Spezialplatz-Regel: das EISKALTE HÄNDCHEN
     // ist eine Monsterkarte und nennt in den Rohdaten selbst keinen Bonus.
     const regelBonus = (specialSlotRule(c) || {}).bonus || 0;
-    // GENDER_ONLY_BONUS_ITEMS (SÜSSER SCHULTERDRACHE, STACHELIGER
-    // GENITALSCHONER): ihr gedruckter Bonus gilt NICHT unconditioniert -
-    // er kommt ausschliesslich ueber ITEM_CONDITIONAL_BONUS
-    // (conditionalItemBonusSum), je nach Geschlecht. Sonst bekaeme das
-    // falsche Geschlecht faelschlich den vollen Bonus mit.
-    const grundBonus = (c && GENDER_ONLY_BONUS_ITEMS.has(c.name)) ? 0 : (c && c.bonus ? c.bonus : regelBonus);
-    return sum + grundBonus + attachmentBonusSum(room, id);
+    return sum + (c && c.bonus ? c.bonus : regelBonus) + attachmentBonusSum(room, id);
   }, 0);
 }
 
@@ -507,6 +501,9 @@ function raceItemBonusSum(player, excludeIds) {
   }, 0);
 }
 
+// Mit leerer Monsterliste liefert conditionalItemBonusSum genau die Boni, die
+// nur an der Person haengen (Geschlecht, Rasse: GENITALSCHONER, GEILER HELM) -
+// die gehoeren auch in die dauerhaft angezeigte Staerke.
 function baseStrength(player, room) {
   // VERFLUCHTER GEGENSTAND: "Er verliert seine Kraefte" gilt dauerhaft, nicht
   // nur waehrend combatTotals rechnet - sonst zeigt die staendig sichtbare
@@ -514,14 +511,15 @@ function baseStrength(player, room) {
   // an, obwohl er im eigentlichen Kampf schon korrekt rausfliegt (siehe
   // combatTotals/excludeIds).
   const excludeIds = cursedItemIds(player);
-  return player.level + equippedBonusSum(player, room, excludeIds) + raceItemBonusSum(player, excludeIds) + hellknightArmorBonus(player);
+  return player.level + equippedBonusSum(player, room, excludeIds) + raceItemBonusSum(player, excludeIds) + hellknightArmorBonus(player)
+    + conditionalItemBonusSum(player, [], false, excludeIds);
 }
 
 // ITEM_CONDITIONAL_BONUS: siehe src/cards/passives.js (dort zusammen mit den
 // übrigen Dauerwirkungstabellen geladen, obwohl die Nutzung hier ist).
 // excludeIds (optional): siehe equippedBonusSum.
 function conditionalItemBonusSum(player, monsters, untot, excludeIds) {
-  if (!player || !monsters || !monsters.length) return 0;
+  if (!player || !monsters) return 0;
   // EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
   // Schaden." Verdoppeln heisst: den gedruckten Bonus ein zweites Mal
   // dazuzaehlen. Generisch ueber FIRE_ITEMS, damit neue Feuergegenstaende
@@ -3104,7 +3102,6 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
-  GENDER_ONLY_BONUS_ITEMS,
 } = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
@@ -4308,8 +4305,10 @@ const COMBAT_PLAYABLE_RE = /im\s+Kampf\b|Während\s+(eines\s+)?beliebige[nm]\s+K
 
 function parseCombatPotion(rawText) {
   const t = normalizeCardText(rawText);
-  let m = t.match(/\+(\d+)\s+für\s+beide\s+Seiten/i);
-  if (m) return { side: 'both', amount: parseInt(m[1], 10) };
+  // "+X für eine der beiden Seiten" (Erweiterungen; englisch "to either side" -
+  // die alte Übersetzung "für beide Seiten" war falsch).
+  let m = t.match(/\+(\d+)\s+für\s+eine\s+der\s+beiden\s+Seiten/i);
+  if (m) return { side: 'either', amount: parseInt(m[1], 10) };
   // Alle Schreibweisen des Grundspiels: "+2 egal für welche Seite", "+5 für
   // egal welche Seite", "+5, egal für welche Seite", "+3 für eine der
   // Parteien, egal für welche Seite".
@@ -4687,14 +4686,24 @@ function handleSetCombatModifier(room, playerId, who, value) {
 // eingesetzt werden - kaempfe nur mit deiner Charakterstufe." combatTotals
 // laesst deshalb jeden Munchkin-Bonus fallen (actorModifier eingeschlossen).
 // Eine Karte, die genau das bringen soll, waere also verbraucht, ohne zu
-// wirken - fuer wen sie wirkungslos ist, wird sie hier abgewiesen statt still
-// geschluckt. Wer NICHT mitkaempft, darf weiterhin das Monster verstaerken:
-// diese Seite zaehlt auch gegen die Ghoule.
-function munchkinBonusWirkungslos(room, player, spec) {
-  if (!spec || spec.type !== 'modifier') return false;
-  if (!combatHasMonster(room, MONSTER_IGNORES_BONUSES)) return false;
-  if (!combatParticipants(room).some((p) => p.id === player.id)) return false;
-  return spec.side === 'actor' || spec.side === 'either';
+// wirken und wird hier abgewiesen statt still geschluckt. Die Monster-Seite
+// zaehlt auch gegen die Ghoule: Karten mit Seitenwahl ("egal welche Seite",
+// eigene Wahl) bleiben spielbar, nur ihre Munchkin-Option faellt weg (siehe
+// ohneMunchkinBonus).
+// tripleItemBonus (HALBFINAL-SCHLAG) landet ebenfalls in actorModifier.
+const istNurMunchkinBonus = (action) => !!action
+  && ((action.type === 'modifier' && action.side === 'actor') || action.type === 'tripleItemBonus');
+function munchkinBonusWirkungslos(room, spec) {
+  if (!spec || !combatHasMonster(room, MONSTER_IGNORES_BONUSES)) return false;
+  if (spec.type === 'modifier') return spec.side === 'actor';
+  // Trifft heute HALBFINAL-SCHLAG (nur Gegenstandsoptionen) und schuetzt
+  // zugleich davor, dass ohneMunchkinBonus einen leeren Wahl-Dialog oeffnet.
+  if (spec.type === 'choice') return spec.options.every((o) => istNurMunchkinBonus(o.action));
+  return false;
+}
+function ohneMunchkinBonus(room, options) {
+  if (!combatHasMonster(room, MONSTER_IGNORES_BONUSES)) return options;
+  return options.filter((o) => !istNurMunchkinBonus(o.action));
 }
 
 // Gespielte Kampfkarte als Anzeige-Ereignis: alle am Tisch sollen kurz sehen,
@@ -4857,7 +4866,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
       touchRoom(room);
       return;
     }
-    if (munchkinBonusWirkungslos(room, player, doorSpec)) {
+    if (munchkinBonusWirkungslos(room, doorSpec)) {
       log(room, `"${c.name}" wuerde gegen "${monsterIgnoringBonusesName(room)}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
       touchRoom(room);
       return;
@@ -4896,7 +4905,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     touchRoom(room);
     return;
   }
-  if (munchkinBonusWirkungslos(room, player, spec)) {
+  if (munchkinBonusWirkungslos(room, spec)) {
     log(room, `"${c.name}" wuerde gegen "${monsterIgnoringBonusesName(room)}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
     touchRoom(room);
     return;
@@ -4916,10 +4925,13 @@ function handlePlayCombatCard(room, playerId, cardId) {
   if (spec.type === 'modifier' && spec.side === 'either') {
     // Gegen die GEMEINEN GHOULE faellt die Munchkin-Seite weg - sie waere
     // wirkungslos (siehe munchkinBonusWirkungslos).
-    const seiten = [
-      { id: 'munchkins', label: `+${spec.amount} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount: spec.amount } },
+    // actorAmount: Karten, deren Bonus nur auf der Munchkin-Seite steigt
+    // (SCHARFE PFEFFERSOSSE "+6 zur Hilfe von Halblingen").
+    const fuerMunchkins = spec.actorAmount != null ? spec.actorAmount : spec.amount;
+    const seiten = ohneMunchkinBonus(room, [
+      { id: 'munchkins', label: `+${fuerMunchkins} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount: fuerMunchkins } },
       { id: 'monster', label: `+${spec.amount} für das Monster`, action: { type: 'modifier', side: 'monster', amount: spec.amount } },
-    ].filter((o) => !(o.id === 'munchkins' && combatHasMonster(room, MONSTER_IGNORES_BONUSES)));
+    ]);
     openCardChoice(room, player, c.name, seiten);
     room.pendingCardAction.sourceCardId = cardId;
     log(room, `${player.name} spielt "${c.name}" im Kampf - Seite nötig.`, [cardId]);
@@ -4928,7 +4940,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     return;
   }
   if (spec.type === 'choice') {
-    openCardChoice(room, player, c.name, spec.options);
+    openCardChoice(room, player, c.name, ohneMunchkinBonus(room, spec.options));
     room.pendingCardAction.sourceCardId = cardId;
     log(room, `${player.name} spielt "${c.name}" im Kampf - Wahl nötig.`, [cardId]);
     announceCardPlay(room, player, cardId, 'Wahl steht noch aus');

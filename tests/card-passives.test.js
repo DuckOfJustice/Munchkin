@@ -176,17 +176,76 @@ function run() {
 
   // GEMEINE GHOULE: "Gegen sie duerfen keine Gegenstaende oder andere Boni
   // eingesetzt werden." combatTotals laesst jeden Munchkin-Bonus fallen - eine
-  // Karte dafuer waere also verbraucht, ohne zu wirken. Deshalb wird sie gar
-  // nicht erst angenommen, solange die spielende Person selbst im Kampf steht.
+  // reine Munchkin-Bonuskarte waere also verbraucht, ohne zu wirken, und wird
+  // gar nicht erst angenommen.
   {
+    const elf = findCard('ELF', 'race');
+    const wasser = findCard('YUPPIE-WASSER'); // +2 nur fuer die Munchkins
+    const g = combatRoom('GEMEINE GHOULE', { level: 7, races: [elf.id], hand: [wasser.id] });
+    handlePlayCombatCard(g.room, 'p1', wasser.id);
+    assert.ok(g.room.players[0].hand.includes(wasser.id),
+      'gegen die Ghoule bleibt eine reine Munchkin-Bonuskarte auf der Hand');
+    assert.strictEqual(g.room.pendingCardAction, null);
+    assert.strictEqual(g.room.combat.actorModifier, 0);
+    done(g.room);
+
+    // Genauso fuer Zuschauer:innen - fuer die Munchkins waere die Karte auch
+    // von aussen gespielt wirkungslos.
+    const z = combatRoom('GEMEINE GHOULE', { level: 7, races: [elf.id] });
+    z.room.players[1].hand = [wasser.id];
+    handlePlayCombatCard(z.room, 'p2', wasser.id);
+    assert.ok(z.room.players[1].hand.includes(wasser.id), 'auch von aussen bleibt die Munchkin-Bonuskarte auf der Hand');
+    assert.strictEqual(z.room.pendingCardAction, null);
+    assert.strictEqual(z.room.combat.actorModifier, 0);
+    done(z.room);
+  }
+  {
+    // HALBFINAL-SCHLAG: dreifacher Gegenstandsbonus - zaehlt gegen die Ghoule
+    // nicht, jede Option waere wirkungslos. Die Karte bleibt auf der Hand
+    // (und der Gegenstand wird nicht fuer nichts riskiert).
+    const schlag = findCard('HALBFINAL-SCHLAG');
+    const g = combatRoom('GEMEINE GHOULE', { level: 7, equipped: equipMithril, hand: [schlag.id] });
+    handlePlayCombatCard(g.room, 'p1', schlag.id);
+    assert.ok(g.room.players[0].hand.includes(schlag.id), 'HALBFINAL-SCHLAG bleibt gegen die Ghoule auf der Hand');
+    assert.strictEqual(g.room.pendingCardAction, null);
+    assert.strictEqual(g.room.combat.actorModifier, 0);
+    done(g.room);
+
+    // Gegenprobe: gegen ein normales Monster oeffnet sich die Gegenstandswahl.
+    const n = combatRoom('LAHMER GOBLIN', { level: 7, equipped: equipMithril, hand: [schlag.id] });
+    handlePlayCombatCard(n.room, 'p1', schlag.id);
+    assert.ok(n.room.pendingCardAction, 'normal ist HALBFINAL-SCHLAG spielbar');
+    done(n.room);
+  }
+  {
+    // Eine Karte "egal welche Seite" bleibt dagegen auch fuer die kaempfende
+    // Person spielbar - nur noch fuer die Monster-Seite, die wirkt.
     const trank = findCard('FLAMMENDER GIFTTRANK'); // "+3, egal welche Seite"
     const g = combatRoom('GEMEINE GHOULE', { level: 7, hand: [trank.id] });
     handlePlayCombatCard(g.room, 'p1', trank.id);
-    assert.ok(g.room.players[0].hand.includes(trank.id),
-      'gegen die Ghoule bleibt eine reine Munchkin-Bonuskarte auf der Hand');
-    assert.strictEqual(g.room.pendingCardAction, null, 'und es wird keine Seitenwahl geoeffnet');
-    assert.strictEqual(g.room.combat.actorModifier, 0);
+    assert.ok(g.room.pendingCardAction, 'die kaempfende Person darf das Monster verstaerken');
+    assert.deepStrictEqual(g.room.pendingCardAction.options.map((o) => o.id), ['monster']);
+    handleResolveCardChoice(g.room, 'p1', 'monster');
+    assert.deepStrictEqual([g.room.combat.actorModifier, g.room.combat.monsterModifier], [0, 3]);
     done(g.room);
+  }
+  {
+    // Karten mit eigener Wahl (TRANK DES MUNDGERUCHS; LECKERER KUCHEN fuer
+    // Halblinge): die wirkungslose Munchkin-Option faellt weg, der Rest bleibt.
+    const trank = findCard('TRANK DES MUNDGERUCHS');
+    const g = combatRoom('GEMEINE GHOULE', { level: 7, hand: [trank.id] });
+    handlePlayCombatCard(g.room, 'p1', trank.id);
+    assert.ok(g.room.pendingCardAction, 'TRANK DES MUNDGERUCHS bleibt spielbar');
+    assert.ok(!g.room.pendingCardAction.options.some((o) => o.id === 'munchkins'), 'ohne Munchkin-Option');
+    done(g.room);
+
+    const halbling = findCard('HALBLING', 'race');
+    const kuchen = findCard('LECKERER KUCHEN');
+    const k = combatRoom('GEMEINE GHOULE', { level: 7, races: [halbling.id], hand: [kuchen.id] });
+    handlePlayCombatCard(k.room, 'p1', kuchen.id);
+    assert.deepStrictEqual(k.room.pendingCardAction.options.map((o) => o.id), ['monster', 'essen'],
+      'Halbling gegen Ghoule: fuers Monster werfen oder essen');
+    done(k.room);
   }
   {
     // Wer NICHT mitkaempft, darf das Monster weiterhin verstaerken - das wirkt.
