@@ -34,6 +34,7 @@ const abgedeckt = (c) => HANDGEBAUT.has(c.name)
   || S.LAMP_CARDS.has(c.name)
   || S.GUARANTEED_FLEE_CARDS.has(c.name)
   || S.POST_FLEE_ESCAPE_CARDS.has(c.name)
+  || S.TREASURE_REACTION_CARDS.has(c.name)
   || S.isMonsterEnhancerCard(c)
   || S.isInstantLevelUpCard(c)
   || S.isCombatPotionCard(c)
@@ -50,7 +51,10 @@ console.log('### MONSTER: badstuff ohne Automatik');
 base.filter((c) => c.category === 'monster').forEach((c) => {
   let spec = null;
   try { spec = S.resolveConsequenceSpec(c.name, c.badstuff, p, room); } catch (e) { spec = 'ERR ' + e.message; }
-  if (!spec) console.log(zeile(c));
+  // abgedeckt() zaehlt auch hier: Schlimme Dinge koennen statt eines
+  // Sofort-Effekts einen Fluch-Tracker-Eintrag setzen (GUMMI-GOLEM,
+  // WEIHNACHTSMANN - LINGERING_CURSES).
+  if (!spec && !abgedeckt(c)) console.log(zeile(c));
 });
 
 console.log('\n### FLUCH/DOOR_OTHER_AS_CURSE ohne Automatik');

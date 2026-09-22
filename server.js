@@ -3591,7 +3591,11 @@ function monsterTraitBonusSum(room) {
         // Der Raum kommt als zweites Argument dazu, damit eine Regel den
         // Kampfzustand sehen kann (FEUERLÖSCHER: "+5, wenn dir niemand
         // hilft"). Alle aelteren Regeln ignorieren ihn.
-        || (rule.wennErfuellt ? rule.wennErfuellt(p, room) : false));
+        // nachteilFuer: eine wennErfuellt-Regel, die (auch) an einer Rasse
+        // oder Klasse haengt, bekommt denselben Halb-Blut-/Super-Munchkin-
+        // Schutz wie rule.races/rule.classes (RIESENKAKERLAKE).
+        || (rule.wennErfuellt && !(immun && rule.nachteilFuer && traitImmun(p, rule.nachteilFuer))
+          ? rule.wennErfuellt(p, room) : false));
       return teil + (hit ? rule.bonus : 0);
     }, 0);
   }, 0);
@@ -7240,7 +7244,7 @@ module.exports = {
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
   hatKampfschatzSperre, hatUntotenAngst, cursedItemIds, unequipSlotCard, ownTradeIds,
-  clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence, setzeZugphase,
+  clearNextCombatCurses, COMBAT_REACTION_CARDS, TREASURE_REACTION_CARDS, applyCombatReaction, handleAckConsequence, setzeZugphase,
   zieheSchaetzeFuer, zuckerschockAktiv, besesseneSchaetze, handleResolveConsequenceChoice,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,

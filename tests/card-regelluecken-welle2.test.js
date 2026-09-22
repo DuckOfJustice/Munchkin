@@ -212,5 +212,23 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(room.combat.helperId, 'p2', 'wer im Zuckerschock ist, darf nicht ablehnen');
 }
 
+// --- RIESENKAKERLAKE "+5 gegen Elfen oder Menschen": ein Halb-Blut-Elf hat
+// laut Karte keine Nachteile seiner Rasse - und ist auch kein Mensch.
+{
+  const kakerlake = findCard('RIESENKAKERLAKE', 'monster');
+  const elf = findCard('ELF', 'race').id;
+  const halbBlut = findCard('HALB-BLUT').id;
+  const staerke = (p) => {
+    const room = makeRoom([p]);
+    S.startCombat(room, p.id, [kakerlake.id], { fromHand: false });
+    const wert = S.combatTotals(room).monsterStrength;
+    room.combat = null;
+    return wert;
+  };
+  assert.strictEqual(staerke(makePlayer({ races: [elf] })), kakerlake.level + 5, 'Gegenprobe: echter Elf bekommt +5 ab');
+  assert.strictEqual(staerke(makePlayer({ races: [elf], raceCapCard: halbBlut })), kakerlake.level, 'Halb-Blut-Elf: kein Bonus');
+  assert.strictEqual(staerke(makePlayer({})), kakerlake.level + 5, 'Mensch bekommt weiter +5 ab');
+}
+
 fertig();
 console.log('card-regelluecken-welle2: alle Checks gruen');
