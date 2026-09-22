@@ -121,5 +121,46 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(room.pendingConsequence.playerId, 'p2', 'die spaet dazugekommene Hilfe scheitert');
 }
 
+// --- 2. HALB-BLUT: "eine Rassenkarte ... alle Vorteile aber keine Nachteile"
+{
+  const elf = findCard('ELF', 'race').id;
+  const halbling = findCard('HALBLING', 'race').id;
+  const gnom = ALL_CARDS.find((c) => c.name === 'GNOM').id;
+  const halbBlut = findCard('HALB-BLUT').id;
+  const zunge = findCard('ZUNGENDÄMON', 'monster');
+  const spec = (p, name) => S.resolveConsequenceSpec(name, findCard(name, 'monster').badstuff, p, makeRoom([p]));
+
+  const halbElf = makePlayer({ races: [elf], raceCapCard: halbBlut });
+  assert.strictEqual(spec(halbElf, 'ZUNGENDÄMON').amount, 2, 'Halb-Elf: ZUNGENDÄMON wie Nicht-Elfen');
+  assert.strictEqual(spec(halbElf, 'FUNGUS').amount, 1, 'Halb-Elf: FUNGUS wie Nicht-Elfen');
+  assert.strictEqual(spec(makePlayer({ races: [elf] }), 'ZUNGENDÄMON').amount, 3, 'Gegenprobe: echter Elf 3');
+  // Halb-Blut mit ZWEI Rassen hat laut Karte alle Nachteile.
+  const zweiRassen = makePlayer({ races: [elf, halbling], raceCapCard: halbBlut });
+  assert.strictEqual(spec(zweiRassen, 'ZUNGENDÄMON').amount, 3, 'zwei Rassen: Nachteil bleibt');
+
+  // MONSTER, DAS DER SL ...: Elf +2 Stufen - fuer Halb-Elfen (Frau, damit nur die Rasse zaehlt) nicht.
+  const slName = 'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT';
+  const sl = S.resolveConsequenceSpec(slName, findCard(slName, 'monster').badstuff, makePlayer({ races: [elf], raceCapCard: halbBlut, gender: 'w' }), makeRoom([]));
+  const slStufen = [].concat(sl.type === 'combo' ? sl.actions : [sl]).filter((x) => x.type === 'levelDelta').reduce((s, x) => s + x.amount, 0);
+  assert.strictEqual(slStufen, 0, 'Halb-Elfin: keine Elfen-Stufen beim SL-Monster');
+
+  // BEKIFFTER GOLEM: Halb-Halbling darf vorbeigehen.
+  const golem = findCard('BEKIFFTER GOLEM', 'monster').id;
+  assert.ok(S.monsterPassOption(golem, makePlayer({ races: [halbling], raceCapCard: halbBlut })), 'Halb-Halbling darf vorbeigehen');
+  assert.ok(!S.monsterPassOption(golem, makePlayer({ races: [halbling] })), 'Gegenprobe: Halbling muss kaempfen');
+
+  // KRAKZILLA: "Greift niemanden mit Stufe 4 oder niedriger an, AUSSER Elfen."
+  const krak = findCard('KRAKZILLA', 'monster').id;
+  assert.ok(S.monsterRefusesTarget(krak, makePlayer({ level: 4, races: [elf], raceCapCard: halbBlut })), 'Halb-Elf auf Stufe 4 wird verschont');
+  assert.ok(!S.monsterRefusesTarget(krak, makePlayer({ level: 4, races: [elf] })), 'Gegenprobe: Elf wird angegriffen');
+
+  // SPASSBREMSE: toedlich fuer Gnome - nicht fuer Halb-Gnome.
+  const bremse = findCard('SPASSBREMSE');
+  const halbGnom = makePlayer({ races: [gnom], raceCapCard: halbBlut, hand: [bremse.id] });
+  const room = makeRoom([halbGnom]);
+  S.handleEquipItem(room, 'p1', bremse.id);
+  assert.ok(S.equippedItemIds(halbGnom).includes(bremse.id), 'Halb-Gnom legt die Spassbremse an und lebt');
+}
+
 fertig();
 console.log('card-regelluecken-welle1: alle Checks gruen');

@@ -3,7 +3,7 @@
 // sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6 gegen Elfen").
 module.exports = (ctx) => {
   const {
-    hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
+    hasRace, hatRasseMitNachteil, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
   } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
@@ -21,7 +21,7 @@ module.exports = (ctx) => {
     'PLUTONIUMDRACHE': (p) => p.level <= 5,
     'BULLROG': (p) => p.level <= 4,
     // "Greift niemanden mit Stufe 4 oder niedriger an, AUSSER Elfen."
-    'KRAKZILLA': (p) => p.level <= 4 && !hasRace(p, 'ELF'),
+    'KRAKZILLA': (p) => p.level <= 4 && !hatRasseMitNachteil(p, 'ELF'),
     'HIPPOGREIF': (p) => p.level <= 3,
     'KÖNIG TUT': (p) => p.level <= 3,
     'GRUFTIGE GEBRÜDER': (p) => p.level <= 3,

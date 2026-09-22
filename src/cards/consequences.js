@@ -6,7 +6,7 @@
 // durchzureichen.
 module.exports = (ctx) => {
   const {
-    card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
+    card, hasRace, hatRasseMitNachteil, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
     equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
     getrageneSlotKarte, specialSlotRule, gegenstandHatSonderkraft, cursedItemIds,
   } = ctx;
@@ -82,11 +82,11 @@ module.exports = (ctx) => {
     'UNGLAUBLICHER UNAUSSPRECHLICHER SCHRECKEN': () => ({ type: 'discardClassCardMatchingElseDeath', substr: 'ZAUBERER' }),
 
     // --- Rassen-bedingte Stufenzahl ---
-    'ZUNGENDÄMON': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 3 : 2 }),
+    'ZUNGENDÄMON': (player) => ({ type: 'levelDelta', amount: hatRasseMitNachteil(player, 'ELF') ? 3 : 2 }),
     // ponytail: "Verdoppelt die Strafe, wenn der Fungus Gigantisch ist" fehlt -
     // die Konsequenz weiss nicht, welche Verstaerker im Kampf lagen. Aufruestweg:
     // den Verstaerker-Zustand in die Konsequenz durchreichen.
-    'FUNGUS': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 2 : 1 }),
+    'FUNGUS': (player) => ({ type: 'levelDelta', amount: hatRasseMitNachteil(player, 'ELF') ? 2 : 1 }),
 
     // --- Bedingt auf aktuellen Ausrüstungszustand (zum Zeitpunkt der Konsequenz bekannt) ---
     // getrageneSlotKarte statt player.equipped[slot]: ein geschummelter
@@ -271,7 +271,7 @@ module.exports = (ctx) => {
     // Diejenigen, die nicht unter die Kriterien oben fallen, muessen zwei
     // Karten ablegen."
     'MONSTER, DAS DER SL SICH SELBST AUSGEDACHT HAT': (player) => {
-      const stufen = (hasRace(player, 'ELF') ? 2 : 0) + (hasRace(player, 'HALBLING') ? 1 : 0)
+      const stufen = (hatRasseMitNachteil(player, 'ELF') ? 2 : 0) + (hatRasseMitNachteil(player, 'HALBLING') ? 1 : 0)
         + (istGeschlecht(player, 'm') ? 1 : 0);
       // "nicht unter die Kriterien oben" = weder Halbling noch Elf noch Mann.
       const karten = stufen === 0 ? 2 : (istGeschlecht(player, 'm') ? 1 : 0);

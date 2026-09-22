@@ -2318,7 +2318,7 @@ function applyPrimitiveAction(room, player, action) {
 // Konsequenz passiert, nicht beim Laden dieses Moduls).
 const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
-  card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
+  card, hasRace, hatRasseMitNachteil, hasPowerGroup, isMonsterEnhancerCard,
   resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
   istGrosserGegenstand, getrageneSlotKarte,
   specialSlotRule,
@@ -3105,7 +3105,7 @@ const {
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
   GENDER_ONLY_BONUS_ITEMS,
-} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
+} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds, hatRasseMitNachteil });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
 // Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
@@ -3389,7 +3389,7 @@ function monsterPassOption(cardId, player) {
   const c = card(cardId);
   const rule = c && MONSTER_PASS_OPTION[c.name];
   if (!rule) return null;
-  if ((rule.forcedFightRaces || []).some((r) => hasRace(player, r))) return null;
+  if ((rule.forcedFightRaces || []).some((r) => hatRasseMitNachteil(player, r))) return null;
   // nurRassen: BOBBELKOPF duerfen nur Elfen einfach abwerfen.
   if (rule.nurRassen && !rule.nurRassen.some((r) => hasRace(player, r))) return null;
   return rule;
@@ -3418,16 +3418,22 @@ function combatStartOptionRule(cardId, player) {
 // Nachteile", Cap-Karte plus zwei Merkmale heisst "normal, mit allem".
 // Rassen und Klassen sind getrennt: SUPER MUNCHKIN schuetzt nicht vor einem
 // Rassen-Malus.
-// ponytail: gilt nur fuer MONSTER_TRAIT_BONUS, den einzigen Nachteil, den
-// die Design-Spec (Abschnitt 4) dieser Karte zuordnet. Rassenabhaengige
-// "Schlimme Dinge" (ZUNGENDAEMON/FUNGUS treffen Elfen haerter,
-// src/cards/consequences.js) und BEKIFFTER GOLEMs forcedFightRaces sind
-// ebenfalls Nachteile und bleiben vorerst bestehen - Aufruestweg: dieselbe
-// traitImmun-Abfrage an jenen drei Stellen.
+// Rassenabhaengige Nachteile ausserhalb von MONSTER_TRAIT_BONUS (Schlimme
+// Dinge wie ZUNGENDAEMON/FUNGUS, BEKIFFTER GOLEMs forcedFightRaces,
+// KRAKZILLAs Ausnahme, SPASSBREMSE) fragen hatRasseMitNachteil statt hasRace
+// - siehe dort.
 function traitImmun(player, welches) {
   if (welches === 'classes') return !!player.classCapCard && player.classes.length === 1;
   if (welches === 'races') return !!player.raceCapCard && player.races.length === 1;
   return false;
+}
+
+// HALB-BLUT, zweite Kartenhaelfte: "eine Rassenkarte ... alle Vorteile aber
+// keine Nachteile". Fuer jede Stelle, an der eine Rasse ein NACHTEIL ist
+// (Schlimme Dinge, Kampfzwang, toedliche Gegenstaende) statt hasRace.
+// Vorteile (Elf +1 auf Weglaufen, ...) fragen weiter hasRace.
+function hatRasseMitNachteil(player, rasse) {
+  return hasRace(player, rasse) && !traitImmun(player, 'races');
 }
 
 // Welche Rasse ein Monster in dieser Person SIEHT - siehe MONSTER_SEES_AS_RACE
@@ -5937,7 +5943,7 @@ function handleEquipItem(room, playerId, cardId) {
   // SPASSBREMSE: "In den falschen Haenden - und zwar den Haenden eines Gnoms -
   // ist es toedlich." Wer die Karte trotzdem anlegt, stirbt.
   const toedlichFuer = DEADLY_ITEMS_BY_RACE[c.name];
-  if (toedlichFuer && hasRace(player, toedlichFuer)) {
+  if (toedlichFuer && hatRasseMitNachteil(player, toedlichFuer)) {
     removeFromHand(player, cardId);
     discardCard(room, cardId);
     log(room, `${player.name} legt "${c.name}" an - in den Haenden eines ${toedlichFuer}s ist das toedlich.`, [cardId]);
