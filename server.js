@@ -5795,10 +5795,7 @@ function handleFleeEscape(room, playerId, cardId) {
 // "Nur in deiner Runde spielbar. Sie beschwoert einen Geist, der ein Monster
 // verschwinden laesst, selbst wenn dein Weglaufenwurf verpatzt wurde und es
 // dich fangen wuerde. War es das einzige Monster, erhaeltst du seinen Schatz,
-// aber keine Stufe." - ponytail: kein eigenes Fenster, sie haengt am
-// bestehenden Fluchtentscheidungsfenster (c.fleeRerollOffer), das genau
-// diesen Moment beschreibt. Aufruestweg fuer "jederzeit spielbar": ein
-// eigenes Kampf-weites Fenster wie bei den Reaktionskarten oben.
+// aber keine Stufe." - Spielbar im eigenen Kampf ueber handlePlayCombatCard und zusaetzlich im Fluchtentscheidungsfenster (c.fleeRerollOffer) nach einem verpatzten Wurf.
 const LAMP_CARDS = new Set(['MAGISCHE LAMPE']);
 
 function lampCardIds(actor) {

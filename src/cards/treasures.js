@@ -137,10 +137,7 @@ module.exports = (ctx) => {
     // "Zu einem beliebigen Zeitpunkt waehrend des Kampfes spielen. Durchsuche
     // den Schatzabwurfstapel ... und tausche diese Karte gegen den ersten
     // tragbaren Gegenstand, den du findest."
-    // ponytail: die Kartenwahl (openCardCardChoice) zeigt beide Ablagestapel
-    // und filtert nicht auf "tragbar" - wer die Regel streng nimmt, nimmt den
-    // obersten Gegenstand des Schatzstapels. Ein eigener gefilterter Waehler
-    // waere der Aufruestweg.
+    // Genommen wird automatisch der oberste tragbare Gegenstand des Schatz-Ablagestapels (takeFirstWearableFromTreasureDiscard), wie die Karte es sagt.
     'EINHEITSGRÖSSE': (player, room) => (room.combat ? { type: 'takeFirstWearableFromTreasureDiscard' } : null),
     // "Du kannst ihn auch als Wunschring einsetzen (z.B. um einen Fluch zu
     // beenden) und hinterher abwerfen." Die Flucht-Seite der Karte laeuft

@@ -406,10 +406,7 @@ module.exports = (ctx) => {
     // Die Karte sagt die Addition ausdruecklich - deshalb zwei Regeln.
     'JABBERWOCK': [{ races: ['ZWERG'], bonus: 3 }, { classes: ['ZAUBERER'], bonus: 3 }],
     'WEIHNACHTSMANN': { races: ['ELF'], bonus: -5 },                               // "-5 gegen Elfen. Der Narr vertraut den Elfen."
-    // ponytail: nur der Kampfbonus oben ist verdrahtet. Die Schlimmen Dinge
-    // ("kein Schatz, bis du ein Monster allein toetest") sind bewusst
-    // manuell - siehe Kommentar bei CONSEQUENCE_OVERRIDES in
-    // src/cards/consequences.js (Design-Spec §6, Welle 3).
+    // Die Schlimmen Dinge (Stoererliste) stehen in CONSEQUENCE_OVERRIDES ('lingeringCurse', kind 'noTreasure').
   };
 
   // --- Monster, die die Kampfrechnung selbst verändern ---------------------
