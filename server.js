@@ -450,13 +450,7 @@ function equippedBonusSum(player, room, excludeIds) {
     // Rueckfall auf den Bonus der Spezialplatz-Regel: das EISKALTE HÄNDCHEN
     // ist eine Monsterkarte und nennt in den Rohdaten selbst keinen Bonus.
     const regelBonus = (specialSlotRule(c) || {}).bonus || 0;
-    // GENDER_ONLY_BONUS_ITEMS (SÜSSER SCHULTERDRACHE, STACHELIGER
-    // GENITALSCHONER): ihr gedruckter Bonus gilt NICHT unconditioniert -
-    // er kommt ausschliesslich ueber ITEM_CONDITIONAL_BONUS
-    // (conditionalItemBonusSum), je nach Geschlecht. Sonst bekaeme das
-    // falsche Geschlecht faelschlich den vollen Bonus mit.
-    const grundBonus = (c && GENDER_ONLY_BONUS_ITEMS.has(c.name)) ? 0 : (c && c.bonus ? c.bonus : regelBonus);
-    return sum + grundBonus + attachmentBonusSum(room, id);
+    return sum + (c && c.bonus ? c.bonus : regelBonus) + attachmentBonusSum(room, id);
   }, 0);
 }
 
@@ -507,6 +501,9 @@ function raceItemBonusSum(player, excludeIds) {
   }, 0);
 }
 
+// Mit leerer Monsterliste liefert conditionalItemBonusSum genau die Boni, die
+// nur an der Person haengen (Geschlecht, Rasse: GENITALSCHONER, GEILER HELM) -
+// die gehoeren auch in die dauerhaft angezeigte Staerke.
 function baseStrength(player, room) {
   // VERFLUCHTER GEGENSTAND: "Er verliert seine Kraefte" gilt dauerhaft, nicht
   // nur waehrend combatTotals rechnet - sonst zeigt die staendig sichtbare
@@ -514,14 +511,15 @@ function baseStrength(player, room) {
   // an, obwohl er im eigentlichen Kampf schon korrekt rausfliegt (siehe
   // combatTotals/excludeIds).
   const excludeIds = cursedItemIds(player);
-  return player.level + equippedBonusSum(player, room, excludeIds) + raceItemBonusSum(player, excludeIds) + hellknightArmorBonus(player);
+  return player.level + equippedBonusSum(player, room, excludeIds) + raceItemBonusSum(player, excludeIds) + hellknightArmorBonus(player)
+    + conditionalItemBonusSum(player, [], false, excludeIds);
 }
 
 // ITEM_CONDITIONAL_BONUS: siehe src/cards/passives.js (dort zusammen mit den
 // übrigen Dauerwirkungstabellen geladen, obwohl die Nutzung hier ist).
 // excludeIds (optional): siehe equippedBonusSum.
 function conditionalItemBonusSum(player, monsters, untot, excludeIds) {
-  if (!player || !monsters || !monsters.length) return 0;
+  if (!player || !monsters) return 0;
   // EISRIESE: "Jeder Feuer- oder Flammengegenstand verursacht doppelten
   // Schaden." Verdoppeln heisst: den gedruckten Bonus ein zweites Mal
   // dazuzaehlen. Generisch ueber FIRE_ITEMS, damit neue Feuergegenstaende
@@ -3104,7 +3102,6 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
-  GENDER_ONLY_BONUS_ITEMS,
 } = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.

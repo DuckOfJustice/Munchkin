@@ -756,8 +756,8 @@ function makeRoom(players) {
   assert.strictEqual(t1.playerStrength, 7, 'Schulterdrache gibt Männern den Grundbonus +2');
   room.combat = null;
 }
-// STACHELIGER GENITALSCHONER: anders als Schulterdrache KEIN Grundbonus fuer
-// alle - der gedruckte Wert (2) ist der gesamte Bonus, nur fuer Maenner.
+// STACHELIGER GENITALSCHONER: gleiche Bauform wie der Schulterdrache -
+// Grundbonus +2 fuer alle, Maenner +2 obendrauf (vom Nutzer festgelegt).
 {
   const p1 = makePlayer({ id: 'p1', name: 'Mann', gender: 'm' });
   const room = makeRoom([p1]);
@@ -767,8 +767,8 @@ function makeRoom(players) {
   const monster = findCard('LAHMER GOBLIN');
   startCombat(room, p1.id, [monster.id], { fromHand: false });
   const t = combatTotals(room);
-  // Mann: Stufe 5 + Männer-Bonus 2 = 7 (kein zusaetzlicher Grundbonus)
-  assert.strictEqual(t.playerStrength, 7, 'Genitalschoner gibt Männern +2');
+  // Mann: Stufe 5 + Grundbonus 2 + Männer-Bonus 2 = 9
+  assert.strictEqual(t.playerStrength, 9, 'Genitalschoner gibt Männern +4');
   room.combat = null;
 }
 {
@@ -780,9 +780,21 @@ function makeRoom(players) {
   const monster = findCard('LAHMER GOBLIN');
   startCombat(room, p1.id, [monster.id], { fromHand: false });
   const t = combatTotals(room);
-  // Frau: Stufe 5 + 0 = 5 - kein Bonus fuer das falsche Geschlecht.
-  assert.strictEqual(t.playerStrength, 5, 'Genitalschoner gibt Frauen keinen Bonus');
+  // Frau: Stufe 5 + Grundbonus 2 = 7.
+  assert.strictEqual(t.playerStrength, 7, 'Genitalschoner gibt Frauen den Grundbonus +2');
   room.combat = null;
+}
+// Der Geschlechtsbonus haengt nur an der Person, nicht am Monster - er gehoert
+// deshalb auch in die dauerhaft angezeigte Staerke (⚔), nicht erst in den Kampf.
+{
+  const genital = findCard('STACHELIGER GENITALSCHONER');
+  const mann = makePlayer({ id: 'p1', name: 'Mann', gender: 'm' });
+  const room = makeRoom([mann]);
+  mann.hand.push(genital.id);
+  handleEquipItem(room, mann.id, genital.id);
+  assert.strictEqual(baseStrength(mann, room), 5 + 4, 'Mann: +4 auch ausserhalb des Kampfs');
+  mann.gender = 'w';
+  assert.strictEqual(baseStrength(mann, room), 5 + 2, 'Frau: nur der Grundbonus +2');
 }
 
 // PSYCHO-EICHHÖRNCHEN: greift Träger des Genitalschoners nicht an
