@@ -21,7 +21,9 @@ Fluchtphase würfelt die helfende Person normal und kann entkommen
 
 **Soll:** `haseAnwenden` merkt sich bei einer 6 am Kampf, dass die helfende
 Person gefangen ist. Ist sie in der Fluchtreihe dran, scheitert ihre Flucht
-automatisch ohne Wurf (Logzeile „kann nicht mehr entkommen“) und sie bekommt
+automatisch, unabhängig vom Wurf – derselbe Weg wie bei Monstern, vor denen
+es kein Entkommen gibt (`FLEE_IMPOSSIBLE`), mit der Logzeile „kann nicht mehr
+entkommen“ – und sie bekommt
 wie jede gescheiterte Person die Schlimmen Dinge. Die kämpfende Person
 würfelt normal. Kam erst nach dem Wurf eine helfende Person dazu, gilt die
 Sperre ebenfalls (die Karte spricht von „dem Helfer“ dieses Kampfs).
