@@ -5197,6 +5197,10 @@ function haseAnwenden(room, c, hase, wurf) {
   if (wurf !== 6) { log(room, `Der ganz normale Hase: Wuerfelwurf ${wurf} - er bleibt ganz normal.`); return; }
   c.levelOverrides = c.levelOverrides || {};
   c.levelOverrides[hase] = 15;
+  // "... und der Helfer kann nicht mehr entkommen" - gilt fuer die helfende
+  // Person dieses Kampfs, auch wenn sie erst nach dem Wurf dazukommt
+  // (siehe handleAttemptFlee).
+  c.helferGefangen = true;
   log(room, 'Der ganz normale Hase: Würfelwurf 6 - es ist "Der Hase Aus Dem Film" auf Stufe 15!', [hase]);
   refreshCombatReady(room);
 }
@@ -5510,11 +5514,13 @@ function handleAttemptFlee(room, playerId, modifier) {
   // weiter wie zuvor (siehe rollWithWindow).
   rollWithWindow(room, actor, 'flee', function mitWurf(roll) {
     const total = roll + mod;
-    const impossible = combatHasMonster(room, FLEE_IMPOSSIBLE);
+    const helferGefangen = !!c.helferGefangen && actor.id === c.helperId;
+    const impossible = helferGefangen || combatHasMonster(room, FLEE_IMPOSSIBLE);
     const automatic = fleeIsAutomatic(room, actor);
     const success = impossible ? false : (automatic ? true : total >= 5);
     let note = parts.length ? parts.map((x) => `${x.label} ${x.amount >= 0 ? '+' : ''}${x.amount}`).join(', ') : '';
-    if (impossible) note = 'Vor diesem Monster gibt es kein Entkommen.';
+    if (helferGefangen) note = 'Der Hase aus dem Film: der Helfer kann nicht mehr entkommen.';
+    else if (impossible) note = 'Vor diesem Monster gibt es kein Entkommen.';
     else if (automatic) note = 'Automatische Flucht.';
     log(room, `${actor.name} würfelt ${roll} (${mod >= 0 ? '+' : ''}${mod} = ${total}) zum Weglaufen: ${success ? 'geschafft!' : 'gescheitert!'}${note ? ` [${note}]` : ''}`);
     // Eigenes seq-Feld fuer die Wuerfel-Animation: room.combat wird gleich auf
