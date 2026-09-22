@@ -187,5 +187,29 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   }))], [waffe.id], 'waffenIds ohne Schild');
 }
 
+// --- 4. HUHN AUF DEINEM KOPF: "Jeder Fluch oder alle Schlimmen Dinge, die
+// deine Kopfbedeckung entfernen, nehmen das Huhn mit."
+{
+  const helm = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'head').id;
+  const huhn = findCard('HUHN AUF DEINEM KOPF').id;
+  const bigfoot = findCard('BIGFOOT', 'monster'); // Schlimme Dinge: Kopfbedeckung verlieren
+  const p = makePlayer();
+  p.equipped.head = helm;
+  const room = makeRoom([p]);
+  S.addActiveCurse(room, p, 'HUHN AUF DEINEM KOPF', huhn);
+  room.pendingConsequence = { playerId: 'p1', kind: 'loss', cardId: null, text: '', autoApplied: null, choice: null };
+  S.autoApplyLossConsequence(room, p, [{ name: bigfoot.name, text: bigfoot.badstuff }]);
+  assert.strictEqual(p.equipped.head, null, 'Testvoraussetzung: Kopfbedeckung ist weg');
+  assert.ok(!p.activeCurses.some((f) => f.name === 'HUHN AUF DEINEM KOPF'), 'das Huhn ist mit weg');
+
+  // Gegenprobe: freiwilliges Ablegen nimmt das Huhn nicht mit.
+  const q = makePlayer();
+  q.equipped.head = helm;
+  const room2 = makeRoom([q]);
+  S.addActiveCurse(room2, q, 'HUHN AUF DEINEM KOPF', huhn);
+  S.handleUnequipItem(room2, 'p1', helm);
+  assert.ok(q.activeCurses.some((f) => f.name === 'HUHN AUF DEINEM KOPF'), 'selbst abgelegt: Huhn bleibt');
+}
+
 fertig();
 console.log('card-regelluecken-welle1: alle Checks gruen');

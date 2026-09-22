@@ -2376,9 +2376,22 @@ function resolveConsequenceSpec(name, text, player, room) {
 // {name, text}. Bietet eine Karte eine echte Wahl an UND ist sie die
 // einzige Quelle, wird stattdessen `pendingConsequence.choice` gesetzt und
 // auf die Antwort der Spielerin gewartet (siehe handleResolveConsequenceChoice).
+// HUHN AUF DEINEM KOPF: "Jeder Fluch oder alle Schlimmen Dinge, die deine
+// Kopfbedeckung entfernen, nehmen das Huhn mit." Geprueft an den zwei
+// Stellen, ueber die JEDER Fluch und jedes Miese Zeug laeuft - so zaehlt
+// jede Karte, die den Kopf-Slot leert, auch kuenftige. Freiwilliges Ablegen
+// laeuft hier nicht durch und nimmt das Huhn deshalb nicht mit.
+function huhnMitKopfbedeckung(room, player, hatteKopf) {
+  if (!hatteKopf || getrageneSlotKarte(player, 'head')) return;
+  const vorher = (player.activeCurses || []).length;
+  player.activeCurses = (player.activeCurses || []).filter((f) => f.name !== 'HUHN AUF DEINEM KOPF');
+  if (player.activeCurses.length < vorher) log(room, `Mit der Kopfbedeckung ist auch das Huhn von ${player.name} weg.`);
+}
+
 function autoApplyLossConsequence(room, player, sources) {
   const pc = room.pendingConsequence;
   if (!pc) return;
+  const hatteKopf = !!getrageneSlotKarte(player, 'head');
   if (sources.length === 1) {
     const spec = resolveConsequenceSpec(sources[0].name, sources[0].text, player, room);
     if (spec && spec.type === 'choice') {
@@ -2402,6 +2415,7 @@ function autoApplyLossConsequence(room, player, sources) {
     pc.autoApplied = parts.join('; ');
     log(room, `${player.name}: Automatisch berechnet - ${pc.autoApplied}.`);
   }
+  huhnMitKopfbedeckung(room, player, hatteKopf);
 }
 
 function handleResolveConsequenceChoice(room, playerId, optionId) {
@@ -2411,8 +2425,10 @@ function handleResolveConsequenceChoice(room, playerId, optionId) {
   if (!stored || !stored[optionId]) return;
   const player = findPlayer(room, playerId);
   if (!player) return;
+  const hatteKopf = !!getrageneSlotKarte(player, 'head');
   const option = pc.choice.options.find((o) => o.id === optionId);
   const desc = applyPrimitiveAction(room, player, stored[optionId]);
+  huhnMitKopfbedeckung(room, player, hatteKopf);
   pc.autoApplied = `${pc.choice.sourceName}: ${option ? option.label : optionId} -> ${desc}`;
   log(room, `${player.name}: ${pc.autoApplied}`);
   pc.choice = null;
