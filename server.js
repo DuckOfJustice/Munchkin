@@ -2726,6 +2726,12 @@ function applyTargetAction(room, actor, target, action) {
       const c = room.combat;
       if (!c) return 'kein Kampf im Gange';
       c.originalActorId = c.originalActorId || c.actorId;
+      // ZAUBERCOUCH: eine Uebergabe zaehlt als neue kaempfende Person - die
+      // alte Antwort (kaempfende Person UND abgeloeste Hilfe) verfaellt,
+      // die neue kaempfende Person bekommt die Frage (Ruling der Kontrolle).
+      const vorherigeHilfe = findPlayer(room, c.helperId);
+      delete actor.zaubercouch;
+      if (vorherigeHilfe) delete vorherigeHilfe.zaubercouch;
       c.actorId = target.id;
       c.helperId = null;
       c.helperPending = null;
@@ -2733,6 +2739,7 @@ function applyTargetAction(room, actor, target, action) {
       // neue kaempfende Person ueber.
       c.helperReward = 0;
       c.ready = {};
+      zaubercouchFragen(target);
       refreshCombatReady(room);
       return `${target.name} kämpft jetzt anstelle von ${actor.name}`;
     }
@@ -4571,6 +4578,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.helperId = player.id;
       c.helperPending = null;
       c.helperReward = 0; // "Du kannst keine Belohnung einfordern."
+      zaubercouchFragen(player);
 
       refreshCombatReady(room);
       return `${player.name} draengt sich als Helfer in den Kampf (ohne Belohnung)`;

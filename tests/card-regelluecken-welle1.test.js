@@ -267,5 +267,46 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(bot.zaubercouch, 'nein', 'Bots blockieren nicht');
 }
 
+// --- 5b. ZAUBERCOUCH bei NIMM MICH! NIMM MICH!: erzwungene Hilfe zaehlt
+// als Einstieg als Helfer:in - die Frage kommt genauso wie bei handleRespondHelp.
+{
+  const couch = findCard('ZAUBERCOUCH').id;
+  const goblin = findCard('LAHMER GOBLIN', 'monster').id;
+  const a = makePlayer({ id: 'p1', name: 'A' });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  b.equipped.special = [couch];
+  const room = makeRoom([a, b]);
+  S.startCombat(room, 'p1', [goblin], { fromHand: false });
+  const spec = S.COMBAT_POTION_OVERRIDES['NIMM MICH! NIMM MICH!'];
+  S.applyCombatPotionAction(room, b, spec(b, room), findCard('NIMM MICH! NIMM MICH!'));
+  assert.strictEqual(room.combat.helperId, 'p2', 'B haengt sich als Helfer an');
+  assert.strictEqual(b.zaubercouch, 'offen', 'NIMM MICH!: Frage beim erzwungenen Einstieg als Helfer');
+}
+
+// --- 5c. ZAUBERCOUCH bei ÜBERFALLTRANK: die Uebergabe zaehlt als neue
+// kaempfende Person - alte Antworten (kaempfende Person UND abgeloeste
+// Hilfe) verfallen, die neue kaempfende Person bekommt die Frage.
+{
+  const couch = findCard('ZAUBERCOUCH').id;
+  const goblin = findCard('LAHMER GOBLIN', 'monster').id;
+  const trank = findCard('ÜBERFALLTRANK').id;
+  const mitCouch2 = (o) => { const p = makePlayer(o); p.equipped.special = [couch]; return p; };
+  const a = mitCouch2({ id: 'p1', name: 'A', hand: [trank] });
+  const helfer = mitCouch2({ id: 'p2', name: 'B' });
+  const ziel = mitCouch2({ id: 'p3', name: 'C' });
+  const room = makeRoom([a, helfer, ziel]);
+  S.startCombat(room, 'p1', [goblin], { fromHand: false });
+  S.handleAnswerZaubercouch(room, 'p1', true);
+  room.combat.helperId = 'p2';
+  helfer.zaubercouch = 'ja';
+  assert.ok(S.hasClass(a, 'ZAUBERER') && S.hasClass(helfer, 'ZAUBERER'), 'Testvoraussetzung');
+  S.handlePlayCombatCard(room, 'p1', trank);
+  S.handleResolveCardTarget(room, 'p1', 'p3');
+  assert.strictEqual(room.combat.actorId, 'p3', 'C kaempft jetzt');
+  assert.ok(!S.hasClass(a, 'ZAUBERER'), 'die alte kaempfende Person verliert die Zauberer-Klasse');
+  assert.ok(!S.hasClass(helfer, 'ZAUBERER'), 'die abgeloeste Helferin verliert sie ebenfalls');
+  assert.strictEqual(ziel.zaubercouch, 'offen', 'die neue kaempfende Person bekommt die Frage');
+}
+
 fertig();
 console.log('card-regelluecken-welle1: alle Checks gruen');
