@@ -204,6 +204,16 @@ module.exports = (ctx) => {
     // keinen Spielzeitpunkt ("im Kampf"), deshalb greift COMBAT_PLAYABLE_RE
     // nicht und die Karte braucht diesen kuratierten Eintrag.
     'MONSTERFUTTER': () => ({ type: 'modifier', side: 'either', amount: 5 }),
+    // "Hebe einen Zwerg hoch, der sich nicht im Kampf befindet. Wirf ihn in
+    // die Schlacht. +6 fuer eine der beiden Seiten. Dich selbst kannst du
+    // nicht werfen." Ohne werfbaren Zwerg nicht einsetzbar.
+    // ponytail: welcher Zwerg fliegt, wird nicht abgefragt - der Wurf hat fuer
+    // ihn keine Folgen, die Wahl aendert also nichts.
+    'ZWERGENWURF': (player, room) => {
+      const imKampf = combatParticipants(room).map((p) => p.id);
+      const werfbar = room.players.some((p) => p.id !== player.id && !imKampf.includes(p.id) && hasRace(p, 'ZWERG'));
+      return werfbar ? { type: 'modifier', side: 'either', amount: 6 } : null;
+    },
     // "Waehrend beliebigem Kampf spielen. +2 fuer eine der beiden Seiten oder
     // +4 wenn von einem Ork geworfen. Aber ein Halbling kann ihn ESSEN und eine
     // Stufe aufsteigen!" parseCombatPotion findet nur die +2 - der Ork-Zusatz
