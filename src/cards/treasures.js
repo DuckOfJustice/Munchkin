@@ -200,31 +200,35 @@ module.exports = (ctx) => {
     },
 
     // --- Clerical Errors ---------------------------------------------------
-    // "+5 fuer beide Seiten. Nur einmal einsetzbar." Der Text nennt keinen
-    // Spielzeitpunkt ("im Kampf"), deshalb greift COMBAT_PLAYABLE_RE nicht
-    // und die Karte braucht diesen kuratierten Eintrag.
-    'MONSTERFUTTER': () => ({ type: 'modifier', side: 'both', amount: 5 }),
-    // "Waehrend beliebigem Kampf spielen. +2 fuer beide Seiten oder +4 wenn
-    // von einem Ork geworfen. Aber ein Halbling kann ihn ESSEN und eine Stufe
-    // aufsteigen!" parseCombatPotion findet nur die +2 - der Ork-Zusatz und
-    // die Halbling-Wahl brauchen diesen Eintrag.
+    // "+5 fuer eine der beiden Seiten. Nur einmal einsetzbar." Der Text nennt
+    // keinen Spielzeitpunkt ("im Kampf"), deshalb greift COMBAT_PLAYABLE_RE
+    // nicht und die Karte braucht diesen kuratierten Eintrag.
+    'MONSTERFUTTER': () => ({ type: 'modifier', side: 'either', amount: 5 }),
+    // "Waehrend beliebigem Kampf spielen. +2 fuer eine der beiden Seiten oder
+    // +4 wenn von einem Ork geworfen. Aber ein Halbling kann ihn ESSEN und eine
+    // Stufe aufsteigen!" parseCombatPotion findet nur die +2 - der Ork-Zusatz
+    // und die Halbling-Wahl brauchen diesen Eintrag.
     'LECKERER KUCHEN': (player) => {
-      const werfen = { type: 'modifier', side: 'both', amount: hasRace(player, 'ORK') ? 4 : 2 };
-      if (!hasRace(player, 'HALBLING')) return werfen;
+      const amount = hasRace(player, 'ORK') ? 4 : 2;
+      if (!hasRace(player, 'HALBLING')) return { type: 'modifier', side: 'either', amount };
+      // Werfen braucht hier die Seite gleich mit - die Seitenwahl in
+      // handlePlayCombatCard greift nur fuer ein nacktes 'either'.
       return {
         type: 'choice',
         options: [
-          { id: 'werfen', label: `Kuchen werfen (+${werfen.amount} fuer beide Seiten)`, action: werfen },
+          { id: 'munchkins', label: `Kuchen werfen: +${amount} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount } },
+          { id: 'monster', label: `Kuchen werfen: +${amount} für das Monster`, action: { type: 'modifier', side: 'monster', amount } },
           { id: 'essen', label: 'Kuchen essen -> 1 Stufe aufsteigen', action: { type: 'levelUp', amount: 1 } },
         ],
       };
     },
-    // "Dieses feurige Gebraeu gewaehrt beiden Seiten +3, oder +6, wenn es zur
-    // Hilfe von Halblingen eingesetzt wird." Die Zahl steht hinter der Seite,
-    // parseCombatPotion findet sie deshalb nicht.
+    // "Dieses feurige Gebraeu gewaehrt +3 fuer eine der beiden Seiten, oder +6,
+    // wenn es zur Hilfe von Halblingen eingesetzt wird." Die +6 gibt es nur
+    // auf der Munchkin-Seite; die Zahl steht hinter der Seite, parseCombatPotion
+    // findet sie deshalb nicht.
     'SCHARFE PFEFFERSOSSE': (player, room) => ({
-      type: 'modifier', side: 'both',
-      amount: combatParticipants(room).some((p) => hasRace(p, 'HALBLING')) ? 6 : 3,
+      type: 'modifier', side: 'either', amount: 3,
+      actorAmount: combatParticipants(room).some((p) => hasRace(p, 'HALBLING')) ? 6 : 3,
     }),
     // "Du hast die Goetter erfreut und sie zeigen dir ihre Anerkennung, indem
     // sie alle Monster auf unschoene Weise toeten. Die Goetter nehmen sich

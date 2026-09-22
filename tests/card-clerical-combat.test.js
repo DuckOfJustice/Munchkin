@@ -40,27 +40,25 @@ function makeRoom(players, monsterIds) {
   return room;
 }
 
-// --- MONSTERFUTTER: "+5 fuer beide Seiten" ---------------------------------
+// --- MONSTERFUTTER: "+5 fuer eine der beiden Seiten" -----------------------
+// Seitenwahl und Wirkung: card-either-side.test.js.
 {
   const futter = findCard('MONSTERFUTTER');
   assert.ok(isCombatPotionCard(futter), 'MONSTERFUTTER ist jetzt als Kampf-Trank spielbar');
   const p = makePlayer({});
   const room = makeRoom([p], [findCard('MEDUSA', 'monster').id]);
-  const vorher = combatTotals(room);
-  applyCombatPotionAction(room, p, COMBAT_POTION_OVERRIDES['MONSTERFUTTER'](p, room), futter);
-  const nachher = combatTotals(room);
-  assert.strictEqual(nachher.playerStrength - vorher.playerStrength, 5);
-  assert.strictEqual(nachher.monsterStrength - vorher.monsterStrength, 5);
+  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['MONSTERFUTTER'](p, room), { type: 'modifier', side: 'either', amount: 5 });
 }
 
-// --- SCHARFE PFEFFERSOSSE: +3, mit Halbling im Kampf +6 --------------------
+// --- SCHARFE PFEFFERSOSSE: +3 fuer eine Seite, zur Hilfe von Halblingen +6 --
 {
   const p = makePlayer({});
   const room = makeRoom([p], [findCard('MEDUSA', 'monster').id]);
-  assert.strictEqual(COMBAT_POTION_OVERRIDES['SCHARFE PFEFFERSOSSE'](p, room).amount, 3);
+  const ohne = COMBAT_POTION_OVERRIDES['SCHARFE PFEFFERSOSSE'](p, room);
+  assert.deepStrictEqual([ohne.side, ohne.amount, ohne.actorAmount], ['either', 3, 3]);
   p.races = [findCard('HALBLING', 'race').id];
-  assert.strictEqual(COMBAT_POTION_OVERRIDES['SCHARFE PFEFFERSOSSE'](p, room).amount, 6,
-    'zur Hilfe von Halblingen +6');
+  const mit = COMBAT_POTION_OVERRIDES['SCHARFE PFEFFERSOSSE'](p, room);
+  assert.deepStrictEqual([mit.amount, mit.actorAmount], [3, 6], 'zur Hilfe von Halblingen +6, nur fuer die Munchkins');
 }
 
 // --- DEUS EX MASCHINENGEWEHR: kein Schatz, keine Stufe, kein Pluendern -----

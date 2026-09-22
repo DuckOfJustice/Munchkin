@@ -4308,8 +4308,10 @@ const COMBAT_PLAYABLE_RE = /im\s+Kampf\b|Während\s+(eines\s+)?beliebige[nm]\s+K
 
 function parseCombatPotion(rawText) {
   const t = normalizeCardText(rawText);
-  let m = t.match(/\+(\d+)\s+für\s+beide\s+Seiten/i);
-  if (m) return { side: 'both', amount: parseInt(m[1], 10) };
+  // "+X für eine der beiden Seiten" (Erweiterungen; englisch "to either side" -
+  // die alte Übersetzung "für beide Seiten" war falsch).
+  let m = t.match(/\+(\d+)\s+für\s+eine\s+der\s+beiden\s+Seiten/i);
+  if (m) return { side: 'either', amount: parseInt(m[1], 10) };
   // Alle Schreibweisen des Grundspiels: "+2 egal für welche Seite", "+5 für
   // egal welche Seite", "+5, egal für welche Seite", "+3 für eine der
   // Parteien, egal für welche Seite".
@@ -4916,8 +4918,11 @@ function handlePlayCombatCard(room, playerId, cardId) {
   if (spec.type === 'modifier' && spec.side === 'either') {
     // Gegen die GEMEINEN GHOULE faellt die Munchkin-Seite weg - sie waere
     // wirkungslos (siehe munchkinBonusWirkungslos).
+    // actorAmount: Karten, deren Bonus nur auf der Munchkin-Seite steigt
+    // (SCHARFE PFEFFERSOSSE "+6 zur Hilfe von Halblingen").
+    const fuerMunchkins = spec.actorAmount != null ? spec.actorAmount : spec.amount;
     const seiten = [
-      { id: 'munchkins', label: `+${spec.amount} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount: spec.amount } },
+      { id: 'munchkins', label: `+${fuerMunchkins} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount: fuerMunchkins } },
       { id: 'monster', label: `+${spec.amount} für das Monster`, action: { type: 'modifier', side: 'monster', amount: spec.amount } },
     ].filter((o) => !(o.id === 'munchkins' && combatHasMonster(room, MONSTER_IGNORES_BONUSES)));
     openCardChoice(room, player, c.name, seiten);

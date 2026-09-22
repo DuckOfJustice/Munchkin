@@ -63,24 +63,25 @@ function run() {
   // Kampf-Tränke
   // -------------------------------------------------------------------
   assert.deepStrictEqual(parseCombatPotion('Im Kampf spielen. +3 für eine der Parteien, egal für welche Seite. Nur einmal einsetzbar.'), { side: 'either', amount: 3 });
-  assert.deepStrictEqual(parseCombatPotion('Während beliebigem Kampf spielen. +3 für beide Seiten.'), { side: 'both', amount: 3 });
+  assert.deepStrictEqual(parseCombatPotion('Während beliebigem Kampf spielen. +3 für eine der beiden Seiten.'), { side: 'either', amount: 3 });
   assert.deepStrictEqual(parseCombatPotion('Im Kampf spielen. +2 nur für Monster, und jeder kann Goblins ausspielen.'), { side: 'monster', amount: 2 });
   assert.ok(isCombatPotionCard(findCard('SCHLAFTRANK')));
-  assert.ok(isCombatPotionCard(findCard('KÖNIGLICHES ÖL')), 'KÖNIGLICHES ÖL ("+3 für beide Seiten") muss ebenfalls erkannt werden');
+  assert.ok(isCombatPotionCard(findCard('KÖNIGLICHES ÖL')), 'KÖNIGLICHES ÖL ("+3 für eine der beiden Seiten") muss ebenfalls erkannt werden');
 
 
   const elfId = findCard('ELF', 'race').id;
-  // LECKERER KUCHEN: +2 fuer beide Seiten, +4 vom Ork geworfen, Halblinge
+  // LECKERER KUCHEN: +2 fuer eine der beiden Seiten, +4 vom Ork geworfen, Halblinge
   // duerfen stattdessen essen (1 Stufe) - Halbling schlaegt Ork nicht, es
   // bleibt eine Wahl mit dem jeweils richtigen Wurf-Bonus.
   const halblingId = findCard('HALBLING', 'race').id;
   const orkRasseId = ALL_CARDS.find((c) => c.name === 'ORK' && c.category === 'door_other').id;
-  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer()), { type: 'modifier', side: 'both', amount: 2 });
-  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer({ races: [orkRasseId] })), { type: 'modifier', side: 'both', amount: 4 }, 'vom Ork geworfen -> +4');
+  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer()), { type: 'modifier', side: 'either', amount: 2 });
+  assert.deepStrictEqual(COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer({ races: [orkRasseId] })), { type: 'modifier', side: 'either', amount: 4 }, 'vom Ork geworfen -> +4');
   const kuchenHalbling = COMBAT_POTION_OVERRIDES['LECKERER KUCHEN'](makePlayer({ races: [halblingId] }));
   assert.strictEqual(kuchenHalbling.type, 'choice', 'Halbling bekommt die Wahl');
   assert.deepStrictEqual(kuchenHalbling.options.map((o) => o.action), [
-    { type: 'modifier', side: 'both', amount: 2 },
+    { type: 'modifier', side: 'actor', amount: 2 },
+    { type: 'modifier', side: 'monster', amount: 2 },
     { type: 'levelUp', amount: 1 },
   ], 'werfen oder essen');
 
