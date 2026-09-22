@@ -494,6 +494,7 @@ function hellknightArmorBonus(player) {
 // damit RACE_ITEM_BONUS (z.B. GNOM) nicht ueber die Rasse zurueckholt, was
 // MONDJUNGFERN gerade an Waffenbonus gestrichen hat.
 function raceItemBonusSum(player, excludeIds) {
+  if (hatFluchArt(player, 'traitsVergessen')) return 0; // siehe hasRace
   return player.races.reduce((sum, id) => {
     const c = card(id);
     const fn = c && RACE_ITEM_BONUS[c.name.toUpperCase()];
@@ -567,6 +568,8 @@ function publicPlayer(room, p) {
   // keine abgelaufene Strafe mehr an, und der WUNSCHRING, der die Rohliste
   // liest, kann nicht mehr an sie verschwendet werden.
   stinktierStrafeAktiv(p);
+  // GUMMI-GOLEM: derselbe Grund - Zuckerschock endet beim Lesen (zuckerschockAktiv).
+  zuckerschockAktiv(p);
   return {
     id: p.id,
     name: p.name,
@@ -3185,7 +3188,9 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
-} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
+} = passivesFactory({
+  card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds, hatFluchArt,
+});
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
 // Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
@@ -3229,7 +3234,8 @@ function applyLingeringRule(room, player, cardName, cardId, regel) {
   player.activeCurses.push({
     cardId, name: cardName, kind: regel.kind, amount, dauer: regel.dauer,
     // GUMMI-GOLEM: "bis du einen verlierst" - der Stand beim Eintragen ist der
-    // Vergleichswert (siehe zuckerschockAktiv).
+    // Vergleichswert (siehe zuckerschockAktiv). besesseneSchaetze ist weiter
+    // unten definiert (Funktionsdeklaration, daher hier schon nutzbar).
     schatzStand: regel.kind === 'zuckerschock' ? besesseneSchaetze(player).length : undefined,
     // Klartext fuer die Anzeige - steht bei der Regel selbst (src/cards/
     // reactions.js), damit der Client die Wirkung nicht nachbauen muss.
@@ -3619,6 +3625,7 @@ function monsterTraitBonusSum(room) {
 function fleeIsAutomatic(room, player) {
   if (combatHasMonster(room, FLEE_AUTOMATIC)) return true;
   if (!room.combat || !player) return false;
+  if (hatFluchArt(player, 'traitsVergessen')) return false; // siehe hasRace
   const regeln = player.races.map((id) => {
     const c = card(id);
     return c && FLEE_AUTOMATIC_BY_RACE[c.name.toUpperCase()];
@@ -4207,7 +4214,7 @@ function handLimit(player) {
 function dryadeWirkung(room, player) {
   if (!room.combat || !player) return;
   if (!room.combat.monsterIds.some((id) => (card(id) || {}).name === 'DRYADE')) return;
-  if (!player.classes.some((id) => /ZAUBERER/i.test((card(id) || {}).name || ''))) return;
+  if (!hasClass(player, 'ZAUBERER')) return; // respektiert TEMPORÄRE ANMNESIE
   const desc = applyPrimitiveAction(room, player, { type: 'discardClassCardMatchingElseDeath', substr: 'ZAUBERER' });
   log(room, `Die Dryade schwaecht ${player.name}: ${desc}.`);
 }

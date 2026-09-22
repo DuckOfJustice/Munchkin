@@ -4,6 +4,7 @@
 module.exports = (ctx) => {
   const {
     hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
+    hatFluchArt,
   } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
@@ -276,7 +277,9 @@ module.exports = (ctx) => {
   // Dazu die Monsterbrille fuer den einen Gegenstand, der eine Rasse verleiht:
   // wer FALSCHE OHREN traegt, gilt fuer Monster als Elf und damit nicht als
   // Mensch (ITEM_GRANTS_TRAIT kennt sonst keine Rasse).
-  const istMensch = (p) => !p.races.length && !monsterSeesRace(p, 'ELF');
+  // TEMPORÄRE ANMNESIE: "ueberall als klassenloser Mensch gezaehlt" - wer den
+  // Fluch traegt, zaehlt als Mensch, auch wenn Rassenkarten ausliegen.
+  const istMensch = (p) => (hatFluchArt(p, 'traitsVergessen') || !p.races.length) && !monsterSeesRace(p, 'ELF');
 
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite

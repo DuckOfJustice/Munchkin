@@ -248,5 +248,87 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   });
 }
 
+// --- Review-Fund 1: istMensch (src/cards/passives.js) las p.races direkt und
+// ignorierte TEMPORÄRE ANMNESIE. Verflucht gilt "ueberall als klassenloser
+// Mensch" - RIESENKAKERLAKE ("+5 gegen Elfen oder Menschen") und GRASGNOLL
+// ("+5 gegen Menschen") muessen also trotz Elfen-Karten auf dem Tisch greifen.
+{
+  const elf = findCard('ELF', 'race').id;
+  const anmnesie = findCard('TEMPORÄRE ANMNESIE').id;
+  const staerkeGegen = (monsterCard) => {
+    const p = makePlayer({ races: [elf] });
+    const room = makeRoom([p]);
+    S.addActiveCurse(room, p, 'TEMPORÄRE ANMNESIE', anmnesie);
+    S.startCombat(room, p.id, [monsterCard.id], { fromHand: false });
+    const wert = S.combatTotals(room).monsterStrength;
+    room.combat = null;
+    return wert;
+  };
+  const kakerlake = findCard('RIESENKAKERLAKE', 'monster');
+  assert.strictEqual(staerkeGegen(kakerlake), kakerlake.level + 5, 'verfluchter Elf zaehlt der Kakerlake als Mensch');
+  const grasgnoll = findCard('GRASGNOLL', 'monster');
+  assert.strictEqual(staerkeGegen(grasgnoll), grasgnoll.level + 5, 'verfluchter Elf zaehlt dem Grasgnoll als Mensch');
+}
+
+// --- Review-Fund 2: drei weitere Direktzugriffe auf player.races/classes
+// umgehen die Anmnesie - jetzt ueber hasRace/hasClass bzw. hatFluchArt.
+{
+  // raceItemBonusSum: Gnom-Bonus zaehlt fuer einen Verfluchten nicht mehr.
+  const gnom = findCard('GNOM', 'door_other');
+  const anmnesie = findCard('TEMPORÄRE ANMNESIE').id;
+  const g = findCard('GHOULPEITSCHE');
+  const p = makePlayer({ races: [gnom.id] });
+  p.equipped.hands = [g.id, null];
+  assert.strictEqual(S.raceItemBonusSum(p), 1, 'Testvoraussetzung: Gnom-Bonus greift normal');
+  const room = makeRoom([p]);
+  S.addActiveCurse(room, p, 'TEMPORÄRE ANMNESIE', anmnesie);
+  assert.strictEqual(S.raceItemBonusSum(p), 0, 'verflucht: kein Gnom-Bonus mehr');
+}
+{
+  // fleeIsAutomatic: automatische Flucht vor "Nase"-Monstern entfaellt.
+  const gnom = findCard('GNOM', 'door_other');
+  const anmnesie = findCard('TEMPORÄRE ANMNESIE').id;
+  const nase = findCard('LAUFENDE NASE', 'monster');
+  const p = makePlayer({ races: [gnom.id] });
+  const room = makeRoom([p]);
+  room.combat = { actorId: p.id, monsterIds: [nase.id] };
+  assert.ok(S.fleeIsAutomatic(room, p), 'Testvoraussetzung: Gnom entkommt automatisch');
+  S.addActiveCurse(room, p, 'TEMPORÄRE ANMNESIE', anmnesie);
+  assert.ok(!S.fleeIsAutomatic(room, p), 'verflucht: keine automatische Flucht mehr');
+}
+{
+  // dryadeWirkung: ein verfluchter "Zauberer" gilt nicht mehr als Zauberer,
+  // die Dryade darf ihm die Klasse nicht wegnehmen.
+  const zauberer = findCard('ZAUBERER', 'class');
+  const anmnesie = findCard('TEMPORÄRE ANMNESIE').id;
+  const dryade = findCard('DRYADE', 'monster');
+  const p = makePlayer({ classes: [zauberer.id] });
+  const room = makeRoom([p]);
+  room.combat = {
+    actorId: p.id, helperId: null, monsterIds: [dryade.id],
+    actorModifier: 0, monsterModifier: 0, backstabbed: {},
+  };
+  S.addActiveCurse(room, p, 'TEMPORÄRE ANMNESIE', anmnesie);
+  S.dryadeWirkung(room, p);
+  assert.deepStrictEqual(p.classes, [zauberer.id], 'die Zauberer-Karte bleibt liegen, kein Verlust');
+  assert.ok(!room.logs.some((l) => /Dryade schwaecht/i.test(l.text)), 'kein Log-Eintrag ueber verlorene Klasse');
+}
+
+// --- Review-Fund 3: publicPlayer normalisiert STINKTIER (stinktierStrafeAktiv)
+// beim Lesen, aber nicht GUMMI-GOLEMs Zuckerschock - dadurch blieb ein
+// abgelaufener Fluch im Client/WUNSCHRING sichtbar.
+{
+  const golem = findCard('GUMMI-GOLEM', 'monster');
+  const schatz = findCard('FLAMMENDER GIFTTRANK').id;
+  const p = makePlayer({ hand: [schatz] });
+  const room = makeRoom([p]);
+  S.addActiveCurse(room, p, 'GUMMI-GOLEM', golem.id);
+  assert.ok(p.activeCurses.some((f) => f.kind === 'zuckerschock'), 'Testvoraussetzung: Fluch eingetragen');
+  p.hand = []; // Schatz verloren - der Fluch ist ab jetzt beim Lesen vorbei.
+  const state = S.publicState(room);
+  assert.ok(!state.players[0].activeCurses.some((f) => f.kind === 'zuckerschock'),
+    'publicState zeigt den abgelaufenen Zuckerschock nicht mehr an');
+}
+
 fertig();
 console.log('card-regelluecken-welle2: alle Checks gruen');
