@@ -1295,9 +1295,9 @@ function applyDeathConsequence(room, player) {
   if (!andere.length) { alleAblegen(); return; }
   const queue = [];
   while (queue.length < anzahl) andere.forEach((p) => queue.push(p.id));
-  openQueuedCardAction(room, 'Leiche plündern', queue.slice(0, anzahl), (pluendererId) => {
-    const pluenderer = findPlayer(room, pluendererId);
-    const ids = leiche().filter((id) => darfSchatzBekommen(pluenderer, id));
+  // Stoererliste: advanceCardActionQueue filtert die Kandidaten.
+  openQueuedCardAction(room, 'Leiche plündern', queue.slice(0, anzahl), () => {
+    const ids = leiche();
     if (!ids.length) return null;
     return { kind: 'chooseCard', prompt: `Eine Karte von ${player.name} nehmen`, candidateIds: ids, takeFrom: player.id };
   }, player.id, 'alles');
@@ -1805,10 +1805,13 @@ function applyPrimitiveAction(room, player, action) {
             giveTo: receiver.id
           };
         } else if (currentVictim.hand.length > 0) {
-          const count = Math.min(2, currentVictim.hand.length);
+          // Stoererliste: gezogen wird nur, was der Empfaenger bekommen darf.
+          const ziehbar = () => currentVictim.hand.filter((id) => darfSchatzBekommen(receiver, id));
+          const count = Math.min(2, ziehbar().length);
           const drawn = [];
           for (let i = 0; i < count; i++) {
-             const id = currentVictim.hand[Math.floor(Math.random() * currentVictim.hand.length)];
+             const erlaubt = ziehbar();
+             const id = erlaubt[Math.floor(Math.random() * erlaubt.length)];
              removeFromHand(currentVictim, id);
              clearCheatIfLost(currentVictim, id);
              drawn.push(id);
@@ -1879,7 +1882,10 @@ function applyPrimitiveAction(room, player, action) {
         if (!player.hand.length) return;
         const target = room.players[targetIdx];
         if (!target || target.id === player.id) return;
-        const cid = player.hand[Math.floor(Math.random() * player.hand.length)];
+        // Stoererliste: nur Karten, die das Ziel bekommen darf.
+        const erlaubt = player.hand.filter((id) => darfSchatzBekommen(target, id));
+        if (!erlaubt.length) { results.push(`${target.name} bekommt nichts (Störerliste)`); return; }
+        const cid = erlaubt[Math.floor(Math.random() * erlaubt.length)];
         removeFromHand(player, cid);
         // SCHUMMELN!: dritter Transferweg neben Diebstahl/Handel, der nicht
         // ueber discardCard laeuft - Anhang muss auch hier mit der Karte weg.
@@ -2260,15 +2266,13 @@ function applyPrimitiveAction(room, player, action) {
             log(room, `${player.name} zieht 1 zufällige Karte aus der Hand von ${naechster.name}.`);
             return null;
           }
-          case 'geben': {
-            const gebbar = naechster ? player.hand.filter((id) => darfSchatzBekommen(naechster, id)) : [];
-            if (!gebbar.length) return null;
+          // Stoererliste bei geben/ablagestapel: advanceCardActionQueue filtert.
+          case 'geben':
+            if (!naechster || !player.hand.length) return null;
             return { kind: 'chooseCard', prompt: `Eine Karte an ${naechster.name} geben`,
-              candidateIds: gebbar, giveTo: naechster.id };
-          }
+              candidateIds: player.hand.slice(), giveTo: naechster.id };
           case 'ablagestapel': {
-            const kandidaten = [oberste(room.doorDiscard), oberste(room.treasureDiscard)]
-              .filter((id) => id && darfSchatzBekommen(player, id));
+            const kandidaten = [oberste(room.doorDiscard), oberste(room.treasureDiscard)].filter(Boolean);
             if (!kandidaten.length) return null;
             return { kind: 'chooseCard', prompt: 'Die oberste Karte welches Ablagestapels nimmst du?',
               candidateIds: kandidaten };
@@ -2291,21 +2295,22 @@ function applyPrimitiveAction(room, player, action) {
     }
     case 'noEffect':
       return 'kein spielmechanischer Effekt';
-    // WUNSCHRING: "Beendet jeden Fluch." - siehe TREASURE_POWER_OVERRIDES.
-    // Geloescht wird nach Wirkungsart, nicht nach Index - siehe
-    // fluchBeendenSpec in src/cards/treasures.js. Ist der gewaehlte Fluch
-    // inzwischen von selbst ausgelaufen, sagt die Meldung das ehrlich: die
-    // Karte ist trotzdem verbraucht, und niemand soll glauben, sie haette
-    // gewirkt.
     // GRASGNOLL: "Du verlierst drei Stufen. Du erhaeltst eine Stufe zurueck
-    // fuer jeden Trank, den du sofort ablegst."
+    // fuer jeden Trank, den du sofort ablegst." Zurueck gibt es hoechstens,
+    // was wirklich verloren ging - setLevel stoppt bei Stufe 1.
     case 'grasgnoll': {
+      const vorher = player.level;
       const desc = applyPrimitiveAction(room, player, { type: 'levelDelta', amount: 3 });
-      grasgnollTrankWahl(room, player, 3);
+      grasgnollTrankWahl(room, player, vorher - player.level);
       return desc;
     }
     case 'grasgnollTrank': {
-      if (!player.hand.includes(action.cardId)) return '';
+      // Karte inzwischen weg (von Hand abgelegt, zweite Quelle): Wahl mit den
+      // uebrigen Traenken neu anbieten statt sie still zu verlieren.
+      if (!player.hand.includes(action.cardId)) {
+        grasgnollTrankWahl(room, player, action.rest);
+        return 'der Trank ist nicht mehr auf der Hand';
+      }
       removeFromHand(player, action.cardId);
       discardCard(room, action.cardId);
       setLevel(player, player.level + 1);
@@ -2314,6 +2319,9 @@ function applyPrimitiveAction(room, player, action) {
     }
     case 'grasgnollFertig':
       return 'keinen weiteren Trank abgelegt';
+    // WUNSCHRING: "Beendet jeden Fluch." - siehe TREASURE_POWER_OVERRIDES.
+    // Ist der gewaehlte Fluch inzwischen von selbst ausgelaufen, sagt die
+    // Meldung das ehrlich: die Karte ist trotzdem verbraucht.
     case 'clearCurse': {
       // Genau der gewaehlte Eintrag (Id aus fluchBeendenSpec) - nicht alle
       // derselben Wirkungsart.
@@ -2457,8 +2465,11 @@ function handleResolveConsequenceChoice(room, playerId, optionId) {
   pc.choice = null;
   room._pendingChoiceActions = null;
   const desc = applyPrimitiveAction(room, player, stored[optionId]);
-  pc.autoApplied = `${sourceName}: ${option ? option.label : optionId} -> ${desc}`;
-  log(room, `${player.name}: ${pc.autoApplied}`);
+  const zeile = `${sourceName}: ${option ? option.label : optionId} -> ${desc}`;
+  // Anhaengen statt ersetzen: GRASGNOLL hat davor schon "-3 Stufen"
+  // eingetragen (bei mehreren Monstern auch die der anderen).
+  pc.autoApplied = pc.autoApplied ? `${pc.autoApplied}; ${zeile}` : zeile;
+  log(room, `${player.name}: ${zeile}`);
   touchRoom(room);
 }
 
@@ -2601,6 +2612,16 @@ function advanceCardActionQueue(room) {
     room._pendingCardActionResolvers = spec.action;
   } else if (spec.kind === 'chooseCard') {
     room._pendingCardActionResolvers = null;
+    // Stoererliste an EINER Stelle fuer alle Warteschlangen-Kartenwahlen
+    // (HIPPOGREIF, ANWALT, LEPRACHAUN, EDELMUT, ENTE, Leiche, ...): nur
+    // Karten anbieten, die die empfangende Person bekommen darf.
+    const pa = room.pendingCardAction;
+    const empfaenger = findPlayer(room, kartenwahlEmpfaengerId(pa));
+    pa.candidateIds = pa.candidateIds.filter((id) => darfSchatzBekommen(empfaenger, id));
+    if (!pa.candidateIds.length) {
+      log(room, `${empfaenger ? empfaenger.name : 'Jemand'} steht auf der Störerliste - bei "${q.cardName}" gibt es nichts, was ankommen darf.`);
+      return advanceCardActionQueue(room);
+    }
   } else {
     room._pendingCardActionResolvers = {};
     (spec.options || []).forEach((o) => { room._pendingCardActionResolvers[o.id] = o.action; });
@@ -2905,7 +2926,15 @@ function handleResolveCardCardChoice(room, playerId, chosenCardId) {
   if (!pa.candidateIds.includes(chosenCardId)) return;
   const player = findPlayer(room, playerId);
   if (!player) return;
+  // Stoererliste: die Kandidaten sind beim Oeffnen schon gefiltert, die
+  // Sperre kann aber seither entstanden sein.
   const chosen = card(chosenCardId);
+  if (!darfSchatzBekommen(findPlayer(room, kartenwahlEmpfaengerId(pa)), chosenCardId)) {
+    log(room, `"${chosen ? chosen.name : chosenCardId}" ist eine Schatzkarte - Störerliste, nichts übergeben.`);
+    finishCardAction(room, pa);
+    touchRoom(room);
+    return;
+  }
   // Schlimme Dinge mit Fremdbeteiligung (HIPPOGREIF/ANWALT/LEPRACHAUN/
   // NETZ-TROLL): die gewaehlte Karte kommt vom OPFER, nicht aus einem
   // Ablagestapel - siehe queuedTakeFromHand/queuedTakeItem.
@@ -3323,6 +3352,15 @@ function darfSchatzBekommen(player, cardId) {
   return !hatSchatzSperre(player) || (card(cardId) || {}).type !== 'treasure';
 }
 
+// Wer bei einer Kartenwahl (kind 'chooseCard') die Karte bekommt: takeFrom
+// und Ablagestapel -> die waehlende Person, giveTo -> die beschenkte,
+// discardVictim/discardOwn -> niemand (die Karte geht auf den Ablagestapel).
+function kartenwahlEmpfaengerId(pa) {
+  if (pa.giveTo) return pa.giveTo;
+  if (pa.discardVictim || pa.discardOwn) return null;
+  return pa.playerId;
+}
+
 // NARRENGOLD: "Du erhaeltst keinen Schatz im naechsten Kampf." Nur die
 // Kampfbeute - anders als die Stoererliste (hatSchatzSperre), die JEDE
 // Schatzkarte sperrt und deshalb in zieheSchaetzeFuer sitzt.
@@ -3344,9 +3382,17 @@ function hatKampfschatzSperre(player) {
 // Person). Fuer eine Ziehung, die auf zwei Personen verteilt wird (Kampf-
 // Hauptausschuettung), gilt die Sperre der Person, fuer die tatsaechlich
 // gezogen wird - siehe resolveCombatWin.
-// Karten, die OHNE drawTreasure() die Hand wechseln (DIEB, ENTE DER VIELEN
-// SACHEN, PRIESTER-Auferstehung, EINHEITSGRÖSSE, WÜNSCHELSTAB, Leiche
-// pluendern), pruefen darfSchatzBekommen bzw. hatSchatzSperre selbst.
+// Karten, die OHNE drawTreasure() die Hand wechseln, pruefen
+// darfSchatzBekommen/hatSchatzSperre selbst:
+//   - jede Kartenwahl aus einer Warteschlange (HIPPOGREIF, ANWALT, EDELMUT,
+//     ENTE, Leiche, ...) zentral in advanceCardActionQueue und
+//     handleResolveCardCardChoice, die Ablagestapel-Wahl in openCardCardChoice
+//   - einzeln: DIEB, ENTE-klauen, EDELMUT-Handkarten, VERLIERE ZWEI KARTEN,
+//     PRIESTER-Auferstehung, EINHEITSGRÖSSE, WÜNSCHELSTAB, FLOHMARKT,
+//     SINNLOSER AKT, HILF MIR, SCHICKSALHAFTE KARTEN
+// Bewusst ohne Sperre: Anfangsverteilung, SCHATZ TAUSCHEN (eigener Schatz
+// gegen einen neuen) und der BUMERANGDOLCH, der zu seinem Besitzer
+// zurueckkehrt (endTurn).
 function zieheSchaetzeFuer(room, player, n) {
   if (hatSchatzSperre(player)) return [];
   const drawn = [];
@@ -5045,6 +5091,12 @@ function applyCombatReaction(room, player, cardId, regel) {
     return;
   }
   if (regel.kind === 'takeItemFromPlayer') {
+    // Der genommene Gegenstand ist eine Schatzkarte - nicht auf der Stoererliste.
+    if (hatSchatzSperre(player)) {
+      log(room, `${player.name} steht auf der Störerliste und bekommt keine Schatzkarten - "${karte.name}" bleibt auf der Hand.`);
+      touchRoom(room);
+      return;
+    }
     removeFromHand(player, cardId);
     discardCard(room, cardId);
     zeigen();
@@ -6173,6 +6225,13 @@ function handleResolveMultiCardSelection(room, playerId, cardIds, deck) {
   if (!Array.isArray(cardIds) || !cardIds.length) return;
   if (deck !== 'door' && deck !== 'treasure') return;
   if (!cardIds.every(id => player.hand.includes(id))) return;
+  // Stoererliste: nicht vom Schatzstapel nachziehen - die Auswahl bleibt
+  // offen, der Tuerstapel geht weiterhin.
+  if (deck === 'treasure' && hatSchatzSperre(player)) {
+    log(room, `${player.name} steht auf der Störerliste - bitte vom Türstapel nachziehen.`);
+    touchRoom(room);
+    return;
+  }
 
   cardIds.forEach(id => {
     removeFromHand(player, id);

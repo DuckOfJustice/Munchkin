@@ -1391,7 +1391,7 @@
       if (pc.choice) {
         const choiceBox = document.createElement('div');
         choiceBox.className = 'row gap wrap';
-        choiceBox.appendChild(textNode('Diese Karte lässt dich wählen - beide Optionen werden automatisch berechnet:'));
+        choiceBox.appendChild(textNode('Diese Karte lässt dich wählen - jede Option wird automatisch berechnet:'));
         pc.choice.options.forEach((opt) => {
           const btn = document.createElement('button');
           btn.className = 'primary'; btn.textContent = opt.label;

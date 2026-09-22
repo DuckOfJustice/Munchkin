@@ -5,6 +5,7 @@ const {
   ALL_CARDS, newEquipped, addActiveCurse, handleUseCardPower, handleResolveCardChoice,
   beendeFluchtphase, handleAckConsequence, handleResolveConsequenceChoice,
   thiefPowerInfo, handleThiefSteal, handleResolveCardCardChoice, priestResurrectPiles, applyPrimitiveAction,
+  applyCombatReaction, COMBAT_REACTION_CARDS, handleResolveMultiCardSelection,
 } = require('../server.js');
 
 const findCard = (name, category) => {
@@ -221,6 +222,108 @@ function makeRoom(players, extra) {
     applyPrimitiveAction(room, tot, { type: 'death' });
     assert.strictEqual(room.pendingCardAction.playerId, 'p2');
     assert.deepStrictEqual(room.pendingCardAction.candidateIds, [tuer], 'nur die Tuerkarte');
+  }
+}
+
+// GRASGNOLL auf niedriger Stufe: setLevel stoppt bei 1, zurueck gibt es nur,
+// was wirklich verloren wurde (Stufe 2 -> 1: hoechstens 1 zurueck).
+{
+  const gnoll = findCard('GRASGNOLL', 'monster');
+  const traenke = ['FLAMMENDER GIFTTRANK', 'SCHLAFTRANK', 'YUPPIE-WASSER'].map((n) => findCard(n).id);
+  const p = makePlayer({ id: 'p1', level: 2, hand: traenke.slice() });
+  const room = makeRoom([p], { turnPhase: 'kampf' });
+  const c = { actorId: 'p1', helperId: null, monsterIds: [gnoll.id], actorModifier: 0, monsterModifier: 0,
+    fleeFailed: ['p1'], mustFlee: false };
+  room.combat = c;
+  beendeFluchtphase(room, c);
+  assert.strictEqual(p.level, 1);
+  handleResolveConsequenceChoice(room, 'p1', `trank-${traenke[0]}`);
+  assert.strictEqual(p.level, 2, 'eine Stufe zurueck');
+  assert.strictEqual(room.pendingConsequence.choice, null, 'mehr war nicht verloren - keine weitere Wahl');
+}
+
+// Stoererliste, weitere Wege (aus dem Code-Review).
+{
+  const sperre = () => [{ name: 'WEIHNACHTSMANN', kind: 'noTreasure', dauer: 'dauerhaft', hinweis: '' }];
+  const schatz = findCard('FLAMMENDER GIFTTRANK').id;
+  const schatz2 = findCard('SCHLAFTRANK').id;
+  const tuer = findCard('ZWERG', 'race').id;
+  const nurTuer = (p) => p.hand.every((id) => ALL_CARDS.find((x) => x.id === id).type !== 'treasure');
+
+  // HIPPOGREIF: "... darf jeder Spieler eine Schatzkarte ... aus deiner Hand
+  // nehmen" - die gesperrte Person geht leer aus, die Wahl zeigt ihr nichts an.
+  {
+    const hippo = findCard('HIPPOGREIF', 'monster');
+    const opfer = makePlayer({ id: 'p1', level: 6, hand: [schatz, schatz2] });
+    const gesperrt = makePlayer({ id: 'p2', name: 'B', activeCurses: sperre() });
+    const room = makeRoom([opfer, gesperrt], { turnPhase: 'kampf' });
+    const c = { actorId: 'p1', helperId: null, monsterIds: [hippo.id], actorModifier: 0, monsterModifier: 0,
+      fleeFailed: ['p1'], mustFlee: false };
+    room.combat = c;
+    beendeFluchtphase(room, c);
+    assert.ok(!room.pendingCardAction || room.pendingCardAction.playerId !== 'p2', 'kein Waehler fuer die gesperrte Person');
+    assert.ok(nurTuer(gesperrt), 'HIPPOGREIF: keine Schatzkarte fuer die gesperrte Person');
+  }
+
+  // EDELMUT ohne Gegenstaende: gezogen werden nur Karten, die der Empfaenger bekommen darf.
+  {
+    const opfer = makePlayer({ id: 'p1', hand: [schatz, schatz2] });
+    const gesperrt = makePlayer({ id: 'p2', name: 'B', activeCurses: sperre() });
+    const room = makeRoom([opfer, gesperrt]);
+    applyPrimitiveAction(room, opfer, { type: 'curseEdelmut', cardId: findCard('EDELMUT').id });
+    assert.ok(nurTuer(gesperrt), 'EDELMUT: keine Schatzkarte fuer die gesperrte Person');
+    assert.strictEqual(opfer.hand.length, 2, 'die Schatzkarten bleiben beim Opfer');
+  }
+
+  // VERLIERE ZWEI KARTEN (giveHandCardsToNeighbors).
+  {
+    const opfer = makePlayer({ id: 'p1', hand: [schatz] });
+    const gesperrt = makePlayer({ id: 'p2', name: 'B', activeCurses: sperre() });
+    const room = makeRoom([opfer, gesperrt]);
+    applyPrimitiveAction(room, opfer, { type: 'giveHandCardsToNeighbors' });
+    assert.ok(nurTuer(gesperrt), 'VERLIERE ZWEI KARTEN: keine Schatzkarte fuer die gesperrte Person');
+    assert.ok(opfer.hand.includes(schatz));
+  }
+
+  // FLOHMARKT: gesperrt nicht einsetzbar (holt Schaetze aus dem Ablagestapel).
+  {
+    const floh = findCard('FLOHMARKT').id;
+    const p = makePlayer({ id: 'p1', hand: [floh, schatz], activeCurses: sperre() });
+    const room = makeRoom([p], { treasureDiscard: [schatz2] });
+    handleUseCardPower(room, 'p1', floh);
+    assert.ok(p.hand.includes(floh), 'FLOHMARKT bleibt auf der Hand');
+  }
+
+  // SINNLOSER AKT DER FREUNDLICHKEIT: nur noch "selbst 1 Stufe".
+  {
+    const akt = findCard('SINNLOSER AKT DER FREUNDLICHKEIT').id;
+    const p = makePlayer({ id: 'p1', hand: [akt], activeCurses: sperre() });
+    const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+    handleUseCardPower(room, 'p1', akt);
+    const ids = room.pendingCardAction ? room.pendingCardAction.options.map((o) => o.id) : [];
+    assert.ok(!ids.includes('target'), 'keine Option, einen Gegenstand zu bekommen');
+  }
+
+  // HILF MIR: gesperrt nicht einsetzbar.
+  {
+    const hilf = findCard('HILF MIR').id;
+    const p = makePlayer({ id: 'p1', hand: [hilf], activeCurses: sperre() });
+    const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })], { turnPhase: 'kampf' });
+    room.combat = { actorId: 'p1', helperId: null, monsterIds: [findCard('LAHMER GOBLIN', 'monster').id],
+      actorModifier: 0, monsterModifier: 0, mustFlee: false };
+    applyCombatReaction(room, p, hilf, COMBAT_REACTION_CARDS['HILF MIR']);
+    assert.ok(p.hand.includes(hilf), 'HILF MIR bleibt auf der Hand');
+    assert.strictEqual(room.pendingCardAction, null);
+  }
+
+  // SCHICKSALHAFTE KARTEN: kein Nachziehen vom Schatzstapel.
+  {
+    const p = makePlayer({ id: 'p1', hand: [tuer], activeCurses: sperre() });
+    const room = makeRoom([p], { treasureDeck: [schatz] });
+    room.pendingCardAction = { kind: 'multiCardSelection', playerId: 'p1', cardName: 'SCHICKSALHAFTE KARTEN', actionType: 'schicksalhafteKarten' };
+    handleResolveMultiCardSelection(room, 'p1', [tuer], 'treasure');
+    assert.ok(p.hand.includes(tuer) && !p.hand.includes(schatz), 'nichts abgelegt, nichts gezogen');
+    assert.ok(room.pendingCardAction, 'die Auswahl bleibt offen (Tuerstapel geht noch)');
   }
 }
 

@@ -42,6 +42,8 @@ module.exports = (ctx) => {
   const TREASURE_POWER_OVERRIDES = {
     // --- Unnatural Axe ---
     'FLOHMARKT': (player, room) => {
+      // Holt Schaetze aus dem Ablagestapel - nicht auf der Stoererliste.
+      if (hatSchatzSperre(player)) return null;
       const items = [...player.hand, ...equippedItemIds(player)]
         .filter(id => card(id) && typeof card(id).gold === 'number');
       if (items.length === 0) return null; // Needs an item
@@ -77,12 +79,13 @@ module.exports = (ctx) => {
     // auf einen Rivalen spielen, um ihn dazu zu zwingen, dir den Gegenstand
     // zu geben, der ihm den größten Bonus bringt, und er bekommt stattdessen
     // eine Stufe."
-    'SINNLOSER AKT DER FREUNDLICHKEIT': () => ({
+    // Stoererliste: der Gegenstand waere eine Schatzkarte - dann nur die Stufe.
+    'SINNLOSER AKT DER FREUNDLICHKEIT': (player) => ({
       type: 'choice',
       options: [
         { id: 'self', label: 'Selbst 1 Stufe aufsteigen', action: { type: 'levelUp', amount: 1 } },
         { id: 'target', label: 'Auf einen Mitspieler anwenden', action: { type: 'targetPlayer', prompt: 'Wen dazu zwingen, seinen besten Gegenstand herzugeben?', action: { type: 'stealBestItemGiveLevel' } } },
-      ],
+      ].filter((o) => o.id !== 'target' || !hatSchatzSperre(player)),
     }),
 
     // --- Bedingung prüfbar (blockiert, wenn nicht erfüllt) ---
