@@ -212,9 +212,10 @@ function run() {
 
     addActiveCurse({ logs: [] }, p, 'HUHN AUF DEINEM KOPF', findCard('HUHN AUF DEINEM KOPF').id);
     const spec1 = TREASURE_POWER_OVERRIDES['WUNSCHRING'](p);
-    // Die Aktion nennt Wirkungsart und Namen, keinen Listenindex - siehe
+    // Die Aktion nennt die Id des Eintrags, keinen Listenindex - siehe
     // fluchBeendenSpec.
-    assert.deepStrictEqual(spec1, { type: 'clearCurse', kind: 'rollMalus', name: 'HUHN AUF DEINEM KOPF' },
+    assert.deepStrictEqual(spec1,
+      { type: 'clearCurse', id: p.activeCurses[0].id, kind: 'rollMalus', name: 'HUHN AUF DEINEM KOPF', itemId: null },
       'genau ein Fluch: kein Wahldialog');
     applyPrimitiveAction({}, p, spec1);
     assert.strictEqual(p.activeCurses.length, 0, 'der einzige Fluch ist beendet');
