@@ -4690,10 +4690,14 @@ function handleSetCombatModifier(room, playerId, who, value) {
 // zaehlt auch gegen die Ghoule: Karten mit Seitenwahl ("egal welche Seite",
 // eigene Wahl) bleiben spielbar, nur ihre Munchkin-Option faellt weg (siehe
 // ohneMunchkinBonus).
-const istNurMunchkinBonus = (action) => !!action && action.type === 'modifier' && action.side === 'actor';
+// tripleItemBonus (HALBFINAL-SCHLAG) landet ebenfalls in actorModifier.
+const istNurMunchkinBonus = (action) => !!action
+  && ((action.type === 'modifier' && action.side === 'actor') || action.type === 'tripleItemBonus');
 function munchkinBonusWirkungslos(room, spec) {
   if (!spec || !combatHasMonster(room, MONSTER_IGNORES_BONUSES)) return false;
   if (spec.type === 'modifier') return spec.side === 'actor';
+  // Trifft heute HALBFINAL-SCHLAG (nur Gegenstandsoptionen) und schuetzt
+  // zugleich davor, dass ohneMunchkinBonus einen leeren Wahl-Dialog oeffnet.
   if (spec.type === 'choice') return spec.options.every((o) => istNurMunchkinBonus(o.action));
   return false;
 }

@@ -188,6 +188,34 @@ function run() {
     assert.strictEqual(g.room.pendingCardAction, null);
     assert.strictEqual(g.room.combat.actorModifier, 0);
     done(g.room);
+
+    // Genauso fuer Zuschauer:innen - fuer die Munchkins waere die Karte auch
+    // von aussen gespielt wirkungslos.
+    const z = combatRoom('GEMEINE GHOULE', { level: 7, races: [elf.id] });
+    z.room.players[1].hand = [wasser.id];
+    handlePlayCombatCard(z.room, 'p2', wasser.id);
+    assert.ok(z.room.players[1].hand.includes(wasser.id), 'auch von aussen bleibt die Munchkin-Bonuskarte auf der Hand');
+    assert.strictEqual(z.room.pendingCardAction, null);
+    assert.strictEqual(z.room.combat.actorModifier, 0);
+    done(z.room);
+  }
+  {
+    // HALBFINAL-SCHLAG: dreifacher Gegenstandsbonus - zaehlt gegen die Ghoule
+    // nicht, jede Option waere wirkungslos. Die Karte bleibt auf der Hand
+    // (und der Gegenstand wird nicht fuer nichts riskiert).
+    const schlag = findCard('HALBFINAL-SCHLAG');
+    const g = combatRoom('GEMEINE GHOULE', { level: 7, equipped: equipMithril, hand: [schlag.id] });
+    handlePlayCombatCard(g.room, 'p1', schlag.id);
+    assert.ok(g.room.players[0].hand.includes(schlag.id), 'HALBFINAL-SCHLAG bleibt gegen die Ghoule auf der Hand');
+    assert.strictEqual(g.room.pendingCardAction, null);
+    assert.strictEqual(g.room.combat.actorModifier, 0);
+    done(g.room);
+
+    // Gegenprobe: gegen ein normales Monster oeffnet sich die Gegenstandswahl.
+    const n = combatRoom('LAHMER GOBLIN', { level: 7, equipped: equipMithril, hand: [schlag.id] });
+    handlePlayCombatCard(n.room, 'p1', schlag.id);
+    assert.ok(n.room.pendingCardAction, 'normal ist HALBFINAL-SCHLAG spielbar');
+    done(n.room);
   }
   {
     // Eine Karte "egal welche Seite" bleibt dagegen auch fuer die kaempfende
