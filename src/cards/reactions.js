@@ -77,6 +77,11 @@ module.exports = () => {
     // Weihnachtsmanns, kind 'noTreasure').
     'NARRENGOLD': { kind: 'noCombatTreasure', dauer: 'naechsterKampf',
       hinweis: 'Im nächsten Kampf gibt es für dich keinen Schatz.' },
+    // "Eine Beule am Kopf laesst dich deine Klasse(n) und Rasse(n) vergessen
+    // ... Bis dahin wirst du ueberall als klassenloser Mensch gezaehlt."
+    // Wirkung in hasRace/hasClass/itemGrantsTrait, Ende in finishCombatWin.
+    'TEMPORÄRE ANMNESIE': { kind: 'traitsVergessen', dauer: 'dauerhaft',
+      hinweis: 'Rasse und Klasse zählen nicht, bis du einen Kampf gewinnst.' },
     // "Du darfst nicht 'Auf Aerger aus sein'. Dieser Fluch bleibt bestehen,
     // bis du einem anderen Spieler geholfen hast, einen Kampf zu gewinnen."
     // Sperre und Ende: keinAergerSuchen in server.js.

@@ -80,5 +80,54 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.ok(a.activeCurses.some((f) => f.kind === 'keinAergerSuchen'), 'der eigene Sieg beendet den Fluch nicht');
 }
 
+// --- TEMPORÄRE ANMNESIE: "Bis dahin wirst du überall als klassenloser Mensch
+// gezählt." Ende: ein gewonnener Kampf, an dem die Person beteiligt war.
+{
+  const anmnesie = findCard('TEMPORÄRE ANMNESIE').id;
+  const elf = findCard('ELF', 'race').id;
+  const krieger = findCard('KRIEGER', 'class').id;
+  const p = makePlayer({ races: [elf], classes: [krieger] });
+  const room = makeRoom([p]);
+  assert.ok(S.hasRace(p, 'ELF') && S.hasClass(p, 'KRIEGER'), 'Testvoraussetzung');
+  S.addActiveCurse(room, p, 'TEMPORÄRE ANMNESIE', anmnesie);
+  assert.ok(!S.hasRace(p, 'ELF'), 'Rasse vergessen');
+  assert.ok(!S.hasClass(p, 'KRIEGER'), 'Klasse vergessen');
+  assert.deepStrictEqual([p.races.length, p.classes.length], [1, 1], 'die Karten bleiben ausliegen');
+  // Monsterbonus gegen Elfen greift nicht mehr.
+  const sauger = findCard('GESICHTSSAUGER', 'monster');
+  S.startCombat(room, 'p1', [sauger.id], { fromHand: false });
+  assert.strictEqual(S.combatTotals(room).monsterStrength, sauger.level, '"+6 gegen Elfen" zaehlt nicht mehr');
+  room.combat = null;
+}
+// Ein Gegenstand, der eine Klasse verleiht, zaehlt ebenfalls nicht.
+{
+  const anmnesie = findCard('TEMPORÄRE ANMNESIE').id;
+  const ohren = findCard('FALSCHE OHREN');
+  const p = makePlayer();
+  p.equipped.special = [ohren.id];
+  const room = makeRoom([p]);
+  assert.ok(S.monsterSeesRace(p, 'ELF'), 'Testvoraussetzung: Falsche Ohren machen zum Elfen');
+  S.addActiveCurse(room, p, 'TEMPORÄRE ANMNESIE', anmnesie);
+  assert.ok(!S.monsterSeesRace(p, 'ELF'), 'auch geliehene Rassen sind vergessen');
+}
+// Ende: gewonnener Kampf, kaempfend ODER helfend.
+{
+  const anmnesie = findCard('TEMPORÄRE ANMNESIE').id;
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const ende = (alsHelfer) => {
+    const a = makePlayer({ id: 'p1', name: 'A', level: 9 });
+    const h = makePlayer({ id: 'p2', name: 'B' });
+    const room = makeRoom([a, h]);
+    const opfer = alsHelfer ? h : a;
+    S.addActiveCurse(room, opfer, 'TEMPORÄRE ANMNESIE', anmnesie);
+    S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+    if (alsHelfer) room.combat.helperId = 'p2';
+    S.resolveCombatWin(room);
+    return !opfer.activeCurses.some((f) => f.kind === 'traitsVergessen');
+  };
+  assert.ok(ende(false), 'eigener Sieg beendet die Anmnesie');
+  assert.ok(ende(true), 'Sieg als Hilfe beendet die Anmnesie');
+}
+
 fertig();
 console.log('card-regelluecken-welle2: alle Checks gruen');

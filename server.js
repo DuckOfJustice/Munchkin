@@ -1342,6 +1342,9 @@ const RACE_ADJECTIVE_DE = { ELF: 'Elfen', ZWERG: 'Zwerge', HALBLING: 'Halblinge'
 const CLASS_ADJECTIVE_DE = { ZAUBERER: 'Zauberer', PRIESTER: 'Priester', DIEB: 'Diebe', KRIEGER: 'Krieger' };
 
 function hasRace(player, substr) {
+  // TEMPORÄRE ANMNESIE: "ueberall als klassenloser Mensch gezaehlt" - die
+  // Karten bleiben ausliegen, zaehlen aber nirgends (auch nicht als Vorteil).
+  if (hatFluchArt(player, 'traitsVergessen')) return false;
   return player.races.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
 }
 
@@ -1360,6 +1363,8 @@ function istGeschlecht(player, g) {
 // `nurMonster` heisst: gilt nur dort, wo Monster reagieren - nicht fuer die
 // Faehigkeiten der Rasse selbst.
 function itemGrantsTrait(player, art, name, auchNurMonster) {
+  // TEMPORÄRE ANMNESIE: geliehene Rassen/Klassen sind genauso vergessen.
+  if (hatFluchArt(player, 'traitsVergessen')) return false;
   return equippedItemIds(player).some((id) => {
     const c = card(id);
     const regel = c && ITEM_GRANTS_TRAIT[c.name];
@@ -3129,6 +3134,7 @@ function handleLootRoom(room, playerId) {
 // ---------------------------------------------------------------------------
 
 function hasClass(player, substr) {
+  if (hatFluchArt(player, 'traitsVergessen')) return false; // siehe hasRace
   // ZAUBERCOUCH: "... wirst du in allen Belangen ... als Zauberer angesehen."
   if (itemGrantsTrait(player, 'class', substr, true)) return true;
   return player.classes.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
@@ -5412,6 +5418,13 @@ function finishCombatWin(room) {
   if (helferBeiSieg && clearActiveCurseByKind(helferBeiSieg, 'keinAergerSuchen')) {
     log(room, `${helferBeiSieg.name} hat jemandem zum Sieg verholfen - die Touristenfalle ist vorbei.`);
   }
+  // TEMPORÄRE ANMNESIE endet mit einem gewonnenen Kampf - "wenn du ein Monster
+  // getoetet hast oder dabei geholfen hast", also fuer alle Beteiligten.
+  combatParticipants(room).forEach((p) => {
+    if (clearActiveCurseByKind(p, 'traitsVergessen')) {
+      log(room, `${p.name} erinnert sich wieder an Rasse und Klasse.`);
+    }
+  });
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   // "... bis du ein Monster ohne Hilfe tötest." Die Loeschung steht VOR der

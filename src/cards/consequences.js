@@ -396,6 +396,8 @@ module.exports = (ctx) => {
     'EDELMUT': () => ({ type: 'curseEdelmut' }),
     'HUNGRIGER RUCKSACK': () => null,
     'KLEINER FEHLER': () => ({ type: 'curseKleinerFehler' }),
+    // TEMPORÄRE ANMNESIE wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES, kind 'traitsVergessen') - kein Sofort-Effekt:
     'TEMPORÄRE ANMNESIE': () => null,
 
     // "Du verlierst deinen wertvollsten Gegenstand, den du im Spiel ausliegen
