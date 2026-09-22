@@ -77,6 +77,12 @@ module.exports = () => {
     // Weihnachtsmanns, kind 'noTreasure').
     'NARRENGOLD': { kind: 'noCombatTreasure', dauer: 'naechsterKampf',
       hinweis: 'Im nächsten Kampf gibt es für dich keinen Schatz.' },
+    // "Am Ende jedes deiner Zuege wuerfelst du, bevor 'Milde Gabe' verteilt
+    // oder abgelegt wird. Dein Rucksack frisst entsprechend des Wurfs so viele
+    // zufaellige Karten deiner Hand! Bei einer gewuerfelten 6 verschluckt der
+    // Rucksack sich selbst und verschwindet." Wurf: rucksackWurf in server.js.
+    'HUNGRIGER RUCKSACK': { kind: 'hungrigerRucksack', dauer: 'dauerhaft',
+      hinweis: 'Am Ende jedes deiner Züge frisst der Rucksack gewürfelt viele Handkarten (bei einer 6 ist er weg).' },
     // "Eine Beule am Kopf laesst dich deine Klasse(n) und Rasse(n) vergessen
     // ... Bis dahin wirst du ueberall als klassenloser Mensch gezaehlt."
     // Wirkung in hasRace/hasClass/itemGrantsTrait, Ende in finishCombatWin.

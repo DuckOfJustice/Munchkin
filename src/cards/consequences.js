@@ -394,6 +394,8 @@ module.exports = (ctx) => {
     // mitten in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-
     // Status) - bleiben bewusst manuell:
     'EDELMUT': () => ({ type: 'curseEdelmut' }),
+    // HUNGRIGER RUCKSACK wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES, kind 'hungrigerRucksack') - der Wurf faellt am Zugende:
     'HUNGRIGER RUCKSACK': () => null,
     'KLEINER FEHLER': () => ({ type: 'curseKleinerFehler' }),
     // TEMPORÄRE ANMNESIE wirkt ausschliesslich ueber den Fluch-Tracker

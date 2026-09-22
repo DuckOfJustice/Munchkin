@@ -129,5 +129,52 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.ok(ende(true), 'Sieg als Hilfe beendet die Anmnesie');
 }
 
+// --- HUNGRIGER RUCKSACK: "Am Ende jedes deiner Zuege wuerfelst du, bevor
+// 'Milde Gabe' verteilt oder abgelegt wird ... Bei einer gewuerfelten 6
+// verschluckt der Rucksack sich selbst und verschwindet."
+{
+  const rucksack = findCard('HUNGRIGER RUCKSACK').id;
+  const handKarten = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 4).map((c) => c.id);
+  const wurf = (zahl) => {
+    const p = makePlayer({ hand: handKarten.slice() });
+    const room = makeRoom([p], { turnPhase: 'pluendern' });
+    S.addActiveCurse(room, p, 'HUNGRIGER RUCKSACK', rucksack);
+    const zufall = Math.random;
+    Math.random = () => (zahl - 1) / 6 + 0.01; // rollDie() -> zahl
+    try { S.setzeZugphase(room, 'gabe'); } finally { Math.random = zufall; }
+    return { p, room };
+  };
+  const zwei = wurf(2);
+  assert.strictEqual(zwei.p.hand.length, 2, 'Wurf 2: zwei Handkarten gefressen');
+  assert.strictEqual(zwei.room.treasureDiscard.length, 2, 'die Karten liegen auf dem Ablagestapel');
+  assert.ok(zwei.p.activeCurses.some((f) => f.kind === 'hungrigerRucksack'), 'der Fluch bleibt');
+
+  const sechs = wurf(6);
+  assert.strictEqual(sechs.p.hand.length, 4, 'Wurf 6: die Hand bleibt unversehrt');
+  assert.ok(!sechs.p.activeCurses.some((f) => f.kind === 'hungrigerRucksack'), 'Wurf 6: der Fluch endet');
+}
+// Nur einmal pro Zug, und nur im Zug der verfluchten Person.
+{
+  const rucksack = findCard('HUNGRIGER RUCKSACK').id;
+  const handKarten = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 4).map((c) => c.id);
+  const zufall = Math.random;
+  const p = makePlayer({ hand: handKarten.slice() });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })], { turnPhase: 'pluendern' });
+  S.addActiveCurse(room, p, 'HUNGRIGER RUCKSACK', rucksack);
+  Math.random = () => 0.01; // rollDie() -> 1
+  try {
+    S.setzeZugphase(room, 'gabe');
+    S.setzeZugphase(room, 'gabe'); // zweiter Uebergang im selben Zug
+  } finally { Math.random = zufall; }
+  assert.strictEqual(p.hand.length, 3, 'der Wurf faellt pro Zug nur einmal');
+
+  const fremd = makePlayer({ id: 'p2', name: 'B', hand: handKarten.slice() });
+  const room2 = makeRoom([makePlayer({ id: 'p1', name: 'A' }), fremd], { turnPhase: 'pluendern', turnIndex: 0 });
+  S.addActiveCurse(room2, fremd, 'HUNGRIGER RUCKSACK', rucksack);
+  Math.random = () => 0.01;
+  try { S.setzeZugphase(room2, 'gabe'); } finally { Math.random = zufall; }
+  assert.strictEqual(fremd.hand.length, 4, 'im fremden Zug frisst der Rucksack nicht');
+}
+
 fertig();
 console.log('card-regelluecken-welle2: alle Checks gruen');

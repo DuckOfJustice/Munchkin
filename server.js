@@ -849,6 +849,7 @@ function endTurn(room) {
   }
   // Der HALBLING-Doppelverkauf gilt "pro Runde" - siehe handleSellItems.
   room.players.forEach((p) => { p.halblingSaleUsed = false; });
+  room.rucksackWurfZug = null; // HUNGRIGER RUCKSACK: im neuen Zug wird wieder gewuerfelt
   room.turnPhase = 'tuer';
   
   if (room.bumerangReturns) {
@@ -1198,7 +1199,7 @@ function handleAckConsequence(room, playerId) {
     // oeffneVerlustKonsequenz und combatEndPhase), dann bekommt die
     // urspruengliche Person trotz
     // verlorenem Kampf ihre Pluenderphase.
-    room.turnPhase = combatEndPhase({ originalActorId: pc.originalActorId }, false);
+    setzeZugphase(room, combatEndPhase({ originalActorId: pc.originalActorId }, false));
     log(room, room.turnPhase === 'pluendern'
       ? `${player.name} macht weiter mit Phase 3: Raum plündern.`
       : `${player.name} macht weiter mit Phase 4: Milde Gabe.`);
@@ -3106,7 +3107,7 @@ function handleLootRoom(room, playerId) {
     };
     log(room, `${player.name} plündert den Raum: 1 verdeckte Türkarte auf die Hand.`);
   }
-  room.turnPhase = 'gabe';
+  setzeZugphase(room, 'gabe');
   touchRoom(room);
 }
 
@@ -3667,6 +3668,38 @@ function rollWithWindow(room, player, purpose, onResolve) {
   if (!holders.length || room.pendingRoll) { onResolve(roll); return; }
   room.pendingRoll = { playerId: player.id, purpose, roll, holders, onResolve };
   log(room, `${player.name} würfelt ${roll}${malus ? ` (${malus} durch einen Fluch)` : ''} - es darf noch auf den Wurf reagiert werden.`);
+}
+
+// Eine Stelle fuer den Phasenwechsel, damit Effekte, die an einer Phase
+// haengen, nicht an jedem der Uebergaenge einzeln stehen muessen.
+function setzeZugphase(room, phase) {
+  room.turnPhase = phase;
+  if (phase === 'gabe') rucksackWurf(room);
+}
+
+// HUNGRIGER RUCKSACK: der Wurf faellt beim Uebergang in die Milde Gabe -
+// "bevor Milde Gabe verteilt oder abgelegt wird". Pro Zug nur einmal
+// (room.rucksackWurfZug, in endTurn zurueckgesetzt), und nur fuer die Person,
+// die gerade am Zug ist - der Fluch nennt "jedes deiner Zuege".
+function rucksackWurf(room) {
+  const p = currentPlayer(room);
+  if (!p || !hatFluchArt(p, 'hungrigerRucksack')) return;
+  if (room.rucksackWurfZug === room.turnIndex) return;
+  room.rucksackWurfZug = room.turnIndex;
+  wurfMitFenster(room, p, 'hungrigerRucksack', (roll) => {
+    if (roll === 6) {
+      clearActiveCurseByKind(p, 'hungrigerRucksack');
+      return `Würfelwurf ${roll} -> der Hungrige Rucksack verschluckt sich selbst und verschwindet`;
+    }
+    const anzahl = Math.min(roll, p.hand.length);
+    for (let i = 0; i < anzahl; i++) {
+      const id = p.hand[Math.floor(Math.random() * p.hand.length)];
+      removeFromHand(p, id);
+      clearCheatIfLost(p, id);
+      discardCard(room, id);
+    }
+    return `Würfelwurf ${roll} -> der Hungrige Rucksack frisst ${anzahl} Handkarte(n)`;
+  });
 }
 
 // Wuerfelwurf fuer Stellen, die ihr Ergebnis als Text zurueckgeben muessen
@@ -4463,7 +4496,7 @@ const COMBAT_POTION_CARD_NAMES = [...new Set(ALL_CARDS.filter(isCombatPotionCard
 function beendeKampfOhneSieg(room, c, thenLoot) {
   clearNextCombatCurses(combatParticipants(room));
   room.combat = null;
-  room.turnPhase = combatEndPhase(c, thenLoot);
+  setzeZugphase(room, combatEndPhase(c, thenLoot));
 }
 
 function combatEndPhase(c, thenLoot) {
@@ -5612,7 +5645,7 @@ function finishCombatWin(room) {
   // ÜBERFALLTRANK: siehe combatEndPhase - der urspruengliche Spieler (nicht
   // die/der Kaempfende) darf danach den Raum pluendern, room.turnIndex zeigt
   // ohnehin noch auf sie/ihn, der Zug ist nie gewechselt.
-  if (!won) room.turnPhase = combatEndPhase(c, false);
+  if (!won) setzeZugphase(room, combatEndPhase(c, false));
   touchRoom(room);
 }
 
@@ -5788,7 +5821,7 @@ function beendeFluchtphase(room, c) {
   // kassiert, wechselt die Phase erst mit ihrer Bestaetigung (wie bisher,
   // siehe handleAckConsequence). Sonst jetzt.
   const actorGescheitert = gescheitert.some((p) => p.id === c.actorId);
-  if (!actorGescheitert) room.turnPhase = combatEndPhase(c, false);
+  if (!actorGescheitert) setzeZugphase(room, combatEndPhase(c, false));
   if (!gescheitert.length) return;
   // Helfer:innen zuerst, die kaempfende Person zuletzt - deren Bestaetigung
   // gibt den Zug wieder frei, also soll sie am Ende stehen.
@@ -7169,7 +7202,7 @@ module.exports = {
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
   hatKampfschatzSperre, hatUntotenAngst, cursedItemIds, unequipSlotCard, ownTradeIds,
-  clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence, handleResolveConsequenceChoice,
+  clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence, setzeZugphase, handleResolveConsequenceChoice,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
   scheduleBotActionsIfNeeded,
