@@ -230,5 +230,23 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(staerke(makePlayer({})), kakerlake.level + 5, 'Mensch bekommt weiter +5 ab');
 }
 
+// --- Der WUNSCHRING ("Beendet jeden Fluch") beendet jeden der vier neuen.
+{
+  const ring = findCard('WUNSCHRING');
+  [['TOURISTENFALLE', 'keinAergerSuchen'], ['TEMPORÄRE ANMNESIE', 'traitsVergessen'],
+    ['HUNGRIGER RUCKSACK', 'hungrigerRucksack'], ['GUMMI-GOLEM', 'zuckerschock']].forEach(([name, kind]) => {
+    const quelle = findCard(name);
+    const p = makePlayer({ hand: [ring.id] });
+    const room = makeRoom([p]);
+    S.addActiveCurse(room, p, name, quelle.id);
+    assert.ok(p.activeCurses.some((f) => f.kind === kind), `${name}: Fluch eingetragen`);
+    S.handleUseCardPower(room, 'p1', ring.id);
+    if (room.pendingCardAction && room.pendingCardAction.options) {
+      S.handleResolveCardChoice(room, 'p1', room.pendingCardAction.options[0].id);
+    }
+    assert.ok(!p.activeCurses.some((f) => f.kind === kind), `${name}: der Wunschring beendet ihn`);
+  });
+}
+
 fertig();
 console.log('card-regelluecken-welle2: alle Checks gruen');
