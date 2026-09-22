@@ -586,6 +586,7 @@ function publicPlayer(room, p) {
     attachments: p.attachments, // SCHUMMELN!: markiert den geschummelten Gegenstand fuer den Client
     activeCurses: p.activeCurses, // anhaltende Flueche, siehe LINGERING_CURSES
     gender: p.gender,
+    zaubercouch: p.zaubercouch || null,
     strength: baseStrength(p, room),
     handLimit: handLimit(p), // ZWERG darf 6 Karten halten, alle anderen 5
   };
@@ -799,6 +800,7 @@ function startGame(room) {
   room.kartenSperren = [];
   room.revealedDoorCard = null;
   room.combat = null;
+  zaubercouchZuruecksetzen(room);
   room.pendingConsequence = null;
   room.winner = null;
   room.phase = 'playing';
@@ -1365,6 +1367,7 @@ function itemGrantsTrait(player, art, name, auchNurMonster) {
     const regel = c && ITEM_GRANTS_TRAIT[c.name];
     if (!regel || !regel[art]) return false;
     if (regel.nurMonster && !auchNurMonster) return false;
+    if (regel.nurWennBenutzt && player.zaubercouch !== 'ja') return false;
     return regel[art].toUpperCase().includes(name.toUpperCase());
   });
 }
@@ -3542,7 +3545,9 @@ function fleeModifierParts(room, player) {
   if (hasPowerGroup(player, 'ASSASSINE DER ROTEN MANTIS')) parts.push({ label: 'Heimlichkeit', amount: 1 });
   equippedItemIds(player).forEach((id) => {
     const c = card(id);
-    if (c && FLEE_ITEM_BONUS[c.name]) parts.push({ label: c.name, amount: FLEE_ITEM_BONUS[c.name] });
+    if (c && FLEE_ITEM_BONUS[c.name] && !(c.name === 'ZAUBERCOUCH' && player.zaubercouch !== 'ja')) {
+      parts.push({ label: c.name, amount: FLEE_ITEM_BONUS[c.name] });
+    }
   });
   if (room.combat) {
     room.combat.monsterIds.forEach((id) => {
@@ -4078,7 +4083,33 @@ function dryadeWirkung(room, player) {
   log(room, `Die Dryade schwaecht ${player.name}: ${desc}.`);
 }
 
+// ZAUBERCOUCH: "Du kannst zu Beginn eines jeden Kampfes entscheiden, ob du
+// die Zaubercouch verwenden willst." Wer mit angelegter Couch in einen Kampf
+// kommt (kaempfend bei Kampfbeginn, helfend beim Einstieg), bekommt die
+// Frage. Solange sie offen ist, wird nicht ausgewertet. Bots sagen Nein.
+// Der Zustand haengt am Spieler, weil hasClass keinen Raum kennt; er wird bei
+// jedem Kampfbeginn und jedem Kampfende zurueckgesetzt.
+function zaubercouchFragen(player) {
+  if (!player || !equippedItemIds(player).some((id) => (card(id) || {}).name === 'ZAUBERCOUCH')) return;
+  player.zaubercouch = player.isBot ? 'nein' : 'offen';
+}
+function zaubercouchZuruecksetzen(room) {
+  room.players.forEach((p) => { delete p.zaubercouch; });
+}
+function zaubercouchOffen(room) {
+  return combatParticipants(room).filter((p) => p.zaubercouch === 'offen');
+}
+function handleAnswerZaubercouch(room, playerId, benutzen) {
+  const p = findPlayer(room, playerId);
+  if (!room.combat || !p || p.zaubercouch !== 'offen') return;
+  p.zaubercouch = benutzen ? 'ja' : 'nein';
+  log(room, `${p.name} ${benutzen ? 'ruht sich auf der Zaubercouch aus (Zauberer, -1 auf Weglaufen)' : 'verzichtet in diesem Kampf auf die Zaubercouch'}.`);
+  refreshCombatReady(room); // Klasse und Staerke koennen sich geaendert haben
+  touchRoom(room);
+}
+
 function startCombat(room, actorId, monsterIds, opts) {
+  zaubercouchZuruecksetzen(room);
   room.players.forEach((p) => pruefeSlipperVerlust(room, p));
   room.combatHappenedThisTurn = true;
   room.turnPhase = 'kampf';
@@ -4114,6 +4145,7 @@ function startCombat(room, actorId, monsterIds, opts) {
     ready: {},         // playerId -> true, sobald jemand die Auswertung freigibt
     readySignature: null,
   };
+  zaubercouchFragen(findPlayer(room, actorId));
   dryadeWirkung(room, findPlayer(room, actorId));
   touchRoom(room);
 }
@@ -4187,6 +4219,7 @@ function handleSetCombatReady(room, playerId, ready) {
   const c = room.combat;
   if (!c) return;
   if (!combatReadyRequired(room).includes(playerId)) return;
+  if (ready && findPlayer(room, playerId) && findPlayer(room, playerId).zaubercouch === 'offen') return;
   c.ready = c.ready || {};
   if (ready) c.ready[playerId] = true; else delete c.ready[playerId];
   const p = findPlayer(room, playerId);
@@ -4390,6 +4423,7 @@ const COMBAT_POTION_CARD_NAMES = [...new Set(ALL_CARDS.filter(isCombatPotionCard
 function beendeKampfOhneSieg(room, c, thenLoot) {
   clearNextCombatCurses(combatParticipants(room));
   room.combat = null;
+  zaubercouchZuruecksetzen(room);
   room.turnPhase = combatEndPhase(c, thenLoot);
 }
 
@@ -5153,6 +5187,7 @@ function handleRespondHelp(room, playerId, accept) {
       return;
     }
     c.helperId = playerId;
+    zaubercouchFragen(findPlayer(room, playerId));
     // Die Zusage aus der Anfrage wird beim Sieg eingeloest (resolveCombatWin).
     c.helperReward = c.helperPending.reward || 0;
     dryadeWirkung(room, findPlayer(room, playerId));
@@ -5237,6 +5272,12 @@ function handleEvaluateCombat(room, playerId) {
   if (room.pendingRoll) return;
   const c = room.combat;
   if (c.actorId !== playerId) return;
+  const couchOffen = zaubercouchOffen(room);
+  if (couchOffen.length) {
+    log(room, `Erst entscheiden, ob die Zaubercouch benutzt wird: ${couchOffen.map((p) => p.name).join(', ')}.`);
+    touchRoom(room);
+    return;
+  }
   // Erst auswerten, wenn niemand mehr eingreifen will.
   if (!combatAllReady(room)) return;
   // DER GANZ NORMALE HASE wuerfelt "nachdem du entschieden hast, wer hilft" -
@@ -5503,6 +5544,7 @@ function finishCombatWin(room) {
     log(room, `${actor.name} hat die Hilfe mit den Knieschützern erzwungen und kann in diesem Kampf nicht gewinnen.`);
   }
   room.combat = null;
+  zaubercouchZuruecksetzen(room);
   // Auch die Helfer:in kann so Stufe 10 erreichen - die Stufe kommt aus einem
   // besiegten Monster, damit zählt sie als Sieg.
   let won = checkWin(room, actor);
@@ -5684,6 +5726,7 @@ function beendeFluchtphase(room, c) {
   const gescheitert = (c.fleeFailed || []).map((id) => findPlayer(room, id)).filter(Boolean);
   discardMonsterIds(room.doorDiscard, c.monsterIds);
   room.combat = null;
+  zaubercouchZuruecksetzen(room);
   // Die Zugphase haengt an der kaempfenden Person: hat SIE das Miese Zeug
   // kassiert, wechselt die Phase erst mit ihrer Bestaetigung (wie bisher,
   // siehe handleAckConsequence). Sonst jetzt.
@@ -6911,6 +6954,7 @@ io.on('connection', (socket) => {
     room.phase = 'lobby';
     room.turnPhase = null;
     room.combat = null;
+    zaubercouchZuruecksetzen(room);
     room.pendingConsequence = null;
     room.winner = null;
     room.revealedDoorCard = null;
@@ -6942,6 +6986,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'requestHelp', ({ targetId, reward }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId, reward)));
   onSafe(socket, 'respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
   onSafe(socket, 'setCombatReady', ({ ready }) => act(socket, (room, pid) => handleSetCombatReady(room, pid, ready !== false)));
+  onSafe(socket, 'answerZaubercouch', ({ benutzen }) => act(socket, (room, pid) => handleAnswerZaubercouch(room, pid, benutzen === true)));
   onSafe(socket, 'evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
   onSafe(socket, 'attemptFlee', ({ modifier }) => act(socket, (room, pid) => handleAttemptFlee(room, pid, modifier)));
   onSafe(socket, 'fleeReroll', ({ cardId }) => act(socket, (room, pid) => handleFleeReroll(room, pid, cardId === undefined ? null : cardId)));
@@ -7064,4 +7109,5 @@ module.exports = {
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
   scheduleBotActionsIfNeeded,
+  handleAnswerZaubercouch,
 };

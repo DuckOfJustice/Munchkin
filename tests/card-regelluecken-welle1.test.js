@@ -211,5 +211,61 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.ok(q.activeCurses.some((f) => f.name === 'HUHN AUF DEINEM KOPF'), 'selbst abgelegt: Huhn bleibt');
 }
 
+// --- 5. ZAUBERCOUCH: "Du kannst zu Beginn eines jeden Kampfes entscheiden, ob
+// du die Zaubercouch verwenden willst. Wenn du es tust, erhaeltst du -1 auf
+// Weglaufen." Verwenden = Zauberer.
+{
+  const couch = findCard('ZAUBERCOUCH').id;
+  const goblin = findCard('LAHMER GOBLIN', 'monster').id;
+  const mitCouch = (o) => { const p = makePlayer(o); p.equipped.special = [couch]; return p; };
+  const couchMalus = (room, p) => S.fleeModifierParts(room, p).some((x) => x.label === 'ZAUBERCOUCH');
+
+  // Ausserhalb eines Kampfs: kein Zauberer.
+  const p = mitCouch();
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  assert.ok(!S.hasClass(p, 'ZAUBERER'), 'ohne Kampf kein Zauberer');
+
+  // Kampfbeginn: Frage offen, Kampf nicht auswertbar.
+  S.startCombat(room, 'p1', [goblin], { fromHand: false });
+  assert.strictEqual(p.zaubercouch, 'offen', 'Frage zu Kampfbeginn');
+  assert.ok(!S.hasClass(p, 'ZAUBERER'), 'unbeantwortet: nicht benutzt');
+  assert.ok(!couchMalus(room, p), 'unbeantwortet: kein Malus');
+  S.handleEvaluateCombat(room, 'p1');
+  // Stufe 5 gegen den LAHMEN GOBLIN: eine Auswertung wuerde den Kampf beenden.
+  assert.ok(room.combat, 'mit offener Couch-Frage keine Auswertung');
+  assert.ok(room.logs.some((l) => /Zaubercouch/.test(l.text)), 'der Verlauf nennt den Grund');
+
+  // "Ja": Zauberer und -1 auf Weglaufen, Antwort danach fest.
+  S.handleAnswerZaubercouch(room, 'p1', true);
+  assert.strictEqual(p.zaubercouch, 'ja');
+  assert.ok(S.hasClass(p, 'ZAUBERER'), 'mit Couch Zauberer');
+  assert.ok(couchMalus(room, p), 'mit Couch -1 auf Weglaufen');
+  S.handleAnswerZaubercouch(room, 'p1', false);
+  assert.strictEqual(p.zaubercouch, 'ja', 'die Antwort gilt fuer diesen Kampf');
+
+  // Naechster Kampf: neue Frage; "Nein" = kein Zauberer, kein Malus.
+  S.startCombat(room, 'p1', [goblin], { fromHand: false });
+  assert.strictEqual(p.zaubercouch, 'offen', 'neue Frage im naechsten Kampf');
+  S.handleAnswerZaubercouch(room, 'p1', false);
+  assert.ok(!S.hasClass(p, 'ZAUBERER') && !couchMalus(room, p), 'Nein: weder Zauberer noch Malus');
+
+  // Helfer mit Couch: Frage beim Einstieg, bis dahin kein "Bereit".
+  const k = makePlayer({ id: 'p1' });
+  const h = mitCouch({ id: 'p2', name: 'B' });
+  const room3 = makeRoom([k, h]);
+  S.startCombat(room3, 'p1', [goblin], { fromHand: false });
+  room3.combat.helperPending = { targetId: 'p2', compelled: false, reward: 0 };
+  S.handleRespondHelp(room3, 'p2', true);
+  assert.strictEqual(h.zaubercouch, 'offen', 'Frage beim Einstieg als Helfer');
+  S.handleSetCombatReady(room3, 'p2', true);
+  assert.ok(!(room3.combat.ready || {}).p2, 'mit offener Couch-Frage kein Bereit');
+
+  // Bot: antwortet sofort "Nein".
+  const bot = mitCouch({ id: 'p1', isBot: true });
+  const room4 = makeRoom([bot]);
+  S.startCombat(room4, 'p1', [goblin], { fromHand: false });
+  assert.strictEqual(bot.zaubercouch, 'nein', 'Bots blockieren nicht');
+}
+
 fertig();
 console.log('card-regelluecken-welle1: alle Checks gruen');

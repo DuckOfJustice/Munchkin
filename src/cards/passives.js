@@ -205,13 +205,11 @@ module.exports = (ctx) => {
   // ZAUBERCOUCH: "Wenn du dich auf dieser Couch ausruhst, wirst du IN ALLEN
   //   BELANGEN zusaetzlich zu deiner (oder deinen) urspruenglichen Klasse(n)
   //   als Zauberer angesehen."
-  // ponytail: die Couch ist hier immer "in Benutzung" - die Karte laesst die
-  // Wahl zu Kampfbeginn ("Du kannst entscheiden, ob du sie verwenden willst"),
-  // dafuer braeuchte es eine Ja/Nein-Frage in jedem Kampfstart. Der Preis
-  // dafuer (-1 auf Weglaufen) gilt deshalb ebenfalls dauerhaft.
+  // Nur wenn zu Beginn des Kampfs gewaehlt (player.zaubercouch === 'ja',
+  // siehe zaubercouchFragen in server.js) - dann auch -1 auf Weglaufen.
   const ITEM_GRANTS_TRAIT = {
     'FALSCHE OHREN': { race: 'ELF', nurMonster: true },
-    'ZAUBERCOUCH': { class: 'ZAUBERER' },
+    'ZAUBERCOUCH': { class: 'ZAUBERER', nurWennBenutzt: true },
     'FALSCHER BART': { race: 'ZWERG', nurMonster: true },
   };
 
