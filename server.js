@@ -4686,14 +4686,20 @@ function handleSetCombatModifier(room, playerId, who, value) {
 // eingesetzt werden - kaempfe nur mit deiner Charakterstufe." combatTotals
 // laesst deshalb jeden Munchkin-Bonus fallen (actorModifier eingeschlossen).
 // Eine Karte, die genau das bringen soll, waere also verbraucht, ohne zu
-// wirken - fuer wen sie wirkungslos ist, wird sie hier abgewiesen statt still
-// geschluckt. Wer NICHT mitkaempft, darf weiterhin das Monster verstaerken:
-// diese Seite zaehlt auch gegen die Ghoule.
-function munchkinBonusWirkungslos(room, player, spec) {
-  if (!spec || spec.type !== 'modifier') return false;
-  if (!combatHasMonster(room, MONSTER_IGNORES_BONUSES)) return false;
-  if (!combatParticipants(room).some((p) => p.id === player.id)) return false;
-  return spec.side === 'actor' || spec.side === 'either';
+// wirken und wird hier abgewiesen statt still geschluckt. Die Monster-Seite
+// zaehlt auch gegen die Ghoule: Karten mit Seitenwahl ("egal welche Seite",
+// eigene Wahl) bleiben spielbar, nur ihre Munchkin-Option faellt weg (siehe
+// ohneMunchkinBonus).
+const istNurMunchkinBonus = (action) => !!action && action.type === 'modifier' && action.side === 'actor';
+function munchkinBonusWirkungslos(room, spec) {
+  if (!spec || !combatHasMonster(room, MONSTER_IGNORES_BONUSES)) return false;
+  if (spec.type === 'modifier') return spec.side === 'actor';
+  if (spec.type === 'choice') return spec.options.every((o) => istNurMunchkinBonus(o.action));
+  return false;
+}
+function ohneMunchkinBonus(room, options) {
+  if (!combatHasMonster(room, MONSTER_IGNORES_BONUSES)) return options;
+  return options.filter((o) => !istNurMunchkinBonus(o.action));
 }
 
 // Gespielte Kampfkarte als Anzeige-Ereignis: alle am Tisch sollen kurz sehen,
@@ -4856,7 +4862,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
       touchRoom(room);
       return;
     }
-    if (munchkinBonusWirkungslos(room, player, doorSpec)) {
+    if (munchkinBonusWirkungslos(room, doorSpec)) {
       log(room, `"${c.name}" wuerde gegen "${monsterIgnoringBonusesName(room)}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
       touchRoom(room);
       return;
@@ -4895,7 +4901,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     touchRoom(room);
     return;
   }
-  if (munchkinBonusWirkungslos(room, player, spec)) {
+  if (munchkinBonusWirkungslos(room, spec)) {
     log(room, `"${c.name}" wuerde gegen "${monsterIgnoringBonusesName(room)}" nichts bewirken (nur Charakterstufen zaehlen) - die Karte bleibt auf der Hand.`);
     touchRoom(room);
     return;
@@ -4918,10 +4924,10 @@ function handlePlayCombatCard(room, playerId, cardId) {
     // actorAmount: Karten, deren Bonus nur auf der Munchkin-Seite steigt
     // (SCHARFE PFEFFERSOSSE "+6 zur Hilfe von Halblingen").
     const fuerMunchkins = spec.actorAmount != null ? spec.actorAmount : spec.amount;
-    const seiten = [
+    const seiten = ohneMunchkinBonus(room, [
       { id: 'munchkins', label: `+${fuerMunchkins} für die Munchkins`, action: { type: 'modifier', side: 'actor', amount: fuerMunchkins } },
       { id: 'monster', label: `+${spec.amount} für das Monster`, action: { type: 'modifier', side: 'monster', amount: spec.amount } },
-    ].filter((o) => !(o.id === 'munchkins' && combatHasMonster(room, MONSTER_IGNORES_BONUSES)));
+    ]);
     openCardChoice(room, player, c.name, seiten);
     room.pendingCardAction.sourceCardId = cardId;
     log(room, `${player.name} spielt "${c.name}" im Kampf - Seite nötig.`, [cardId]);
@@ -4930,7 +4936,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
     return;
   }
   if (spec.type === 'choice') {
-    openCardChoice(room, player, c.name, spec.options);
+    openCardChoice(room, player, c.name, ohneMunchkinBonus(room, spec.options));
     room.pendingCardAction.sourceCardId = cardId;
     log(room, `${player.name} spielt "${c.name}" im Kampf - Wahl nötig.`, [cardId]);
     announceCardPlay(room, player, cardId, 'Wahl steht noch aus');
