@@ -77,6 +77,11 @@ module.exports = () => {
     // Weihnachtsmanns, kind 'noTreasure').
     'NARRENGOLD': { kind: 'noCombatTreasure', dauer: 'naechsterKampf',
       hinweis: 'Im nächsten Kampf gibt es für dich keinen Schatz.' },
+    // "Du darfst nicht 'Auf Aerger aus sein'. Dieser Fluch bleibt bestehen,
+    // bis du einem anderen Spieler geholfen hast, einen Kampf zu gewinnen."
+    // Sperre und Ende: keinAergerSuchen in server.js.
+    'TOURISTENFALLE': { kind: 'keinAergerSuchen', dauer: 'dauerhaft',
+      hinweis: 'Kein "Auf Ärger aus sein", bis du jemandem zum Sieg verhilfst.' },
     // "Du hast Angst vor den Untoten." Dauerhaft - der Kartentext nennt kein
     // Ende, nur der WUNSCHRING beendet ihn.
     'TODESANGST': { kind: 'fearUndead', dauer: 'dauerhaft',

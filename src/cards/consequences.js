@@ -378,6 +378,8 @@ module.exports = (ctx) => {
     'GESCHLECHTSUMWANDLUNG': () => ({ type: 'setGender', value: 'wechseln' }),
     'HUHN AUF DEINEM KOPF': () => null,
     'NARRENGOLD': () => null,
+    // TOURISTENFALLE wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES, kind 'keinAergerSuchen') - kein Sofort-Effekt:
     'TOURISTENFALLE': () => null,
     'MIESER SPIEGEL': () => null,
     // ZWERGENBIER wirkt ausschliesslich ueber den Fluch-Tracker

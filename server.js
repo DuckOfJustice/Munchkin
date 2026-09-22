@@ -3053,6 +3053,12 @@ function handlePlayMonsterFromHand(room, playerId, cardId) {
   if (!player.hand.includes(cardId)) return;
   const c = card(cardId);
   if (!c || c.category !== 'monster') return;
+  // TOURISTENFALLE: "Du darfst nicht 'Auf Aerger aus sein'."
+  if (hatFluchArt(player, 'keinAergerSuchen')) {
+    log(room, `${player.name} sitzt in der Touristenfalle und darf nicht auf Ärger aus sein.`);
+    touchRoom(room);
+    return;
+  }
   // Auch ein aus der Hand gespieltes Monster greift nicht an, wenn sein Text
   // das ausschließt - die Karte ist dann trotzdem verbraucht.
   if (monsterRefusesTarget(cardId, player)) {
@@ -3421,6 +3427,12 @@ function gegenstandHatSonderkraft(name) {
 // inzwischen alle Wuerfe laufen. Der Wert bleibt bei mindestens 1: ein
 // Wuerfel zeigt keine 0, und mehrere Karten lesen den Wurf als 1..6
 // (3.872 ORKS: "bei einer 1 oder 2").
+// Gibt es einen Tracker-Eintrag dieser Wirkungsart? (TOURISTENFALLE,
+// TEMPORÄRE ANMNESIE, HUNGRIGER RUCKSACK - siehe LINGERING_CURSES.)
+function hatFluchArt(player, kind) {
+  return !!player && (player.activeCurses || []).some((f) => f.kind === kind);
+}
+
 function curseRollModifier(player) {
   return (player && player.activeCurses || [])
     .filter((f) => f.kind === 'rollMalus')
@@ -5393,6 +5405,13 @@ function resolveCombatWin(room) {
 
 function finishCombatWin(room) {
   const c = room.combat;
+  // TOURISTENFALLE endet, sobald die verfluchte Person als HILFE einen Kampf
+  // gewinnt - der eigene Sieg zaehlt laut Karte nicht. Hier, solange der
+  // Kampf noch steht und die Hilfe bekannt ist.
+  const helferBeiSieg = c.helperId ? findPlayer(room, c.helperId) : null;
+  if (helferBeiSieg && clearActiveCurseByKind(helferBeiSieg, 'keinAergerSuchen')) {
+    log(room, `${helferBeiSieg.name} hat jemandem zum Sieg verholfen - die Touristenfalle ist vorbei.`);
+  }
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   // "... bis du ein Monster ohne Hilfe tötest." Die Loeschung steht VOR der
