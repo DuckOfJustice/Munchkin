@@ -72,6 +72,54 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   } finally { Math.random = zufall; }
   assert.strictEqual(room.pendingConsequence, null, 'beide entkommen');
 }
+// Ein Halbling-Helfer, vom Hase gefangen: kein Wiederholungswurf-Angebot -
+// der wuerde nichts aendern (helferGefangen erzwingt Scheitern so wie
+// FLEE_IMPOSSIBLE), die Karte waere umsonst weg. Siehe halblingRerollPossible.
+{
+  const hase = findCard('DER GANZ NORMALE HASE', 'monster').id;
+  const karte = findCard('GEILER HELM', 'item').id;
+  const halbling = findCard('HALBLING', 'race').id;
+  const a = makePlayer({ level: 3 });
+  const h = makePlayer({ id: 'p2', name: 'B', level: 3, races: [halbling], hand: [karte] });
+  const room = makeRoom([a, h]);
+  S.startCombat(room, 'p1', [hase], { fromHand: false });
+  room.combat.helperId = 'p2';
+  const zufall = Math.random;
+  Math.random = () => 0.99; // jeder Wurf eine 6 - ohne die Sperre waere die Flucht sogar geschafft
+  try {
+    S.hasenWurf(room, null);
+    room.combat.mustFlee = true;
+    S.handleAttemptFlee(room, 'p1', 0);
+    S.handleAttemptFlee(room, 'p2', 0);
+  } finally { Math.random = zufall; }
+  assert.ok(!room.combat || !room.combat.fleeRerollOffer, 'kein Wiederholungsangebot fuer den gefangenen Helfer');
+  assert.ok(room.pendingConsequence, 'der gefangene Halbling-Helfer bekommt trotzdem das Miese Zeug');
+  assert.strictEqual(room.pendingConsequence.playerId, 'p2');
+  assert.ok(h.hand.includes(karte), 'die Handkarte bleibt, da kein Angebot verbraucht wurde');
+}
+// Kam die helfende Person erst NACH dem Hasenwurf dazu, gilt die Sperre
+// trotzdem - der Check in handleAttemptFlee liest c.helperId zum
+// Flucht-Zeitpunkt, nicht zum Wurf-Zeitpunkt.
+{
+  const hase = findCard('DER GANZ NORMALE HASE', 'monster').id;
+  const a = makePlayer({ level: 3 });
+  const h = makePlayer({ id: 'p2', name: 'B', level: 3 });
+  const room = makeRoom([a, h]);
+  S.startCombat(room, 'p1', [hase], { fromHand: false });
+  // noch kein Helfer beim Wurf.
+  const zufall = Math.random;
+  Math.random = () => 0.99; // jeder Wurf eine 6
+  try {
+    S.hasenWurf(room, null);
+    assert.strictEqual(room.combat.helferGefangen, true);
+    room.combat.helperId = 'p2'; // erst jetzt kommt die Hilfe dazu
+    room.combat.mustFlee = true;
+    S.handleAttemptFlee(room, 'p1', 0);
+    S.handleAttemptFlee(room, 'p2', 0);
+  } finally { Math.random = zufall; }
+  assert.ok(room.pendingConsequence, 'die spaet dazugekommene Hilfe ist trotzdem gefangen');
+  assert.strictEqual(room.pendingConsequence.playerId, 'p2', 'die spaet dazugekommene Hilfe scheitert');
+}
 
 fertig();
 console.log('card-regelluecken-welle1: alle Checks gruen');

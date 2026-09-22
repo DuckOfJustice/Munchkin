@@ -5778,11 +5778,13 @@ function applyFleeFailure(room, actor, c) {
 
 // Nur beim ersten verpatzten Wurf, nur mit Karte auf der Hand - und nicht
 // gegen Monster, vor denen es ohnehin kein Entkommen gibt (der zweite Wurf
-// wuerde genauso scheitern und die Karte waere umsonst weg).
+// wuerde genauso scheitern und die Karte waere umsonst weg). Derselbe Weg
+// gilt fuer den vom GANZ NORMALEN HASEN gefangenen Helfer.
 function halblingRerollPossible(room, actor) {
   const c = room.combat;
   if (!c || c.halblingRerollUsed) return false;
   if (combatHasMonster(room, FLEE_IMPOSSIBLE)) return false;
+  if (c.helferGefangen && actor.id === c.helperId) return false;
   return hasRace(actor, 'HALBLING') && actor.hand.length > 0;
 }
 
