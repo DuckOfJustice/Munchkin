@@ -263,11 +263,12 @@ module.exports = (ctx) => {
   // waffe belegt zwar beide Plaetze, ist aber nur eine Waffe. Das
   // ZWEIHÄNDIGE SCHWERT liegt in der Spezialausruestung (es kostet netto
   // keine Hand, siehe FREE_HAND_ITEMS) und zaehlt trotzdem mit.
-  // ponytail: "Waffe" gegen "Schild" kennen die Kartendaten nicht - ein
-  // Schild in der Hand zaehlt hier mit. Kuratierte Ausnahmeliste waere der
-  // Aufruestweg. Id-Menge kommt aus handItemIds (server.js) - dieselbe
-  // Definition wie bei MONDJUNGFERN, damit "Waffe" ueberall dasselbe meint.
-  const waffenAnzahl = (p) => handItemIds(p).size;
+  // Schilde belegen eine Hand, sind aber keine Waffe (MONDJUNGFERN "keine
+  // Vorteile durch Waffen", KALI "2 eigene Waffen"). Die einzigen Schilde in
+  // data/cards.json - neue hier ergaenzen.
+  const SHIELD_ITEMS = new Set(['FLOTTER BUCKLER', 'GANZKÖRPER-SCHILD']);
+  const waffenIds = (p) => new Set([...handItemIds(p)].filter((id) => !SHIELD_ITEMS.has((card(id) || {}).name)));
+  const waffenAnzahl = (p) => waffenIds(p).size;
 
   // "Mensch" ist in Munchkin keine Karte, sondern ihr Fehlen: wer keine
   // Rassenkarte ausliegen hat, ist Mensch - deshalb player.races statt einer
@@ -425,8 +426,7 @@ module.exports = (ctx) => {
   // MONDJUNGFERN: "Du musst sie mit leeren Haenden bestrafen. In diesem Kampf
   // erhaeltst du keine Vorteile durch Waffen." Kleiner Bruder von
   // MONSTER_IGNORES_BONUSES, das ALLE Boni streicht.
-  // ponytail: "Waffe" heisst hier wie in waffenAnzahl "belegt eine Hand" -
-  // ein Schild zaehlt also mit. Kuratierte Ausnahmeliste waere der Aufruestweg.
+  // "Waffe" heisst hier wie in waffenAnzahl: belegt eine Hand und ist kein Schild.
   const MONSTER_IGNORES_WEAPONS = new Set(['MONDJUNGFERN']);
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
   const MONSTER_FORBIDS_HELP = new Set(['PAVILLON']);
@@ -663,6 +663,6 @@ module.exports = (ctx) => {
     TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
     GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
     BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
-    GENDER_ONLY_BONUS_ITEMS,
+    GENDER_ONLY_BONUS_ITEMS, waffenIds,
   };
 };

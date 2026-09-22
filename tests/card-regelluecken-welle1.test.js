@@ -162,5 +162,30 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.ok(S.equippedItemIds(halbGnom).includes(bremse.id), 'Halb-Gnom legt die Spassbremse an und lebt');
 }
 
+// --- 3. Schilde sind keine Waffen (MONDJUNGFERN, KALI)
+{
+  const schild = findCard('GANZKÖRPER-SCHILD'); // +4, eine Hand
+  const mond = findCard('MONDJUNGFERN', 'monster').id;
+  const p = makePlayer({ level: 5, hand: [schild.id] });
+  const room = makeRoom([p]);
+  S.handleEquipItem(room, 'p1', schild.id);
+  S.startCombat(room, 'p1', [mond], { fromHand: false });
+  assert.strictEqual(S.combatTotals(room).playerStrength, 9, 'Schild zaehlt gegen die Mondjungfern (5 + 4)');
+
+  // Gegenprobe: eine echte Waffe faellt weiter weg.
+  const waffe = ALL_CARDS.find((c) => c.category === 'item' && c.slotKind === 'hand' && c.bonus > 0 && !/SCHILD|BUCKLER/.test(c.name));
+  const q = makePlayer({ level: 5, hand: [waffe.id] });
+  const room2 = makeRoom([q]);
+  S.handleEquipItem(room2, 'p1', waffe.id);
+  S.startCombat(room2, 'p1', [mond], { fromHand: false });
+  assert.strictEqual(S.combatTotals(room2).playerStrength, 5, `${waffe.name} zaehlt gegen die Mondjungfern nicht`);
+
+  // KALI: "... es sei denn, du verteidigst dich mit 2 eigenen Waffen" -
+  // Schwert + Schild sind nur EINE Waffe.
+  assert.deepStrictEqual([...S.waffenIds(Object.assign(makePlayer(), {
+    equipped: Object.assign(S.newEquipped(), { hands: [waffe.id, schild.id] }),
+  }))], [waffe.id], 'waffenIds ohne Schild');
+}
+
 fertig();
 console.log('card-regelluecken-welle1: alle Checks gruen');

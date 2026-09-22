@@ -429,10 +429,9 @@ function pickItemsWorthGold(player, gold) {
 }
 
 // Alle Ids, die eine Hand belegen: gedruckte Handgegenstaende plus
-// Spezialslot-Karten mit slotKind 'hand' (z.B. ZWEIHAENDIGES SCHWERT). Eine
-// Stelle fuer "was ist ueberhaupt eine Waffe" - benutzt von KALI (waffenAnzahl
-// unten) und von MONDJUNGFERN (excludeIds in combatTotals), damit beide
-// niemals auseinanderlaufen.
+// Spezialslot-Karten mit slotKind 'hand' (z.B. ZWEIHAENDIGES SCHWERT).
+// Grundlage fuer waffenIds (src/cards/passives.js, ohne Schilde) und den
+// LUSTMONSTER-Fluch.
 function handItemIds(player) {
   const ids = new Set((player.equipped.hands || []).filter(Boolean));
   (player.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
@@ -3104,7 +3103,7 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
-  GENDER_ONLY_BONUS_ITEMS,
+  GENDER_ONLY_BONUS_ITEMS, waffenIds,
 } = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds, hatRasseMitNachteil });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
@@ -4221,7 +4220,10 @@ function combatTotals(room) {
       // GEGENSTAND, "Er verliert seine Kraefte"). Sie fliegt aus allen drei
       // Item-Summanden, also samt Kartenanhaengen und Rassenbonus.
       const excludeIds = new Set();
-      if (ignoreWeapons || curseHidesHandItems(p)) handItemIds(p).forEach((id) => excludeIds.add(id));
+      // MONDJUNGFERN nimmt nur Waffen (ohne Schilde), der LUSTMONSTER-Fluch
+      // alle Hand-Gegenstaende.
+      if (ignoreWeapons) waffenIds(p).forEach((id) => excludeIds.add(id));
+      if (curseHidesHandItems(p)) handItemIds(p).forEach((id) => excludeIds.add(id));
       cursedItemIds(p).forEach((id) => excludeIds.add(id));
       const items = curseSuppressesItemBonuses(p)
         ? ruestungsBonusSumme(p)
@@ -7011,7 +7013,7 @@ module.exports = {
   rollWithWindow, handlePlayReactionCard, ITEM_GRANTS_TRAIT, itemGrantsTrait,
   dryadeWirkung, hasenWurf, startCombat, applyTargetAction, handlePlayCurseFromHand,
   kartenSperreAktiv,
-  ATTACHMENT_CARDS, equippedBonusSum, handItemIds,
+  ATTACHMENT_CARDS, equippedBonusSum, handItemIds, waffenIds,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, resolveCombat, handleAttemptFlee, baseStrength,
   handlePrepReady, darfAusruesten,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
