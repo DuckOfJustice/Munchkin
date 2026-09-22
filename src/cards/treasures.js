@@ -4,29 +4,28 @@
 // GUARANTEED_FLEE_MAX_MONSTER_LEVEL). Kuratiert statt per Regex - siehe die
 // Erklärung bei den anderen Kartentabellen.
 module.exports = (ctx) => {
-  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds } = ctx;
+  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre } = ctx;
 
   // "Beendet jeden Fluch." - gemeinsame Vorlage fuer WUNSCHRING und DER
   // ANDERE RING (gleicher Kartentext, gleiche Mechanik).
-  // Gewaehlt wird nach Wirkungsart (kind), NICHT nach Position in
-  // activeCurses: zwischen dem Oeffnen des Wahldialogs und der Antwort kann
-  // die Liste sich verschieben (clearNextCombatCurses raeumt alle
-  // 'naechsterKampf'-Eintraege ab, sobald ein Kampf endet) - ein
-  // gespeicherter Index zeigt dann auf den falschen Fluch, und der einmalige
-  // Ring waere trotzdem weg.
-  // ponytail: zwei Tracker-Eintraege derselben Wirkungsart enden gemeinsam
-  // (clearActiveCurseByKind filtert nach kind). Fuer eine Karte, die "jeden
-  // Fluch beendet", vertretbar. Aufruestweg: eine eigene Id je Eintrag in
-  // activeCurses und ein Loeschen nach dieser Id.
+  // Gewaehlt wird NICHT nach Position in activeCurses: zwischen dem Oeffnen
+  // des Wahldialogs und der Antwort kann die Liste sich verschieben
+  // (clearNextCombatCurses raeumt alle 'naechsterKampf'-Eintraege ab, sobald
+  // ein Kampf endet) - ein gespeicherter Index zeigte dann auf den falschen
+  // Fluch. Beendet wird genau der gewaehlte Eintrag - ueber eine Id, die hier beim
+  // Anbieten vergeben wird (die Eintraege entstehen an mehreren Stellen in
+  // server.js, die Id braucht aber nur der Ring). Sonst endeten zwei Fluechen
+  // derselben Wirkungsart gemeinsam (GESCHLECHTSUMWANDLUNG + ZWERGENBIER,
+  // beide combatMalus).
+  let fluchIdZaehler = 0;
   const fluchBeendenSpec = (player) => {
     const flueche = player.activeCurses || [];
     if (!flueche.length) return null; // nichts zu beenden
-    // itemId wandert mit, wo es eine gibt (VERFLUCHTER GEGENSTAND): sonst
-    // sind zwei Gegenstandsfluechen weder unterscheidbar noch einzeln zu
-    // beenden - beide heissen gleich.
-    const beenden = (f) => (f.itemId
-      ? { type: 'clearCurse', kind: f.kind, name: f.name, itemId: f.itemId }
-      : { type: 'clearCurse', kind: f.kind, name: f.name });
+    // itemId nur noch fuer die Anzeige (VERFLUCHTER GEGENSTAND).
+    const beenden = (f) => {
+      if (!f.id) f.id = `fluch-${++fluchIdZaehler}`;
+      return { type: 'clearCurse', id: f.id, kind: f.kind, name: f.name, itemId: f.itemId || null };
+    };
     if (flueche.length === 1) return beenden(flueche[0]);
     return {
       type: 'choice',
@@ -43,6 +42,8 @@ module.exports = (ctx) => {
   const TREASURE_POWER_OVERRIDES = {
     // --- Unnatural Axe ---
     'FLOHMARKT': (player, room) => {
+      // Holt Schaetze aus dem Ablagestapel - nicht auf der Stoererliste.
+      if (hatSchatzSperre(player)) return null;
       const items = [...player.hand, ...equippedItemIds(player)]
         .filter(id => card(id) && typeof card(id).gold === 'number');
       if (items.length === 0) return null; // Needs an item
@@ -78,12 +79,13 @@ module.exports = (ctx) => {
     // auf einen Rivalen spielen, um ihn dazu zu zwingen, dir den Gegenstand
     // zu geben, der ihm den größten Bonus bringt, und er bekommt stattdessen
     // eine Stufe."
-    'SINNLOSER AKT DER FREUNDLICHKEIT': () => ({
+    // Stoererliste: der Gegenstand waere eine Schatzkarte - dann nur die Stufe.
+    'SINNLOSER AKT DER FREUNDLICHKEIT': (player) => ({
       type: 'choice',
       options: [
         { id: 'self', label: 'Selbst 1 Stufe aufsteigen', action: { type: 'levelUp', amount: 1 } },
         { id: 'target', label: 'Auf einen Mitspieler anwenden', action: { type: 'targetPlayer', prompt: 'Wen dazu zwingen, seinen besten Gegenstand herzugeben?', action: { type: 'stealBestItemGiveLevel' } } },
-      ],
+      ].filter((o) => o.id !== 'target' || !hatSchatzSperre(player)),
     }),
 
     // --- Bedingung prüfbar (blockiert, wenn nicht erfüllt) ---
@@ -132,7 +134,10 @@ module.exports = (ctx) => {
     // "Durchsuche die abgelegten Karten, um eine Karte zu finden, die du
     // willst. Nimm die neue Karte und lege diese ab." (Original-Karte wird
     // beim Ausspielen ohnehin abgelegt.)
-    'WÜNSCHELSTAB': () => ({ type: 'chooseDiscardedCard' }),
+    // Stoererliste: nur Tuerkarten waehlbar (openCardCardChoice filtert) -
+    // ohne Tuerkarte im Ablagestapel nicht einsetzbar.
+    'WÜNSCHELSTAB': (player, room) => (hatSchatzSperre(player) && !room.doorDiscard.length
+      ? null : { type: 'chooseDiscardedCard' }),
 
     // "Zu einem beliebigen Zeitpunkt waehrend des Kampfes spielen. Durchsuche
     // den Schatzabwurfstapel ... und tausche diese Karte gegen den ersten
@@ -141,7 +146,8 @@ module.exports = (ctx) => {
     // und filtert nicht auf "tragbar" - wer die Regel streng nimmt, nimmt den
     // obersten Gegenstand des Schatzstapels. Ein eigener gefilterter Waehler
     // waere der Aufruestweg.
-    'EINHEITSGRÖSSE': (player, room) => (room.combat ? { type: 'takeFirstWearableFromTreasureDiscard' } : null),
+    'EINHEITSGRÖSSE': (player, room) => (room.combat && !hatSchatzSperre(player)
+      ? { type: 'takeFirstWearableFromTreasureDiscard' } : null),
     // "Du kannst ihn auch als Wunschring einsetzen (z.B. um einen Fluch zu
     // beenden) und hinterher abwerfen." Die Flucht-Seite der Karte laeuft
     // ueber GUARANTEED_FLEE_CARDS weiter unten.

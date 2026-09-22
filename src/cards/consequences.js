@@ -83,10 +83,13 @@ module.exports = (ctx) => {
 
     // --- Rassen-bedingte Stufenzahl ---
     'ZUNGENDÄMON': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 3 : 2 }),
-    // ponytail: "Verdoppelt die Strafe, wenn der Fungus Gigantisch ist" fehlt -
-    // die Konsequenz weiss nicht, welche Verstaerker im Kampf lagen. Aufruestweg:
-    // den Verstaerker-Zustand in die Konsequenz durchreichen.
-    'FUNGUS': (player) => ({ type: 'levelDelta', amount: hasRace(player, 'ELF') ? 2 : 1 }),
+    // "Elfen verlieren zwei Stufen. Alle anderen verlieren eine. Verdoppelt die
+    // Strafe, wenn der Fungus Gigantisch ist." Die Verstaerker des Kampfs
+    // reicht oeffneVerlustKonsequenz in der Quelle durch.
+    'FUNGUS': (player, room, quelle) => {
+      const faktor = (quelle.verstaerker || []).includes('GIGANTISCH') ? 2 : 1;
+      return { type: 'levelDelta', amount: (hasRace(player, 'ELF') ? 2 : 1) * faktor };
+    },
 
     // --- Bedingt auf aktuellen Ausrüstungszustand (zum Zeitpunkt der Konsequenz bekannt) ---
     // getrageneSlotKarte statt player.equipped[slot]: ein geschummelter
@@ -105,9 +108,8 @@ module.exports = (ctx) => {
     // "Kratzer und Allergien. Wirf den Wuerfel und lege so viele Karten aus
     // deiner Hand ab."
     'KATZENMÄDCHEN': () => ({ type: 'diceDiscardHand', cardName: 'KATZENMÄDCHEN' }),
-    // ponytail: "Du erhaeltst eine Stufe zurueck fuer jeden Trank, den du SOFORT
-    // ablegst" fehlt - ein Zeitfenster fuer freiwilliges Ablegen gibt es nicht.
-    'GRASGNOLL': () => ({ type: 'levelDelta', amount: 3 }),
+    // -3 Stufen, dann Trank-Wahl (siehe grasgnollTrankWahl in server.js).
+    'GRASGNOLL': () => ({ type: 'grasgnoll' }),
 
     // --- Werte-/textbasierter Gegenstandsverlust ---
     'WIRKLICH BESCHISSENER FLUCH!': () => ({ type: 'discardMaxBonusItem' }),
