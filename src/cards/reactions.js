@@ -77,6 +77,11 @@ module.exports = () => {
     // Weihnachtsmanns, kind 'noTreasure').
     'NARRENGOLD': { kind: 'noCombatTreasure', dauer: 'naechsterKampf',
       hinweis: 'Im nächsten Kampf gibt es für dich keinen Schatz.' },
+    // GUMMI-GOLEM, Schlimme Dinge: "Zuckerschock! Du musst in JEDEM Kampf
+    // deine Hilfe anbieten, darfst keinen Schatz annehmen, bis du einen
+    // verlierst." Angebot und Ende: zuckerschockAktiv in server.js.
+    'GUMMI-GOLEM': { kind: 'zuckerschock', dauer: 'dauerhaft',
+      hinweis: 'Du musst in jedem Kampf Hilfe anbieten und bekommst keinen Schatz, bis du einen verlierst.' },
     // "Am Ende jedes deiner Zuege wuerfelst du, bevor 'Milde Gabe' verteilt
     // oder abgelegt wird. Dein Rucksack frisst entsprechend des Wurfs so viele
     // zufaellige Karten deiner Hand! Bei einer gewuerfelten 6 verschluckt der

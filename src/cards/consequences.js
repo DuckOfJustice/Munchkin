@@ -188,8 +188,8 @@ module.exports = (ctx) => {
     // "Lass jeden Ork im Spiel eine Karte aus deiner Hand ziehen."
     'BOBBELKOPF': () => ({ type: 'queuedTakeFromHand', mode: 'after', nurRasse: 'ORK' }),
     // "Zuckerschock! Du musst in jedem Kampf deine Hilfe anbieten, darfst
-    // keinen Schatz annehmen, bis du einen verlierst." - eine Dauerpflicht
-    // ueber viele Zuege, fuer die es keinen Tracker gibt; bleibt manuell:
+    // keinen Schatz annehmen, bis du einen verlierst." Laeuft ueber den
+    // Fluch-Tracker (LINGERING_CURSES, kind 'zuckerschock') - kein Sofort-Effekt:
     'GUMMI-GOLEM': () => null,
     // "Ein Strichmaennchen hat kein Geschlecht, und du jetzt auch nicht. Du
     // bist weder maennlich noch weiblich, bis ein anderer Spieler das

@@ -176,5 +176,41 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(fremd.hand.length, 4, 'im fremden Zug frisst der Rucksack nicht');
 }
 
+// --- GUMMI-GOLEM: "Du musst in jedem Kampf deine Hilfe anbieten, darfst
+// keinen Schatz annehmen, bis du einen verlierst."
+{
+  const golem = findCard('GUMMI-GOLEM', 'monster');
+  const schatz = findCard('FLAMMENDER GIFTTRANK').id;
+  const p = makePlayer({ hand: [schatz] });
+  const room = makeRoom([p, makePlayer({ id: 'p2', name: 'B' })]);
+  S.addActiveCurse(room, p, 'GUMMI-GOLEM', golem.id);
+  const eintrag = p.activeCurses.find((f) => f.kind === 'zuckerschock');
+  assert.ok(eintrag, 'Zuckerschock ist eingetragen');
+  assert.strictEqual(eintrag.schatzStand, 1, 'der Schatzstand beim Eintragen ist festgehalten');
+  assert.ok(S.hatSchatzSperre(p), 'kein Schatz, solange der Fluch laeuft');
+  assert.deepStrictEqual(S.zieheSchaetzeFuer(room, p, 2), [], 'es wird kein Schatz gezogen');
+
+  // Ende: eine Schatzkarte verlieren.
+  p.hand = [];
+  assert.ok(!S.hatSchatzSperre(p), 'nach dem Verlust endet die Sperre');
+  assert.ok(!p.activeCurses.some((f) => f.kind === 'zuckerschock'), 'der Fluch ist beendet');
+}
+// Hilfe anbieten: Logzeile bei Kampfbeginn, und die Zusage kann nicht
+// abgelehnt werden ("Keiner muss deine Hilfe annehmen, aber du musst sie
+// anbieten").
+{
+  const golem = findCard('GUMMI-GOLEM', 'monster');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const a = makePlayer({ id: 'p1', name: 'A' });
+  const h = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([a, h]);
+  S.addActiveCurse(room, h, 'GUMMI-GOLEM', golem.id);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  assert.ok(room.logs.some((l) => /Zuckerschock/i.test(l.text) && /Hilfe/i.test(l.text)), 'das Angebot steht im Verlauf');
+  S.handleRequestHelp(room, 'p1', 'p2', 0);
+  S.handleRespondHelp(room, 'p2', false); // Ablehnen versucht
+  assert.strictEqual(room.combat.helperId, 'p2', 'wer im Zuckerschock ist, darf nicht ablehnen');
+}
+
 fertig();
 console.log('card-regelluecken-welle2: alle Checks gruen');
