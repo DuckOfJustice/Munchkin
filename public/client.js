@@ -1199,10 +1199,11 @@
         // Zusage: wie viele der erbeuteten Schatzkarten die Helfer:in bekommt.
         // Die Obergrenze ist die Schatzzahl des Kampfes - der Server klemmt
         // denselben Wert noch einmal (Fremdeingabe).
-        // Dieselbe Rechnung wie kampfSchatzZahl im Server, inklusive der
-        // Untergrenze 1 bei negativen Verstaerkern (BABY: "mindestens 1").
-        const basisSchaetze = (c.monsterIds || []).reduce((sum, id) => sum + ((card(id) || {}).treasureCount || 0), 0);
-        const maxSchaetze = Math.max(0, c.treasureDelta ? Math.max(1, basisSchaetze + c.treasureDelta) : basisSchaetze);
+        // kampfSchatzZahl kommt fertig gerechnet vom Server (siehe
+        // combatConditionalBonusFields) - eigenes Nachrechnen kannte den
+        // Verstaerker-Anteil nicht mehr, seit der am Monster statt kampfweit
+        // haengt (enhancers statt treasureDelta), und lief auseinander.
+        const maxSchaetze = c.kampfSchatzZahl || 0;
         const lohn = document.createElement('input');
         lohn.type = 'number'; lohn.min = '0';
         lohn.value = '0'; lohn.style.width = '4em'; lohn.title = 'Zugesagte Schatzkarten';

@@ -13,7 +13,8 @@ const {
   fleeModifierParts, monsterRefusesTarget, monsterSeesRace, hasRace,
   handleAttachCard, attachmentBonusSum,
   handleThiefSteal, handleThiefBackstab, handlePlayCurseFromHand,
-  handleUseClassCombatDiscard, baseStrength, handItemIds
+  handleUseClassCombatDiscard, baseStrength, handItemIds,
+  DOOR_COMBAT_CARDS, applyCombatPotionAction, monsterVictoryExtras,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -621,8 +622,38 @@ function makeRoom(players) {
   assert.strictEqual(extras.treasures, 2, 'Mami gibt 1 Extra-Schatz + 1 Ausgleich für Baby');
 }
 
+// --- MAMI/BABY sind pro Monster, nicht kampfweit ---------------------------
+// BABY haengt an einem ANDEREN Monster im selben Kampf - das darf weder die
+// MAMI-Zulassung fuer Monster > Stufe 5 oeffnen, noch die +5-Kompensation
+// oder den Extra-Schatz-Ausgleich einer Mami auf dem unbeteiligten Monster
+// ausloesen (Regression aus dem Code-Review zu Task 1).
+{
+  const goblin = findCard('LAHMER GOBLIN'); // Stufe 1, hat BABY
+  const orks = findCard('3.872 ORKS');      // Stufe 10, hat KEIN BABY
+  const p1 = makePlayer({ id: 'p1', name: 'Spieler 1' });
+  const room = makeRoom([p1]);
 
+  startCombat(room, p1.id, [goblin.id, orks.id], { fromHand: true });
+  room.combat.enhancers.push({ cardId: findCard('BABY').id, monsterId: goblin.id });
 
+  // 1. Zulassung: MAMI darf fuer den Goblin gespielt werden (Stufe <=5 UND
+  // sein eigenes BABY), aber NICHT fuer die Orks (Stufe 10, kein BABY auf
+  // den Orks selbst - das BABY des Goblins zaehlt hier nicht mit).
+  const spec = DOOR_COMBAT_CARDS['MAMI'](p1, room);
+  assert.ok(spec.validMonsterIds.includes(goblin.id), 'der Goblin ist ein gueltiges Ziel');
+  assert.ok(!spec.validMonsterIds.includes(orks.id),
+    'die Orks sind KEIN gueltiges Ziel - das BABY haengt am Goblin, nicht an ihnen');
+
+  // 2. Rechnung: wird MAMI trotzdem direkt auf die Orks angesetzt (Primitiv
+  // ohne den Zulassungsfilter, Verteidigung in der Tiefe), darf das fremde
+  // BABY weder die +5-Kompensation noch den Extra-Schatz-Ausgleich ausloesen.
+  const desc = applyCombatPotionAction(room, p1, { type: 'duplicateMonsterMommy', monsterId: orks.id, validMonsterIds: [orks.id] }, null);
+  assert.ok(desc.includes('+10 auf Mami'), `keine BABY-Kompensation fuer die Orks: ${desc}`);
+  assert.strictEqual(room.combat.mommyMonsterId, orks.id);
+
+  const extras = monsterVictoryExtras(room, p1, null, [orks, orks]);
+  assert.strictEqual(extras.treasures, 1, 'kein Ausgleich-Schatz - das BABY betrifft die Orks nicht');
+}
 
 {
   // Test: SCHICKSALHAFTE KARTEN

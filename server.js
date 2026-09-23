@@ -2514,7 +2514,7 @@ const treasuresFactory = require('./src/cards/treasures.js');
 const {
   TREASURE_POWER_OVERRIDES, COMBAT_POTION_OVERRIDES, DOOR_COMBAT_CARDS,
   POST_FLEE_ESCAPE_CARDS, GUARANTEED_FLEE_CARDS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
-} = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre, enhancerKartenIds });
+} = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre });
 
 // ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES:
 // siehe src/cards/reactions.js.
@@ -3856,7 +3856,9 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
   if (c && c.mommyMonsterId) {
     levels += 1;
     treasures += 1;
-    if (enhancerKartenIds(room).some((id) => card(id).name === 'BABY')) {
+    // Nur wenn BABY auf GENAU dem Baby-Monster dieser Mami liegt - BABY auf
+    // einem anderen Monster im selben Kampf betrifft diese Mami nicht.
+    if ((c.enhancers || []).some((e) => e.monsterId === c.mommyMonsterId && (card(e.cardId) || {}).name === 'BABY')) {
       treasures += 1; // BABY gab -1 Basis-Schatz, MAMI gleicht aus
     }
   }
@@ -4397,6 +4399,11 @@ function combatConditionalBonusFields(room) {
     forbidsHelp: combatHasMonster(room, MONSTER_FORBIDS_HELP),
     autoKilledMonsters: monsters.filter((m) => monsterAutoKilled(m, [actor, helper].filter(Boolean))).map((m) => m.name),
     warriorTieWins,
+    // Fertig gerechnete Schatzzahl fuer die Hilfe-Zusage-Obergrenze (siehe
+    // kampfSchatzZahl weiter unten) - der Client duplizierte diese Formel
+    // frueher selbst und kannte dabei den Verstaerker-Anteil (enhancers)
+    // nicht mehr, seit der am Monster statt kampfweit haengt.
+    kampfSchatzZahl: kampfSchatzZahl(room),
   };
 }
 
@@ -4727,7 +4734,9 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     }
     case 'duplicateMonsterMommy': {
       const mid = action.monsterId || action.validMonsterIds[0];
-      const hasBaby = enhancerKartenIds(room).some((id) => card(id).name === 'BABY');
+      // Nur BABY auf GENAU diesem Monster zaehlt - BABY auf einem anderen
+      // Monster im selben Kampf hat mit dieser Mami nichts zu tun.
+      const hasBaby = (c.enhancers || []).some((e) => e.monsterId === mid && (card(e.cardId) || {}).name === 'BABY');
       c.monsterIds.push(mid);
       c.mommyMonsterId = mid;
       // "Mami ist von allen Verbesserungen ihres Babys betroffen, ausser der

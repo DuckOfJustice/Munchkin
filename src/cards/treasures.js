@@ -4,7 +4,7 @@
 // GUARANTEED_FLEE_MAX_MONSTER_LEVEL). Kuratiert statt per Regex - siehe die
 // Erklärung bei den anderen Kartentabellen.
 module.exports = (ctx) => {
-  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre, enhancerKartenIds } = ctx;
+  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre } = ctx;
 
   // "Beendet jeden Fluch." - gemeinsame Vorlage fuer WUNSCHRING und DER
   // ANDERE RING (gleicher Kartentext, gleiche Mechanik).
@@ -325,9 +325,13 @@ module.exports = (ctx) => {
     'ABGEBRANNT': () => ({ type: 'zeroMonsterTreasure' }),
     'FREUNDLICH': () => ({ type: 'freundlichChoice' }),
     'MAMI': (player, room) => {
+      const enhancers = room.combat.enhancers || [];
       const validMonsterIds = room.combat.monsterIds.filter((m) => {
         const lv = card(m).level || 0;
-        const hasBaby = enhancerKartenIds(room).some((id) => (card(id) || {}).name === 'BABY');
+        // Nur BABY auf GENAU diesem Monster erlaubt MAMI auch jenseits von
+        // Stufe 5 - BABY auf einem anderen Monster im selben Kampf zaehlt
+        // fuer dieses Monster nicht mit.
+        const hasBaby = enhancers.some((e) => e.monsterId === m && (card(e.cardId) || {}).name === 'BABY');
         return lv <= 5 || hasBaby;
       });
       if (validMonsterIds.length === 0) return null;
