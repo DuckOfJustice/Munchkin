@@ -567,8 +567,6 @@ function publicPlayer(room, p) {
   // keine abgelaufene Strafe mehr an, und der WUNSCHRING, der die Rohliste
   // liest, kann nicht mehr an sie verschwendet werden.
   stinktierStrafeAktiv(p);
-  // GUMMI-GOLEM: derselbe Grund - Zuckerschock endet beim Lesen (zuckerschockAktiv).
-  zuckerschockAktiv(p);
   return {
     id: p.id,
     name: p.name,
@@ -3290,10 +3288,6 @@ function applyLingeringRule(room, player, cardName, cardId, regel) {
   }
   player.activeCurses.push({
     cardId, name: cardName, kind: regel.kind, amount, dauer: regel.dauer,
-    // GUMMI-GOLEM: "bis du einen verlierst" - der Stand beim Eintragen ist der
-    // Vergleichswert (siehe zuckerschockAktiv). besesseneSchaetze ist weiter
-    // unten definiert (Funktionsdeklaration, daher hier schon nutzbar).
-    schatzStand: regel.kind === 'zuckerschock' ? besesseneSchaetze(player).length : undefined,
     // Klartext fuer die Anzeige - steht bei der Regel selbst (src/cards/
     // reactions.js), damit der Client die Wirkung nicht nachbauen muss.
     hinweis: regel.hinweis || '',
@@ -3420,26 +3414,7 @@ function hatUntotenAngst(player) {
 // dadurch nicht schrumpfen.
 function hatSchatzSperre(player) {
   return !!player
-    && ((player.activeCurses || []).some((f) => f.kind === 'noTreasure') || zuckerschockAktiv(player));
-}
-
-// Alle Schatzkarten im Besitz: Hand und Angelegtes.
-function besesseneSchaetze(player) {
-  return [...player.hand, ...equippedItemIds(player)].filter((id) => (card(id) || {}).type === 'treasure');
-}
-
-// GUMMI-GOLEM: die Sperre endet, sobald die Person eine Schatzkarte verliert -
-// gemessen am Stand beim Eintragen. Geprueft beim LESEN (wie
-// stinktierStrafeAktiv), damit kein Verlustweg vergessen werden kann: ablegen,
-// verkaufen, gestohlen, verflucht, gehandelt zaehlen alle gleich.
-function zuckerschockAktiv(player) {
-  const eintrag = (player && player.activeCurses || []).find((f) => f.kind === 'zuckerschock');
-  if (!eintrag) return false;
-  if (besesseneSchaetze(player).length < (eintrag.schatzStand || 0)) {
-    player.activeCurses = player.activeCurses.filter((f) => f !== eintrag);
-    return false;
-  }
-  return true;
+    && (player.activeCurses || []).some((f) => f.kind === 'noTreasure' || f.kind === 'zuckerschock');
 }
 
 // Fuer jeden Weg, auf dem eine Karte OHNE drawTreasure() in eine Hand
@@ -4471,12 +4446,13 @@ function startCombat(room, actorId, monsterIds, opts) {
   };
   zaubercouchFragen(findPlayer(room, actorId));
   dryadeWirkung(room, findPlayer(room, actorId));
-  // GUMMI-GOLEM: "Du musst in jedem Kampf deine Hilfe anbieten." Der Server
-  // meldet das Angebot an - annehmen muss es niemand (siehe Karte), deshalb
-  // nur eine Logzeile und keine Anfrage.
+  // GUMMI-GOLEM: "Du musst in jedem Kampf deine Hilfe anbieten." Trust-Prinzip
+  // (2026-09-23 vom Nutzer bestaetigt): der Server kann niemanden zwingen,
+  // eine angebotene Hilfe anzunehmen, deshalb nur eine Logzeile und keine
+  // erzwungene Anfrage.
   const kaempfer = findPlayer(room, actorId);
   room.players.forEach((p) => {
-    if (p.id !== actorId && zuckerschockAktiv(p)) {
+    if (p.id !== actorId && (p.activeCurses || []).some((f) => f.kind === 'zuckerschock')) {
       log(room, `${p.name} steht unter Zuckerschock und bietet ${kaempfer ? kaempfer.name : 'der kämpfenden Person'} seine Hilfe an.`);
     }
   });
@@ -5572,12 +5548,6 @@ function handleRespondHelp(room, playerId, accept) {
     log(room, `${target.name} darf nicht ablehnen (Knieschützer der Verlockung).`);
     accept = true;
   }
-  // GUMMI-GOLEM: "Du musst in jedem Kampf deine Hilfe anbieten" - wer im
-  // Zuckerschock steckt, kann eine Anfrage nicht ausschlagen.
-  if (!accept && zuckerschockAktiv(target)) {
-    log(room, `${target.name} steht unter Zuckerschock und muss helfen.`);
-    accept = true;
-  }
   if (accept) {
     const bittsteller = findPlayer(room, c.actorId);
     if (bittsteller && hatHilfeSperre(bittsteller)) {
@@ -6186,6 +6156,17 @@ function naechsterFluechtling(room, c) {
 function beendeFluchtphase(room, c) {
   const monsters = c.monsterIds.map(card);
   const gescheitert = (c.fleeFailed || []).map((id) => findPlayer(room, id)).filter(Boolean);
+  // GUMMI-GOLEM ("Zuckerschock"): der Fluch endet, sobald die betroffene
+  // Person einen Kampf verliert - unabhaengig davon, gegen welches Monster.
+  // Muss VOR oeffneVerlustKonsequenz() laufen (weiter unten): sonst wuerde
+  // ein frischer Zuckerschock aus GENAU DIESEM verlorenen Kampf (z.B. gegen
+  // einen zweiten Gummi-Golem) sich selbst sofort wieder loeschen, statt bis
+  // zum NAECHSTEN verlorenen Kampf zu bestehen.
+  gescheitert.forEach((p) => {
+    if (clearActiveCurseByKind(p, 'zuckerschock')) {
+      log(room, `${p.name} verliert den Kampf - der Zuckerschock ist vorbei, Schätze sind wieder erlaubt.`);
+    }
+  });
   discardMonsterIds(room.doorDiscard, c.monsterIds);
   room.combat = null;
   zaubercouchZuruecksetzen(room);
@@ -7587,7 +7568,7 @@ module.exports = {
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
   hatKampfschatzSperre, hatUntotenAngst, cursedItemIds, unequipSlotCard, ownTradeIds,
   clearNextCombatCurses, COMBAT_REACTION_CARDS, TREASURE_REACTION_CARDS, applyCombatReaction, handleAckConsequence, setzeZugphase,
-  zieheSchaetzeFuer, zuckerschockAktiv, besesseneSchaetze, handleResolveConsequenceChoice,
+  zieheSchaetzeFuer, handleResolveConsequenceChoice,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
   scheduleBotActionsIfNeeded,
