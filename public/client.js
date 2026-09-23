@@ -1049,18 +1049,19 @@
     div.className = 'combatbox';
     div.innerHTML = `<h3>⚔️ Kampf gegen ${c.monsterIds.map((id) => card(id).name).join(' + ')}</h3>`;
 
-    // "Untot" gilt fuer den GANZEN Kampf, nicht pro Monster (siehe
-    // combatHasUndead im Server): entweder steht von Haus aus ein untotes
-    // Monster da (state.undeadMonsters, z.B. MR. BONES), oder die
-    // Verstaerkerkarte UNTOT wurde gespielt - dann zaehlen ALLE Monster
-    // dieses Kampfes als untot.
-    const untotVerstaerkt = (c.enhancers || []).filter((e) => c.monsterIds.includes(e.monsterId))
-      .some((e) => { const ec = card(e.cardId); return ec && ec.name === 'UNTOT'; });
-    const istUntot = untotVerstaerkt || c.monsterIds.some((id) => (state.undeadMonsters || []).includes((card(id).name || '').toUpperCase()));
+    // "Untot" gilt nur fuer sein Zielmonster, nicht fuer den ganzen Kampf
+    // (siehe combatHasUndead/enhancerKartenIds im Server): ein Monster ist
+    // untot, wenn es von Haus aus untot ist (state.undeadMonsters, z.B.
+    // MR. BONES) oder wenn genau SEIN Verstaerker die Karte UNTOT ist.
+    const untotZiele = new Set((c.enhancers || [])
+      .filter((e) => c.monsterIds.includes(e.monsterId))
+      .filter((e) => { const ec = card(e.cardId); return ec && ec.name === 'UNTOT'; })
+      .map((e) => e.monsterId));
+    const istUntot = (id) => untotZiele.has(id) || (state.undeadMonsters || []).includes((card(id).name || '').toUpperCase());
 
     const monsterRow = document.createElement('div');
     monsterRow.className = 'cardgrid';
-    c.monsterIds.forEach((id) => monsterRow.appendChild(cardTile(id, { undead: istUntot })));
+    c.monsterIds.forEach((id) => monsterRow.appendChild(cardTile(id, { undead: istUntot(id) })));
     div.appendChild(monsterRow);
 
     const iAmActor = c.actorId === myInfo.playerId;

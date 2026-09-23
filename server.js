@@ -5818,15 +5818,16 @@ function oeffneVerlustKonsequenz(room, player, monsters, c, keepPhase) {
     originalActorId: c.originalActorId || null,
     keepPhase: !!keepPhase,
   };
-  // Die Verstaerker des Kampfs reisen mit (FUNGUS: "Verdoppelt die Strafe,
-  // wenn der Fungus Gigantisch ist") - room.combat ist hier schon weg, also
-  // direkt auf dem mitgegebenen c (nicht aktiveEnhancers/enhancerKartenIds,
-  // die room.combat lesen wuerden). ponytail: noch kampfweit, nicht je
-  // Zielmonster gefiltert - Aufruestweg ist Task 2 der Regelluecken-Welle-3
-  // (GIGANTISCH/Fungus-Schlimme-Dinge nur am Zielmonster).
-  const verstaerker = (c.enhancers || []).filter((e) => c.monsterIds.includes(e.monsterId))
-    .map((e) => (card(e.cardId) || {}).name).filter(Boolean);
-  const sources = monsters.map((m) => ({ name: m.name, text: m.badstuff, verstaerker }));
+  // Die Verstaerker reisen mit (FUNGUS: "Verdoppelt die Strafe, wenn der
+  // Fungus Gigantisch ist") - aber nur die des jeweiligen Monsters, GIGANTISCH
+  // auf einem anderen Monster verdoppelt den Fungus nicht. room.combat ist
+  // hier schon weg, also direkt auf dem mitgegebenen c (nicht
+  // aktiveEnhancers/enhancerKartenIds, die room.combat lesen wuerden).
+  const sources = monsters.map((m) => ({
+    name: m.name, text: m.badstuff,
+    verstaerker: (c.enhancers || []).filter((e) => e.monsterId === m.id)
+      .map((e) => (card(e.cardId) || {}).name).filter(Boolean),
+  }));
   if (room.pendingConsequence) {
     room._pendingConsequenceBacklog = (room._pendingConsequenceBacklog || [])
       .concat({ eintrag, playerId: player.id, sources });
