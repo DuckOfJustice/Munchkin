@@ -61,7 +61,10 @@ sich selbst und verschwindet. Deine Hand bleibt unversehrt und der Fluch endet."
 **Soll:**
 
 - Eintrag `'HUNGRIGER RUCKSACK': { kind: 'rucksack', dauer: 'dauerhaft', hinweis: ... }`.
-- **Zeitpunkt:** an der einzigen Stelle, die `room.turnPhase = 'gabe'` setzt.
+- **Zeitpunkt:** beim Wechsel in Phase `gabe`. Das passiert an fünf Stellen
+  (`handleLootRoom` und viermal über `combatEndPhase`); alle fünf laufen künftig
+  über eine Funktion `setzeZugphase(room, phase)`, die beim Eintritt in `gabe`
+  den Rucksack auslöst.
   Hat die Person am Zug den Fluch, würfelt sie über `rollWithWindow` (Zweck
   `'rucksack'`), damit GEZINKTER WÜRFEL, KATZENINTERVENTION und der Huhn-Malus
   gelten.
@@ -69,8 +72,8 @@ sich selbst und verschwindet. Deine Hand bleibt unversehrt und der Fluch endet."
   die Hand bleibt unverändert.
 - **Wurf 1–5:** Der Rucksack frisst so viele **zufällige** Handkarten (alle,
   wenn es weniger sind). Jede Karte kommt auf ihren Ablagestapel
-  (`discardCard`). Die Logzeile nennt die Anzahl, die Namen stehen im
-  Kartenbezug der Logzeile.
+  (`discardCard`). Die Logzeile nennt nur die Anzahl: Handkarten sind geheim,
+  `log()` darf keine privaten Karten verlinken.
 - Der Fluch wirkt einmal pro eigenem Zug. Solange das Wurf-Fenster offen ist,
   blockiert `zugAktionOffen` das Beenden des Zugs, wie bei jedem offenen Wurf.
 - Wird der Zug ohne Phase `gabe` beendet (z. B. Aussetzen durch KALI), wird
