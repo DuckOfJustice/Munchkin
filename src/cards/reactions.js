@@ -48,11 +48,8 @@ module.exports = () => {
       hinweis: '-5 im nächsten Kampf.' },
     // "-1 auf alle Wuerfe. Jeder Fluch oder alle Schlimmen Dinge, die deine
     // Kopfbedeckung entfernen, nehmen das Huhn mit."
-    // ponytail: der zweite Satz (Huhn faellt weg, wenn die Kopfbedeckung
-    // verloren geht) ist nicht verdrahtet - dafuer muesste 'discardSlot'
-    // slot:'head' in applyPrimitiveAction dieses activeCurses-Eintrag mit
-    // entfernen. Bis dahin bleibt das Huhn auch nach Kopfbedeckungsverlust
-    // aktiv (seltener Fall, nur per WUNSCHRING beendbar).
+    // Der zweite Satz (Huhn faellt mit der Kopfbedeckung) steht in
+    // huhnMitKopfbedeckung (server.js).
     'HUHN AUF DEINEM KOPF': { kind: 'rollMalus', amount: -1, dauer: 'dauerhaft',
       hinweis: '-1 auf alle Würfe, bis der Fluch endet (z.B. Wunschring).' },
     // "Du kannst keine Gegenstaende tragen, die mehr als eine Hand benoetigen."

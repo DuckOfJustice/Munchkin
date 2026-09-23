@@ -1081,6 +1081,17 @@
       `<div class="vs">vs.</div><div>Monster: <b>${monsterStrength}</b></div>`;
     div.appendChild(strengthRow);
 
+    // ZAUBERCOUCH: Frage zu Kampfbeginn (siehe zaubercouchFragen im Server).
+    const ich = state.players.find((p) => p.id === myInfo.playerId);
+    if (ich && ich.zaubercouch === 'offen') {
+      const couchRow = document.createElement('div');
+      couchRow.className = 'row gap wrap';
+      couchRow.appendChild(textNode('Zaubercouch verwenden? (Zauberer in diesem Kampf, -1 auf Weglaufen)'));
+      couchRow.appendChild(mkBtn('Ja', () => socket.emit('answerZaubercouch', { benutzen: true })));
+      couchRow.appendChild(mkBtn('Nein', () => socket.emit('answerZaubercouch', { benutzen: false })));
+      div.appendChild(couchRow);
+    }
+
     // Dauerwirkungen der Monsterkarte sichtbar machen, sonst wirken die Zahlen
     // willkürlich.
     const notes = [];

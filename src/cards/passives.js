@@ -3,7 +3,7 @@
 // sind zu uneinheitlich ("Elfen haben -4!" gegenüber "+6 gegen Elfen").
 module.exports = (ctx) => {
   const {
-    hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
+    hasRace, hatRasseMitNachteil, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
     hatFluchArt,
   } = ctx;
 
@@ -22,7 +22,7 @@ module.exports = (ctx) => {
     'PLUTONIUMDRACHE': (p) => p.level <= 5,
     'BULLROG': (p) => p.level <= 4,
     // "Greift niemanden mit Stufe 4 oder niedriger an, AUSSER Elfen."
-    'KRAKZILLA': (p) => p.level <= 4 && !hasRace(p, 'ELF'),
+    'KRAKZILLA': (p) => p.level <= 4 && !hatRasseMitNachteil(p, 'ELF'),
     'HIPPOGREIF': (p) => p.level <= 3,
     'KÖNIG TUT': (p) => p.level <= 3,
     'GRUFTIGE GEBRÜDER': (p) => p.level <= 3,
@@ -206,13 +206,11 @@ module.exports = (ctx) => {
   // ZAUBERCOUCH: "Wenn du dich auf dieser Couch ausruhst, wirst du IN ALLEN
   //   BELANGEN zusaetzlich zu deiner (oder deinen) urspruenglichen Klasse(n)
   //   als Zauberer angesehen."
-  // ponytail: die Couch ist hier immer "in Benutzung" - die Karte laesst die
-  // Wahl zu Kampfbeginn ("Du kannst entscheiden, ob du sie verwenden willst"),
-  // dafuer braeuchte es eine Ja/Nein-Frage in jedem Kampfstart. Der Preis
-  // dafuer (-1 auf Weglaufen) gilt deshalb ebenfalls dauerhaft.
+  // Nur wenn zu Beginn des Kampfs gewaehlt (player.zaubercouch === 'ja',
+  // siehe zaubercouchFragen in server.js) - dann auch -1 auf Weglaufen.
   const ITEM_GRANTS_TRAIT = {
     'FALSCHE OHREN': { race: 'ELF', nurMonster: true },
-    'ZAUBERCOUCH': { class: 'ZAUBERER' },
+    'ZAUBERCOUCH': { class: 'ZAUBERER', nurWennBenutzt: true },
     'FALSCHER BART': { race: 'ZWERG', nurMonster: true },
   };
 
@@ -264,11 +262,12 @@ module.exports = (ctx) => {
   // waffe belegt zwar beide Plaetze, ist aber nur eine Waffe. Das
   // ZWEIHÄNDIGE SCHWERT liegt in der Spezialausruestung (es kostet netto
   // keine Hand, siehe FREE_HAND_ITEMS) und zaehlt trotzdem mit.
-  // ponytail: "Waffe" gegen "Schild" kennen die Kartendaten nicht - ein
-  // Schild in der Hand zaehlt hier mit. Kuratierte Ausnahmeliste waere der
-  // Aufruestweg. Id-Menge kommt aus handItemIds (server.js) - dieselbe
-  // Definition wie bei MONDJUNGFERN, damit "Waffe" ueberall dasselbe meint.
-  const waffenAnzahl = (p) => handItemIds(p).size;
+  // Schilde belegen eine Hand, sind aber keine Waffe (MONDJUNGFERN "keine
+  // Vorteile durch Waffen", KALI "2 eigene Waffen"). Die einzigen Schilde in
+  // data/cards.json - neue hier ergaenzen.
+  const SHIELD_ITEMS = new Set(['FLOTTER BUCKLER', 'GANZKÖRPER-SCHILD']);
+  const waffenIds = (p) => new Set([...handItemIds(p)].filter((id) => !SHIELD_ITEMS.has((card(id) || {}).name)));
+  const waffenAnzahl = (p) => waffenIds(p).size;
 
   // "Mensch" ist in Munchkin keine Karte, sondern ihr Fehlen: wer keine
   // Rassenkarte ausliegen hat, ist Mensch - deshalb player.races statt einer
@@ -412,10 +411,7 @@ module.exports = (ctx) => {
     // Die Karte sagt die Addition ausdruecklich - deshalb zwei Regeln.
     'JABBERWOCK': [{ races: ['ZWERG'], bonus: 3 }, { classes: ['ZAUBERER'], bonus: 3 }],
     'WEIHNACHTSMANN': { races: ['ELF'], bonus: -5 },                               // "-5 gegen Elfen. Der Narr vertraut den Elfen."
-    // ponytail: nur der Kampfbonus oben ist verdrahtet. Die Schlimmen Dinge
-    // ("kein Schatz, bis du ein Monster allein toetest") sind bewusst
-    // manuell - siehe Kommentar bei CONSEQUENCE_OVERRIDES in
-    // src/cards/consequences.js (Design-Spec §6, Welle 3).
+    // Die Schlimmen Dinge (Stoererliste) stehen in CONSEQUENCE_OVERRIDES ('lingeringCurse', kind 'noTreasure').
   };
 
   // --- Monster, die die Kampfrechnung selbst verändern ---------------------
@@ -430,8 +426,7 @@ module.exports = (ctx) => {
   // MONDJUNGFERN: "Du musst sie mit leeren Haenden bestrafen. In diesem Kampf
   // erhaeltst du keine Vorteile durch Waffen." Kleiner Bruder von
   // MONSTER_IGNORES_BONUSES, das ALLE Boni streicht.
-  // ponytail: "Waffe" heisst hier wie in waffenAnzahl "belegt eine Hand" -
-  // ein Schild zaehlt also mit. Kuratierte Ausnahmeliste waere der Aufruestweg.
+  // "Waffe" heisst hier wie in waffenAnzahl: belegt eine Hand und ist kein Schild.
   const MONSTER_IGNORES_WEAPONS = new Set(['MONDJUNGFERN']);
   // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
   const MONSTER_FORBIDS_HELP = new Set(['PAVILLON']);
@@ -656,5 +651,6 @@ module.exports = (ctx) => {
     TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
     GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
     BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
+    waffenIds,
   };
 };

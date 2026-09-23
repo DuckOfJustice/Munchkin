@@ -54,13 +54,17 @@ function mitKampf(room, monsterIds, actorId) {
   return room;
 }
 
-// --- ZAUBERCOUCH: gilt als Zauberer, -1 auf Weglaufen ----------------------
+// --- ZAUBERCOUCH: nur wenn zu Kampfbeginn gewaehlt (player.zaubercouch ---
+// 'ja', siehe tests/card-regelluecken-welle1.test.js), gilt als Zauberer,
+// -1 auf Weglaufen. ---------------------------------------------------------
 {
   const couch = findCard('ZAUBERCOUCH');
   const p = makePlayer({});
   assert.ok(!hasClass(p, 'ZAUBERER'), 'vorher kein Zauberer');
   p.equipped.special = [couch.id];
-  assert.ok(hasClass(p, 'ZAUBERER'), '"in allen Belangen als Zauberer angesehen"');
+  assert.ok(!hasClass(p, 'ZAUBERER'), 'ohne Wahl kein Zauberer');
+  p.zaubercouch = 'ja';
+  assert.ok(hasClass(p, 'ZAUBERER'), '"in allen Belangen als Zauberer angesehen" - wenn gewaehlt');
   assert.strictEqual(FLEE_ITEM_BONUS['ZAUBERCOUCH'], -1, 'der Preis dafuer');
 }
 

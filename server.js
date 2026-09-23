@@ -429,10 +429,9 @@ function pickItemsWorthGold(player, gold) {
 }
 
 // Alle Ids, die eine Hand belegen: gedruckte Handgegenstaende plus
-// Spezialslot-Karten mit slotKind 'hand' (z.B. ZWEIHAENDIGES SCHWERT). Eine
-// Stelle fuer "was ist ueberhaupt eine Waffe" - benutzt von KALI (waffenAnzahl
-// unten) und von MONDJUNGFERN (excludeIds in combatTotals), damit beide
-// niemals auseinanderlaufen.
+// Spezialslot-Karten mit slotKind 'hand' (z.B. ZWEIHAENDIGES SCHWERT).
+// Grundlage fuer waffenIds (src/cards/passives.js, ohne Schilde) und den
+// LUSTMONSTER-Fluch.
 function handItemIds(player) {
   const ids = new Set((player.equipped.hands || []).filter(Boolean));
   (player.equipped.special || []).forEach((id) => { if ((card(id) || {}).slotKind === 'hand') ids.add(id); });
@@ -588,6 +587,7 @@ function publicPlayer(room, p) {
     attachments: p.attachments, // SCHUMMELN!: markiert den geschummelten Gegenstand fuer den Client
     activeCurses: p.activeCurses, // anhaltende Flueche, siehe LINGERING_CURSES
     gender: p.gender,
+    zaubercouch: p.zaubercouch || null,
     strength: baseStrength(p, room),
     handLimit: handLimit(p), // ZWERG darf 6 Karten halten, alle anderen 5
   };
@@ -801,6 +801,7 @@ function startGame(room) {
   room.kartenSperren = [];
   room.revealedDoorCard = null;
   room.combat = null;
+  zaubercouchZuruecksetzen(room);
   room.pendingConsequence = null;
   room.winner = null;
   room.phase = 'playing';
@@ -1221,6 +1222,11 @@ function handleApplyConsequenceAction(room, playerId, action) {
     log(room, `${player.name}: Stufe ${action.delta >= 0 ? '+' : ''}${action.delta} -> jetzt Stufe ${player.level}.`);
   } else if (action.type === 'discardCard') {
     const cardId = action.cardId;
+    // HUHN AUF DEINEM KOPF: dieses Werkzeug laeuft nur waehrend einer
+    // offenen room.pendingConsequence (siehe Guard oben), also immer als
+    // Folge eines Fluchs oder Schlimmer Dinge - nie freiwillig. Die
+    // Kopfbedeckung faellt hier also unter huhnMitKopfbedeckung.
+    const hatteKopf = !!getrageneSlotKarte(player, 'head');
     if (player.hand.includes(cardId)) {
       removeFromHand(player, cardId);
       discardCard(room, cardId);
@@ -1228,6 +1234,7 @@ function handleApplyConsequenceAction(room, playerId, action) {
       unequipSlotCard(player, cardId);
       discardCard(room, cardId);
     } else return;
+    huhnMitKopfbedeckung(room, player, hatteKopf);
     const c = card(cardId);
     log(room, `${player.name} legt "${c ? c.name : cardId}" ab.`, [cardId]);
   } else if (action.type === 'death') {
@@ -1374,6 +1381,7 @@ function itemGrantsTrait(player, art, name, auchNurMonster) {
     const regel = c && ITEM_GRANTS_TRAIT[c.name];
     if (!regel || !regel[art]) return false;
     if (regel.nurMonster && !auchNurMonster) return false;
+    if (regel.nurWennBenutzt && player.zaubercouch !== 'ja') return false;
     return regel[art].toUpperCase().includes(name.toUpperCase());
   });
 }
@@ -2350,7 +2358,7 @@ function applyPrimitiveAction(room, player, action) {
 // Konsequenz passiert, nicht beim Laden dieses Moduls).
 const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
-  card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
+  card, hasRace, hatRasseMitNachteil, hasPowerGroup, isMonsterEnhancerCard,
   resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
   istGrosserGegenstand, getrageneSlotKarte,
   specialSlotRule,
@@ -2411,9 +2419,30 @@ function resolveConsequenceSpec(name, text, player, room, quelle) {
 // {name, text}. Bietet eine Karte eine echte Wahl an UND ist sie die
 // einzige Quelle, wird stattdessen `pendingConsequence.choice` gesetzt und
 // auf die Antwort der Spielerin gewartet (siehe handleResolveConsequenceChoice).
+// HUHN AUF DEINEM KOPF: "Jeder Fluch oder alle Schlimmen Dinge, die deine
+// Kopfbedeckung entfernen, nehmen das Huhn mit." Geprueft an den drei
+// Stellen, ueber die ein automatisch oder manuell aufgeloester Fluch/Miese
+// Dinge den Kopf-Slot leeren kann: autoApplyLossConsequence (automatische
+// Anwendung), handleResolveConsequenceChoice (Wahlmoeglichkeit) und der
+// discardCard-Zweig von handleApplyConsequenceAction (manuelles "Trust"-
+// Werkzeug) - alle drei laufen nur waehrend einer offenen
+// room.pendingConsequence. NICHT geprueft: Gegenstand-Waehler, die ueber
+// handleResolveCardChoice aufgeloest werden (z.B. FLUCH! EINKOMMENSSTEUER) -
+// diese generische Weiche bedient auch beliebige freiwillige Kartenkraefte,
+// eine "gehoert zu einem Fluch"-Erkennung waere dort nicht zuverlaessig.
+// Freiwilliges Ablegen laeuft durch keine dieser Stellen und nimmt das Huhn
+// deshalb nicht mit.
+function huhnMitKopfbedeckung(room, player, hatteKopf) {
+  if (!hatteKopf || getrageneSlotKarte(player, 'head')) return;
+  const vorher = (player.activeCurses || []).length;
+  player.activeCurses = (player.activeCurses || []).filter((f) => f.name !== 'HUHN AUF DEINEM KOPF');
+  if (player.activeCurses.length < vorher) log(room, `Mit der Kopfbedeckung ist auch das Huhn von ${player.name} weg.`);
+}
+
 function autoApplyLossConsequence(room, player, sources) {
   const pc = room.pendingConsequence;
   if (!pc) return;
+  const hatteKopf = !!getrageneSlotKarte(player, 'head');
   if (sources.length === 1) {
     const spec = resolveConsequenceSpec(sources[0].name, sources[0].text, player, room, sources[0]);
     if (spec && spec.type === 'choice') {
@@ -2437,6 +2466,7 @@ function autoApplyLossConsequence(room, player, sources) {
     pc.autoApplied = parts.join('; ');
     log(room, `${player.name}: Automatisch berechnet - ${pc.autoApplied}.`);
   }
+  huhnMitKopfbedeckung(room, player, hatteKopf);
 }
 
 // GRASGNOLL: Wahl "Trank ablegen (+1 Stufe)" oder "fertig", solange noch
@@ -2465,6 +2495,7 @@ function handleResolveConsequenceChoice(room, playerId, optionId) {
   if (!stored || !stored[optionId]) return;
   const player = findPlayer(room, playerId);
   if (!player) return;
+  const hatteKopf = !!getrageneSlotKarte(player, 'head');
   const option = pc.choice.options.find((o) => o.id === optionId);
   const sourceName = pc.choice.sourceName;
   // Erst schliessen, dann anwenden: eine Aktion darf eine Folgewahl oeffnen
@@ -2472,6 +2503,7 @@ function handleResolveConsequenceChoice(room, playerId, optionId) {
   pc.choice = null;
   room._pendingChoiceActions = null;
   const desc = applyPrimitiveAction(room, player, stored[optionId]);
+  huhnMitKopfbedeckung(room, player, hatteKopf);
   const zeile = `${sourceName}: ${option ? option.label : optionId} -> ${desc}`;
   // Anhaengen statt ersetzen: GRASGNOLL hat davor schon "-3 Stufen"
   // eingetragen (bei mehreren Monstern auch die der anderen).
@@ -2776,6 +2808,12 @@ function applyTargetAction(room, actor, target, action) {
     case 'handOverCombat': {
       const c = room.combat;
       if (!c) return 'kein Kampf im Gange';
+      // Die Karte darf auch von Aussenstehenden gespielt werden (kein
+      // nurImKampf) - `actor` ist dann die Kartenspielerin, NICHT die
+      // bisher kaempfende Person. Fuer Log und Zaubercouch zaehlt aber die
+      // bisher kaempfende Person, deshalb hier ueber c.actorId lesen, bevor
+      // er ueberschrieben wird.
+      const vorherigerKaempfer = findPlayer(room, c.actorId);
       c.originalActorId = c.originalActorId || c.actorId;
       c.actorId = target.id;
       c.helperId = null;
@@ -2784,8 +2822,13 @@ function applyTargetAction(room, actor, target, action) {
       // neue kaempfende Person ueber.
       c.helperReward = 0;
       c.ready = {};
+      zaubercouchFragen(target);
+      // ZAUBERCOUCH: eine Uebergabe zaehlt als neue kaempfende Person - die
+      // alte Antwort (kaempfende Person UND abgeloeste Hilfe) verfaellt, weil
+      // beide jetzt keine combatParticipants mehr sind (refreshCombatReady
+      // raeumt das auf), die neue kaempfende Person bekommt oben die Frage.
       refreshCombatReady(room);
-      return `${target.name} kämpft jetzt anstelle von ${actor.name}`;
+      return `${target.name} kämpft jetzt anstelle von ${vorherigerKaempfer ? vorherigerKaempfer.name : 'der vorherigen Person'}`;
     }
     default:
       return '';
@@ -3188,8 +3231,9 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
+  waffenIds,
 } = passivesFactory({
-  card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds, hatFluchArt,
+  card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds, hatFluchArt, hatRasseMitNachteil,
 });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
@@ -3508,7 +3552,7 @@ function monsterPassOption(cardId, player) {
   const c = card(cardId);
   const rule = c && MONSTER_PASS_OPTION[c.name];
   if (!rule) return null;
-  if ((rule.forcedFightRaces || []).some((r) => hasRace(player, r))) return null;
+  if ((rule.forcedFightRaces || []).some((r) => hatRasseMitNachteil(player, r))) return null;
   // nurRassen: BOBBELKOPF duerfen nur Elfen einfach abwerfen.
   if (rule.nurRassen && !rule.nurRassen.some((r) => hasRace(player, r))) return null;
   return rule;
@@ -3537,16 +3581,22 @@ function combatStartOptionRule(cardId, player) {
 // Nachteile", Cap-Karte plus zwei Merkmale heisst "normal, mit allem".
 // Rassen und Klassen sind getrennt: SUPER MUNCHKIN schuetzt nicht vor einem
 // Rassen-Malus.
-// ponytail: gilt nur fuer MONSTER_TRAIT_BONUS, den einzigen Nachteil, den
-// die Design-Spec (Abschnitt 4) dieser Karte zuordnet. Rassenabhaengige
-// "Schlimme Dinge" (ZUNGENDAEMON/FUNGUS treffen Elfen haerter,
-// src/cards/consequences.js) und BEKIFFTER GOLEMs forcedFightRaces sind
-// ebenfalls Nachteile und bleiben vorerst bestehen - Aufruestweg: dieselbe
-// traitImmun-Abfrage an jenen drei Stellen.
+// Rassenabhaengige Nachteile ausserhalb von MONSTER_TRAIT_BONUS (Schlimme
+// Dinge wie ZUNGENDAEMON/FUNGUS, BEKIFFTER GOLEMs forcedFightRaces,
+// KRAKZILLAs Ausnahme, SPASSBREMSE) fragen hatRasseMitNachteil statt hasRace
+// - siehe dort.
 function traitImmun(player, welches) {
   if (welches === 'classes') return !!player.classCapCard && player.classes.length === 1;
   if (welches === 'races') return !!player.raceCapCard && player.races.length === 1;
   return false;
+}
+
+// HALB-BLUT, zweite Kartenhaelfte: "eine Rassenkarte ... alle Vorteile aber
+// keine Nachteile". Fuer jede Stelle, an der eine Rasse ein NACHTEIL ist
+// (Schlimme Dinge, Kampfzwang, toedliche Gegenstaende) statt hasRace.
+// Vorteile (Elf +1 auf Weglaufen, ...) fragen weiter hasRace.
+function hatRasseMitNachteil(player, rasse) {
+  return hasRace(player, rasse) && !traitImmun(player, 'races');
 }
 
 // Welche Rasse ein Monster in dieser Person SIEHT - siehe MONSTER_SEES_AS_RACE
@@ -3645,7 +3695,9 @@ function fleeModifierParts(room, player) {
   if (hasPowerGroup(player, 'ASSASSINE DER ROTEN MANTIS')) parts.push({ label: 'Heimlichkeit', amount: 1 });
   equippedItemIds(player).forEach((id) => {
     const c = card(id);
-    if (c && FLEE_ITEM_BONUS[c.name]) parts.push({ label: c.name, amount: FLEE_ITEM_BONUS[c.name] });
+    if (c && FLEE_ITEM_BONUS[c.name] && !(c.name === 'ZAUBERCOUCH' && player.zaubercouch !== 'ja')) {
+      parts.push({ label: c.name, amount: FLEE_ITEM_BONUS[c.name] });
+    }
   });
   if (room.combat) {
     room.combat.monsterIds.forEach((id) => {
@@ -4219,7 +4271,37 @@ function dryadeWirkung(room, player) {
   log(room, `Die Dryade schwaecht ${player.name}: ${desc}.`);
 }
 
+// ZAUBERCOUCH: "Du kannst zu Beginn eines jeden Kampfes entscheiden, ob du
+// die Zaubercouch verwenden willst." Wer mit angelegter Couch in einen Kampf
+// kommt (kaempfend bei Kampfbeginn, helfend beim Einstieg), bekommt die
+// Frage. Solange sie offen ist, wird nicht ausgewertet. Bots sagen Nein.
+// Der Zustand haengt am Spieler, weil hasClass keinen Raum kennt; er wird bei
+// jedem Kampfbeginn und jedem Kampfende zurueckgesetzt.
+function zaubercouchFragen(player) {
+  if (!player || !equippedItemIds(player).some((id) => (card(id) || {}).name === 'ZAUBERCOUCH')) return;
+  player.zaubercouch = player.isBot ? 'nein' : 'offen';
+}
+function zaubercouchZuruecksetzen(room) {
+  room.players.forEach((p) => { delete p.zaubercouch; });
+}
+function zaubercouchOffen(room) {
+  // combatReadyRequired ignoriert Getrennte aus demselben Grund: eine
+  // unbeantwortete Frage einer Person, die nicht mehr am Geraet ist, darf
+  // den Kampf nicht auf ewig blockieren - sie zaehlt (wie ueberall sonst
+  // bei Zaubercouch) automatisch als "Nein".
+  return combatParticipants(room).filter((p) => p.zaubercouch === 'offen' && p.connected);
+}
+function handleAnswerZaubercouch(room, playerId, benutzen) {
+  const p = findPlayer(room, playerId);
+  if (!room.combat || !p || p.zaubercouch !== 'offen') return;
+  p.zaubercouch = benutzen ? 'ja' : 'nein';
+  log(room, `${p.name} ${benutzen ? 'ruht sich auf der Zaubercouch aus (Zauberer, -1 auf Weglaufen)' : 'verzichtet in diesem Kampf auf die Zaubercouch'}.`);
+  refreshCombatReady(room); // Klasse und Staerke koennen sich geaendert haben
+  touchRoom(room);
+}
+
 function startCombat(room, actorId, monsterIds, opts) {
+  zaubercouchZuruecksetzen(room);
   room.players.forEach((p) => pruefeSlipperVerlust(room, p));
   room.combatHappenedThisTurn = true;
   room.turnPhase = 'kampf';
@@ -4255,6 +4337,7 @@ function startCombat(room, actorId, monsterIds, opts) {
     ready: {},         // playerId -> true, sobald jemand die Auswertung freigibt
     readySignature: null,
   };
+  zaubercouchFragen(findPlayer(room, actorId));
   dryadeWirkung(room, findPlayer(room, actorId));
   // GUMMI-GOLEM: "Du musst in jedem Kampf deine Hilfe anbieten." Der Server
   // meldet das Angebot an - annehmen muss es niemand (siehe Karte), deshalb
@@ -4331,12 +4414,23 @@ function refreshCombatReady(room) {
     c.ready = {};
     c.readySignature = sig;
   }
+  // ZAUBERCOUCH: wer den Kampf verlassen hat (Uebergabe, entfernte Hilfe,
+  // Todesangst, Stinker-Rueckzug, ...), ist keine kaempfende Person mehr und
+  // verliert Zauberer-Klasse und Weglauf-Malus sofort - nicht erst beim
+  // naechsten Kampf. Zentral hier statt an jeder einzelnen Austrittsstelle,
+  // aus demselben Grund wie oben bei Todesangst: refreshCombatReady laeuft
+  // nach jeder davon.
+  const teilnehmendeIds = new Set(combatParticipants(room).map((p) => p.id));
+  room.players.forEach((p) => {
+    if (p.zaubercouch && !teilnehmendeIds.has(p.id)) delete p.zaubercouch;
+  });
 }
 
 function handleSetCombatReady(room, playerId, ready) {
   const c = room.combat;
   if (!c) return;
   if (!combatReadyRequired(room).includes(playerId)) return;
+  if (ready && findPlayer(room, playerId) && findPlayer(room, playerId).zaubercouch === 'offen') return;
   c.ready = c.ready || {};
   if (ready) c.ready[playerId] = true; else delete c.ready[playerId];
   const p = findPlayer(room, playerId);
@@ -4386,7 +4480,10 @@ function combatTotals(room) {
       // GEGENSTAND, "Er verliert seine Kraefte"). Sie fliegt aus allen drei
       // Item-Summanden, also samt Kartenanhaengen und Rassenbonus.
       const excludeIds = new Set();
-      if (ignoreWeapons || curseHidesHandItems(p)) handItemIds(p).forEach((id) => excludeIds.add(id));
+      // MONDJUNGFERN nimmt nur Waffen (ohne Schilde), der LUSTMONSTER-Fluch
+      // alle Hand-Gegenstaende.
+      if (ignoreWeapons) waffenIds(p).forEach((id) => excludeIds.add(id));
+      if (curseHidesHandItems(p)) handItemIds(p).forEach((id) => excludeIds.add(id));
       cursedItemIds(p).forEach((id) => excludeIds.add(id));
       const items = curseSuppressesItemBonuses(p)
         ? ruestungsBonusSumme(p)
@@ -4539,6 +4636,7 @@ const COMBAT_POTION_CARD_NAMES = [...new Set(ALL_CARDS.filter(isCombatPotionCard
 function beendeKampfOhneSieg(room, c, thenLoot) {
   clearNextCombatCurses(combatParticipants(room));
   room.combat = null;
+  zaubercouchZuruecksetzen(room);
   setzeZugphase(room, combatEndPhase(c, thenLoot));
 }
 
@@ -4686,6 +4784,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.helperId = player.id;
       c.helperPending = null;
       c.helperReward = 0; // "Du kannst keine Belohnung einfordern."
+      zaubercouchFragen(player);
 
       refreshCombatReady(room);
       return `${player.name} draengt sich als Helfer in den Kampf (ohne Belohnung)`;
@@ -4703,6 +4802,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const helper = findPlayer(room, c.helperId);
       c.helperId = null;
       c.helperReward = 0; // mit der Helfer:in faellt auch ihre Zusage weg
+      refreshCombatReady(room); // ZAUBERCOUCH: die Hilfe ist keine combatParticipant mehr
       return `${helper ? helper.name : 'Helfer'} verlässt den Kampf`;
     }
     // POLLYVERWANDLUNGSTRANK/TRANK DER IRRELEVANZ/ENTLASSUNGSGLOCKE nennen
@@ -5327,6 +5427,7 @@ function handleRespondHelp(room, playerId, accept) {
       return;
     }
     c.helperId = playerId;
+    zaubercouchFragen(findPlayer(room, playerId));
     // Die Zusage aus der Anfrage wird beim Sieg eingeloest (resolveCombatWin).
     c.helperReward = c.helperPending.reward || 0;
     dryadeWirkung(room, findPlayer(room, playerId));
@@ -5395,6 +5496,10 @@ function haseAnwenden(room, c, hase, wurf) {
   if (wurf !== 6) { log(room, `Der ganz normale Hase: Wuerfelwurf ${wurf} - er bleibt ganz normal.`); return; }
   c.levelOverrides = c.levelOverrides || {};
   c.levelOverrides[hase] = 15;
+  // "... und der Helfer kann nicht mehr entkommen" - gilt fuer die helfende
+  // Person dieses Kampfs, auch wenn sie erst nach dem Wurf dazukommt
+  // (siehe handleAttemptFlee).
+  c.helferGefangen = true;
   log(room, 'Der ganz normale Hase: Würfelwurf 6 - es ist "Der Hase Aus Dem Film" auf Stufe 15!', [hase]);
   refreshCombatReady(room);
 }
@@ -5407,6 +5512,12 @@ function handleEvaluateCombat(room, playerId) {
   if (room.pendingRoll) return;
   const c = room.combat;
   if (c.actorId !== playerId) return;
+  const couchOffen = zaubercouchOffen(room);
+  if (couchOffen.length) {
+    log(room, `Erst entscheiden, ob die Zaubercouch benutzt wird: ${couchOffen.map((p) => p.name).join(', ')}.`);
+    touchRoom(room);
+    return;
+  }
   // Erst auswerten, wenn niemand mehr eingreifen will.
   if (!combatAllReady(room)) return;
   // DER GANZ NORMALE HASE wuerfelt "nachdem du entschieden hast, wer hilft" -
@@ -5687,6 +5798,7 @@ function finishCombatWin(room) {
     log(room, `${actor.name} hat die Hilfe mit den Knieschützern erzwungen und kann in diesem Kampf nicht gewinnen.`);
   }
   room.combat = null;
+  zaubercouchZuruecksetzen(room);
   // Auch die Helfer:in kann so Stufe 10 erreichen - die Stufe kommt aus einem
   // besiegten Monster, damit zählt sie als Sieg.
   let won = checkWin(room, actor);
@@ -5722,11 +5834,13 @@ function handleAttemptFlee(room, playerId, modifier) {
   // weiter wie zuvor (siehe rollWithWindow).
   rollWithWindow(room, actor, 'flee', function mitWurf(roll) {
     const total = roll + mod;
-    const impossible = combatHasMonster(room, FLEE_IMPOSSIBLE);
+    const helferGefangen = !!c.helferGefangen && actor.id === c.helperId;
+    const impossible = helferGefangen || combatHasMonster(room, FLEE_IMPOSSIBLE);
     const automatic = fleeIsAutomatic(room, actor);
     const success = impossible ? false : (automatic ? true : total >= 5);
     let note = parts.length ? parts.map((x) => `${x.label} ${x.amount >= 0 ? '+' : ''}${x.amount}`).join(', ') : '';
-    if (impossible) note = 'Vor diesem Monster gibt es kein Entkommen.';
+    if (helferGefangen) note = 'Der Hase aus dem Film: der Helfer kann nicht mehr entkommen.';
+    else if (impossible) note = 'Vor diesem Monster gibt es kein Entkommen.';
     else if (automatic) note = 'Automatische Flucht.';
     log(room, `${actor.name} würfelt ${roll} (${mod >= 0 ? '+' : ''}${mod} = ${total}) zum Weglaufen: ${success ? 'geschafft!' : 'gescheitert!'}${note ? ` [${note}]` : ''}`);
     // Eigenes seq-Feld fuer die Wuerfel-Animation: room.combat wird gleich auf
@@ -5866,6 +5980,7 @@ function beendeFluchtphase(room, c) {
   const gescheitert = (c.fleeFailed || []).map((id) => findPlayer(room, id)).filter(Boolean);
   discardMonsterIds(room.doorDiscard, c.monsterIds);
   room.combat = null;
+  zaubercouchZuruecksetzen(room);
   // Die Zugphase haengt an der kaempfenden Person: hat SIE das Miese Zeug
   // kassiert, wechselt die Phase erst mit ihrer Bestaetigung (wie bisher,
   // siehe handleAckConsequence). Sonst jetzt.
@@ -5930,10 +6045,7 @@ function handleFleeEscape(room, playerId, cardId) {
 // "Nur in deiner Runde spielbar. Sie beschwoert einen Geist, der ein Monster
 // verschwinden laesst, selbst wenn dein Weglaufenwurf verpatzt wurde und es
 // dich fangen wuerde. War es das einzige Monster, erhaeltst du seinen Schatz,
-// aber keine Stufe." - ponytail: kein eigenes Fenster, sie haengt am
-// bestehenden Fluchtentscheidungsfenster (c.fleeRerollOffer), das genau
-// diesen Moment beschreibt. Aufruestweg fuer "jederzeit spielbar": ein
-// eigenes Kampf-weites Fenster wie bei den Reaktionskarten oben.
+// aber keine Stufe." - Spielbar im eigenen Kampf ueber handlePlayCombatCard und zusaetzlich im Fluchtentscheidungsfenster (c.fleeRerollOffer) nach einem verpatzten Wurf.
 const LAMP_CARDS = new Set(['MAGISCHE LAMPE']);
 
 function lampCardIds(actor) {
@@ -5988,11 +6100,13 @@ function applyFleeFailure(room, actor, c) {
 
 // Nur beim ersten verpatzten Wurf, nur mit Karte auf der Hand - und nicht
 // gegen Monster, vor denen es ohnehin kein Entkommen gibt (der zweite Wurf
-// wuerde genauso scheitern und die Karte waere umsonst weg).
+// wuerde genauso scheitern und die Karte waere umsonst weg). Derselbe Weg
+// gilt fuer den vom GANZ NORMALEN HASEN gefangenen Helfer.
 function halblingRerollPossible(room, actor) {
   const c = room.combat;
   if (!c || c.halblingRerollUsed) return false;
   if (combatHasMonster(room, FLEE_IMPOSSIBLE)) return false;
+  if (c.helferGefangen && actor.id === c.helperId) return false;
   return hasRace(actor, 'HALBLING') && actor.hand.length > 0;
 }
 
@@ -6145,7 +6259,7 @@ function handleEquipItem(room, playerId, cardId) {
   // SPASSBREMSE: "In den falschen Haenden - und zwar den Haenden eines Gnoms -
   // ist es toedlich." Wer die Karte trotzdem anlegt, stirbt.
   const toedlichFuer = DEADLY_ITEMS_BY_RACE[c.name];
-  if (toedlichFuer && hasRace(player, toedlichFuer)) {
+  if (toedlichFuer && hatRasseMitNachteil(player, toedlichFuer)) {
     removeFromHand(player, cardId);
     discardCard(room, cardId);
     log(room, `${player.name} legt "${c.name}" an - in den Haenden eines ${toedlichFuer}s ist das toedlich.`, [cardId]);
@@ -7102,6 +7216,7 @@ io.on('connection', (socket) => {
     room.phase = 'lobby';
     room.turnPhase = null;
     room.combat = null;
+    zaubercouchZuruecksetzen(room);
     room.pendingConsequence = null;
     room.winner = null;
     room.revealedDoorCard = null;
@@ -7133,6 +7248,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'requestHelp', ({ targetId, reward }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId, reward)));
   onSafe(socket, 'respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
   onSafe(socket, 'setCombatReady', ({ ready }) => act(socket, (room, pid) => handleSetCombatReady(room, pid, ready !== false)));
+  onSafe(socket, 'answerZaubercouch', ({ benutzen }) => act(socket, (room, pid) => handleAnswerZaubercouch(room, pid, benutzen === true)));
   onSafe(socket, 'evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
   onSafe(socket, 'attemptFlee', ({ modifier }) => act(socket, (room, pid) => handleAttemptFlee(room, pid, modifier)));
   onSafe(socket, 'fleeReroll', ({ cardId }) => act(socket, (room, pid) => handleFleeReroll(room, pid, cardId === undefined ? null : cardId)));
@@ -7220,7 +7336,7 @@ module.exports = {
   rollWithWindow, handlePlayReactionCard, ITEM_GRANTS_TRAIT, itemGrantsTrait,
   dryadeWirkung, hasenWurf, startCombat, applyTargetAction, handlePlayCurseFromHand,
   kartenSperreAktiv,
-  ATTACHMENT_CARDS, equippedBonusSum, handItemIds,
+  ATTACHMENT_CARDS, equippedBonusSum, handItemIds, waffenIds,
   handleDrawDoor, handleTakeRevealedDoor, handleEvaluateCombat, resolveCombat, handleAttemptFlee, baseStrength,
   handlePrepReady, darfAusruesten,
   handleFleeReroll, botFleeRerollCard, handleFleeEscape, handleEnchantMonster, enchantInfo,
@@ -7256,4 +7372,5 @@ module.exports = {
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
   scheduleBotActionsIfNeeded,
+  handleAnswerZaubercouch,
 };
