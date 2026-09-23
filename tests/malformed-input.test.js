@@ -23,7 +23,7 @@ const EVENTS = [
   'resolveConsequenceChoice', 'useCardPower', 'resolveCardChoice', 'resolveCardTarget',
   'resolveCardCardChoice', 'useGuaranteedFlee', 'playMonsterFromHand', 'skipToLoot',
   'lootRoom', 'setCombatModifier', 'playCombatCard', 'proposeTrade', 'cancelTrade',
-  'respondTrade', 'requestHelp', 'respondHelp', 'evaluateCombat', 'attemptFlee',
+  'respondTrade', 'requestHelp', 'respondHelp', 'bardeVerzaubern', 'evaluateCombat', 'attemptFlee',
   'equipItem', 'unequipItem', 'sellItems', 'playRaceOrClass', 'discardFromHand',
   'endTurn',
 ];

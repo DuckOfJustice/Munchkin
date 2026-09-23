@@ -1253,6 +1253,26 @@
       div.appendChild(btn);
     }
 
+    // BARDE "Verzaubern": Karte abwerfen, Rivalen waehlen, beide wuerfeln -
+    // bei hoeherem Wurf muss der Rivale ohne Belohnung helfen. Kein Muster im
+    // Client fuer "Handkarte zuerst waehlen dann Knopf" - deshalb je Rivale
+    // ein Knopf, der die erste Handkarte abwirft.
+    // ponytail: keine Kartenauswahl vor dem Klick, nur die erste Handkarte.
+    // Aufruestweg: eigener Kartenwaehler wie bei anderen Klassenkraeften, falls
+    // das je stoert.
+    const verzaubern = myInfo.bardeVerzaubern;
+    if (verzaubern && !c.mustFlee && myInfo.hand.length) {
+      const cardId = myInfo.hand[0];
+      const box = document.createElement('div');
+      box.className = 'row gap wrap';
+      verzaubern.rivalen.forEach((rivale) => {
+        const btn = mkBtn(`🎵 Verzaubern: ${escapeHtml(rivale.name)} (1 Karte abwerfen)`,
+          () => socket.emit('bardeVerzaubern', { cardId, targetId: rivale.id }));
+        box.appendChild(btn);
+      });
+      div.appendChild(box);
+    }
+
     const lampIds = myInfo.lampCardIds || [];
     if (isMyTurn() && lampIds.length && !c.fleeRerollOffer) {
       const lampBox = document.createElement('div');

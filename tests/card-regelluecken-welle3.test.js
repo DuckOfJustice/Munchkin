@@ -147,5 +147,63 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(spec([]).amount, 1, 'ohne GIGANTISCH einfach');
 }
 
+// --- BARDE "Verzaubern": Karte abwerfen, beide wuerfeln, hoeherer Wurf zwingt
+// zur Hilfe ("kann keine Belohnung verlangen").
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure').id;
+  const versuch = (wuerfe) => {
+    const a = makePlayer({ id: 'p1', name: 'A', classes: [barde.id], hand: [karte] });
+    const b = makePlayer({ id: 'p2', name: 'B' });
+    const room = makeRoom([a, b]);
+    S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+    const zufall = Math.random;
+    let i = 0;
+    Math.random = () => (wuerfe[i++] - 1) / 6 + 0.01;
+    try { S.handleBardeVerzaubern(room, 'p1', karte, 'p2'); } finally { Math.random = zufall; }
+    return { a, b, room };
+  };
+  const erfolg = versuch([6, 1]);
+  assert.strictEqual(erfolg.room.combat.helperId, 'p2', 'hoeherer Wurf: der Rivale hilft');
+  assert.strictEqual(erfolg.room.combat.helperReward, 0, 'ohne Belohnung');
+  assert.ok(!erfolg.a.hand.includes(karte), 'die abgeworfene Karte ist weg');
+
+  const misserfolg = versuch([2, 5]);
+  assert.strictEqual(misserfolg.room.combat.helperId, null, 'niedrigerer Wurf: keine Hilfe');
+  assert.ok(!misserfolg.a.hand.includes(karte), 'die Karte ist trotzdem weg');
+
+  const gleichstand = versuch([4, 4]);
+  assert.strictEqual(gleichstand.room.combat.helperId, null, 'Gleichstand reicht nicht ("besser als seiner")');
+}
+// Nicht-Barden bekommen die Kraft nicht.
+{
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure').id;
+  const a = makePlayer({ id: 'p1', name: 'A', hand: [karte] });
+  const room = makeRoom([a, makePlayer({ id: 'p2', name: 'B' })]);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  S.handleBardeVerzaubern(room, 'p1', karte, 'p2');
+  assert.strictEqual(room.combat.helperId, null, 'ohne Barden-Klasse passiert nichts');
+  assert.ok(a.hand.includes(karte), 'die Karte bleibt auf der Hand');
+}
+// "Du kannst das Spiel mit dieser Faehigkeit nicht gewinnen."
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure').id;
+  const a = makePlayer({ id: 'p1', name: 'A', level: 9, classes: [barde.id], hand: [karte] });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([a, b]);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  const zufall = Math.random;
+  let i = 0;
+  Math.random = () => ([6, 1][i++] - 1) / 6 + 0.01;
+  try { S.handleBardeVerzaubern(room, 'p1', karte, 'p2'); } finally { Math.random = zufall; }
+  S.resolveCombatWin(room);
+  assert.strictEqual(a.level, 10, 'die Stufe steigt trotzdem');
+  assert.strictEqual(room.winner, null, 'aber der Sieg zaehlt nicht als Spielsieg');
+}
+
 fertig();
 console.log('card-regelluecken-welle3: alle Checks gruen');

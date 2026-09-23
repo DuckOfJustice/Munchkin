@@ -704,6 +704,9 @@ function sendInfoTo(room, player) {
     // darf (Berserken/Vertreiben/Flugzauber) - privat, weil sie von der
     // eigenen Hand und Klasse abhängt.
     classCombatPower: classCombatPowerInfo(room, player),
+    // BARDE "Verzaubern": haengt an eigener Klasse, eigenem Zug und eigener
+    // Hand - deshalb privat wie classCombatPower.
+    bardeVerzaubern: room.combat ? bardenVerzauberInfo(room, player) : null,
     // ZAUBERER "Verzauberung" und die Rettungskarten nach einem verpatzten
     // Weglaufwurf haengen an der eigenen Hand - deshalb privat und nicht im
     // oeffentlichen Kampfzustand.
@@ -3916,6 +3919,56 @@ function classCombatPowerInfo(room, player) {
   return { label: power.label, className: power.className, bonus: power.bonus, kind: power.kind, remaining: power.remaining };
 }
 
+// BARDE "Verzaubern": "Im Kampf kannst du in deinem Zug eine Karte abwerfen
+// und einen Rivalen waehlen. Ihr wuerfelt beide, wenn dein Wurf besser ist als
+// seiner, muss er dir helfen und kann keine Belohnung verlangen." Ein Versuch
+// pro Aufruf - "bis du Erfolg hast, aufgibst oder dir die Karten oder Gegner
+// ausgehen" ergibt sich daraus, dass man erneut klicken darf.
+function bardenVerzauberInfo(room, player) {
+  const c = room.combat;
+  if (!c || !player || c.actorId !== player.id) return null;
+  const dran = currentPlayer(room);
+  if (!dran || dran.id !== player.id) return null;       // "in deinem Zug"
+  if (!hasClass(player, 'BARDE') || c.helperId || c.helperPending) return null;
+  if (!player.hand.length) return null;
+  const rivalen = room.players.filter((p) => p.id !== player.id && p.connected)
+    .map((p) => ({ id: p.id, name: p.name }));
+  return rivalen.length ? { rivalen } : null;
+}
+
+function handleBardeVerzaubern(room, playerId, cardId, targetId) {
+  const player = findPlayer(room, playerId);
+  const ziel = findPlayer(room, targetId);
+  if (!player || !ziel || !bardenVerzauberInfo(room, player)) return;
+  if (!player.hand.includes(cardId) || ziel.id === player.id) return;
+  if (room.pendingRoll || room.pendingCardAction) return; // keine offene Wahl ueberschreiben
+  removeFromHand(player, cardId);
+  discardCard(room, cardId);
+  log(room, `${player.name} (Barde) wirft "${card(cardId).name}" ab und versucht, ${ziel.name} zu verzaubern.`, [cardId]);
+  rollWithWindow(room, player, 'verzaubern', (wurfBarde) => {
+    rollWithWindow(room, ziel, 'verzaubern', (wurfZiel) => {
+      const c = room.combat;
+      if (!c) return;
+      if (wurfBarde > wurfZiel) {
+        log(room, `Verzaubert: ${wurfBarde} gegen ${wurfZiel} - ${ziel.name} muss ${player.name} helfen (ohne Belohnung).`);
+        // Gleiche Bauform wie KNIESCHUETZER DER VERLOCKUNG: die Hilfe ist
+        // erzwungen ("compelled"), handleRespondHelp uebernimmt Stinker-Sperre,
+        // Untotenangst, Logging und den Ready-Status wie bei jeder Hilfe.
+        c.helperPending = { targetId: ziel.id, compelled: true, reward: 0 };
+        handleRespondHelp(room, ziel.id, true);
+        // "Du kannst das Spiel mit dieser Faehigkeit nicht gewinnen." - nur
+        // setzen, wenn die Hilfe wirklich zustande kam (Stinker/Untotenangst/
+        // Lustmonster koennen sie trotz compelled=true noch verhindern).
+        if (room.combat && room.combat.helperId === ziel.id) room.combat.bardenZwang = true;
+      } else {
+        log(room, `Der Zauber misslingt: ${wurfBarde} gegen ${wurfZiel}. ${player.name} darf es erneut versuchen.`);
+      }
+      touchRoom(room);
+    });
+  });
+  touchRoom(room);
+}
+
 // ZAUBERER "Verzauberung": "Du darfst deine ganze Hand ablegen (Minimum 3
 // Karten), um ein einzelnes Monster zu verzaubern, anstatt zu bekaempfen.
 // Lege das Monster ab und nimm seinen Schatz, erhalte aber keine Stufe.
@@ -5223,7 +5276,12 @@ function handleRequestHelp(room, playerId, targetId, reward) {
   // Zusage aus dem Client ist Fremdeingabe: ganze Zahl, nicht negativ, nicht
   // mehr als der Kampf ueberhaupt hergibt.
   const zusage = Math.max(0, Math.min(kampfSchatzZahl(room), Math.floor(Number(reward) || 0)));
-  c.helperPending = { targetId, compelled, reward: zusage };
+  // noWinLevel ist die KNIESCHÜTZER-eigene Folge von "compelled" (Sperre der
+  // Siegesstufe) - BARDE "Verzaubern" setzt spaeter ebenfalls compelled:true,
+  // aber ohne noWinLevel: seine Sperre ist bardenZwang (Sieg zaehlt nicht),
+  // nicht eine gekappte Stufe. Deshalb getrennte Felder statt "compelled"
+  // wiederzuverwenden.
+  c.helperPending = { targetId, compelled, noWinLevel: compelled, reward: zusage };
   log(room, `${actor.name} bittet ${target.name} um Hilfe${zusage ? ` (Zusage: ${zusage} Schatzkarte(n))` : ' (ohne Belohnung)'}${compelled ? ' - Knieschützer der Verlockung: kann nicht ablehnen' : ''}.`);
   touchRoom(room);
 }
@@ -5269,7 +5327,7 @@ function handleRespondHelp(room, playerId, accept) {
     dryadeWirkung(room, findPlayer(room, playerId));
     // "In einem Kampf, bei dem der Helfer ... genötigt wurde, kannst du
     // nicht die Siegesstufe erreichen." Greift in resolveCombatWin.
-    if (compelled) c.noWinLevel = true;
+    if (c.helperPending.noWinLevel) c.noWinLevel = true;
     log(room, `${target.name} hilft im Kampf.`);
   } else {
     log(room, `${target.name} lehnt ab.`);
@@ -5612,9 +5670,15 @@ function finishCombatWin(room) {
     log(room, `${actor.name} hat die Hilfe mit den Knieschützern erzwungen und kann in diesem Kampf nicht gewinnen.`);
   }
   room.combat = null;
+  // BARDE "Verzaubern": "Du kannst das Spiel mit dieser Faehigkeit nicht
+  // gewinnen." Die Stufe steigt (oben schon geschehen), der Spielsieg faellt
+  // aus - checkWin wird fuer diesen Sieg gar nicht erst aufgerufen.
+  let won = c.bardenZwang ? false : checkWin(room, actor);
+  if (c.bardenZwang && actor.level >= MAX_LEVEL) {
+    log(room, `${actor.name} erreicht Stufe 10 - aber mit erzwungener Hilfe des Barden zählt das nicht als Sieg.`);
+  }
   // Auch die Helfer:in kann so Stufe 10 erreichen - die Stufe kommt aus einem
   // besiegten Monster, damit zählt sie als Sieg.
-  let won = checkWin(room, actor);
   if (!won && helper) won = checkWin(room, helper);
   // ÜBERFALLTRANK: siehe combatEndPhase - der urspruengliche Spieler (nicht
   // die/der Kaempfende) darf danach den Raum pluendern, room.turnIndex zeigt
@@ -7063,6 +7127,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'respondTrade', ({ tradeId, accept, counterCardIds }) => act(socket, (room, pid) => handleRespondTrade(room, pid, tradeId, accept, counterCardIds)));
   onSafe(socket, 'requestHelp', ({ targetId, reward }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId, reward)));
   onSafe(socket, 'respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
+  onSafe(socket, 'bardeVerzaubern', ({ cardId, targetId }) => act(socket, (room, pid) => handleBardeVerzaubern(room, pid, cardId, targetId)));
   onSafe(socket, 'setCombatReady', ({ ready }) => act(socket, (room, pid) => handleSetCombatReady(room, pid, ready !== false)));
   onSafe(socket, 'evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
   onSafe(socket, 'attemptFlee', ({ modifier }) => act(socket, (room, pid) => handleAttemptFlee(room, pid, modifier)));
@@ -7170,6 +7235,7 @@ module.exports = {
   combatTotals, handLimit, hasRace, hasClass,
   CLASS_COMBAT_DISCARD, CLASS_FLEE_DISCARD, UNDEAD_MONSTERS,
   handleUseClassCombatDiscard, classCombatPowerInfo, combatSignature,
+  bardenVerzauberInfo, handleBardeVerzaubern,
   handleThiefBackstab, handleThiefSteal, thiefPowerInfo,
   handlePriestResurrect, priestResurrectPiles,
   handleSetCombatReady, combatReadyRequired, combatAllReady, refreshCombatReady,
