@@ -494,6 +494,7 @@ function hellknightArmorBonus(player) {
 // damit RACE_ITEM_BONUS (z.B. GNOM) nicht ueber die Rasse zurueckholt, was
 // MONDJUNGFERN gerade an Waffenbonus gestrichen hat.
 function raceItemBonusSum(player, excludeIds) {
+  if (hatFluchArt(player, 'traitsVergessen')) return 0; // siehe hasRace
   return player.races.reduce((sum, id) => {
     const c = card(id);
     const fn = c && RACE_ITEM_BONUS[c.name.toUpperCase()];
@@ -567,6 +568,8 @@ function publicPlayer(room, p) {
   // keine abgelaufene Strafe mehr an, und der WUNSCHRING, der die Rohliste
   // liest, kann nicht mehr an sie verschwendet werden.
   stinktierStrafeAktiv(p);
+  // GUMMI-GOLEM: derselbe Grund - Zuckerschock endet beim Lesen (zuckerschockAktiv).
+  zuckerschockAktiv(p);
   return {
     id: p.id,
     name: p.name,
@@ -849,6 +852,7 @@ function endTurn(room) {
   }
   // Der HALBLING-Doppelverkauf gilt "pro Runde" - siehe handleSellItems.
   room.players.forEach((p) => { p.halblingSaleUsed = false; });
+  room.rucksackWurfZug = null; // HUNGRIGER RUCKSACK: im neuen Zug wird wieder gewuerfelt
   room.turnPhase = 'tuer';
   
   if (room.bumerangReturns) {
@@ -1198,7 +1202,7 @@ function handleAckConsequence(room, playerId) {
     // oeffneVerlustKonsequenz und combatEndPhase), dann bekommt die
     // urspruengliche Person trotz
     // verlorenem Kampf ihre Pluenderphase.
-    room.turnPhase = combatEndPhase({ originalActorId: pc.originalActorId }, false);
+    setzeZugphase(room, combatEndPhase({ originalActorId: pc.originalActorId }, false));
     log(room, room.turnPhase === 'pluendern'
       ? `${player.name} macht weiter mit Phase 3: Raum plündern.`
       : `${player.name} macht weiter mit Phase 4: Milde Gabe.`);
@@ -1342,6 +1346,9 @@ const RACE_ADJECTIVE_DE = { ELF: 'Elfen', ZWERG: 'Zwerge', HALBLING: 'Halblinge'
 const CLASS_ADJECTIVE_DE = { ZAUBERER: 'Zauberer', PRIESTER: 'Priester', DIEB: 'Diebe', KRIEGER: 'Krieger' };
 
 function hasRace(player, substr) {
+  // TEMPORÄRE ANMNESIE: "ueberall als klassenloser Mensch gezaehlt" - die
+  // Karten bleiben ausliegen, zaehlen aber nirgends (auch nicht als Vorteil).
+  if (hatFluchArt(player, 'traitsVergessen')) return false;
   return player.races.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
 }
 
@@ -1360,6 +1367,8 @@ function istGeschlecht(player, g) {
 // `nurMonster` heisst: gilt nur dort, wo Monster reagieren - nicht fuer die
 // Faehigkeiten der Rasse selbst.
 function itemGrantsTrait(player, art, name, auchNurMonster) {
+  // TEMPORÄRE ANMNESIE: geliehene Rassen/Klassen sind genauso vergessen.
+  if (hatFluchArt(player, 'traitsVergessen')) return false;
   return equippedItemIds(player).some((id) => {
     const c = card(id);
     const regel = c && ITEM_GRANTS_TRAIT[c.name];
@@ -3053,6 +3062,12 @@ function handlePlayMonsterFromHand(room, playerId, cardId) {
   if (!player.hand.includes(cardId)) return;
   const c = card(cardId);
   if (!c || c.category !== 'monster') return;
+  // TOURISTENFALLE: "Du darfst nicht 'Auf Aerger aus sein'."
+  if (hatFluchArt(player, 'keinAergerSuchen')) {
+    log(room, `${player.name} sitzt in der Touristenfalle und darf nicht auf Ärger aus sein.`);
+    touchRoom(room);
+    return;
+  }
   // Auch ein aus der Hand gespieltes Monster greift nicht an, wenn sein Text
   // das ausschließt - die Karte ist dann trotzdem verbraucht.
   if (monsterRefusesTarget(cardId, player)) {
@@ -3095,7 +3110,7 @@ function handleLootRoom(room, playerId) {
     };
     log(room, `${player.name} plündert den Raum: 1 verdeckte Türkarte auf die Hand.`);
   }
-  room.turnPhase = 'gabe';
+  setzeZugphase(room, 'gabe');
   touchRoom(room);
 }
 
@@ -3123,6 +3138,7 @@ function handleLootRoom(room, playerId) {
 // ---------------------------------------------------------------------------
 
 function hasClass(player, substr) {
+  if (hatFluchArt(player, 'traitsVergessen')) return false; // siehe hasRace
   // ZAUBERCOUCH: "... wirst du in allen Belangen ... als Zauberer angesehen."
   if (itemGrantsTrait(player, 'class', substr, true)) return true;
   return player.classes.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
@@ -3172,7 +3188,9 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
-} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
+} = passivesFactory({
+  card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds, hatFluchArt,
+});
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
 // Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
@@ -3215,6 +3233,10 @@ function applyLingeringRule(room, player, cardName, cardId, regel) {
   }
   player.activeCurses.push({
     cardId, name: cardName, kind: regel.kind, amount, dauer: regel.dauer,
+    // GUMMI-GOLEM: "bis du einen verlierst" - der Stand beim Eintragen ist der
+    // Vergleichswert (siehe zuckerschockAktiv). besesseneSchaetze ist weiter
+    // unten definiert (Funktionsdeklaration, daher hier schon nutzbar).
+    schatzStand: regel.kind === 'zuckerschock' ? besesseneSchaetze(player).length : undefined,
     // Klartext fuer die Anzeige - steht bei der Regel selbst (src/cards/
     // reactions.js), damit der Client die Wirkung nicht nachbauen muss.
     hinweis: regel.hinweis || '',
@@ -3339,7 +3361,27 @@ function hatUntotenAngst(player) {
 // und weggeworfen - der Text sagt "du erhaeltst keine", der Stapel soll
 // dadurch nicht schrumpfen.
 function hatSchatzSperre(player) {
-  return !!player && (player.activeCurses || []).some((f) => f.kind === 'noTreasure');
+  return !!player
+    && ((player.activeCurses || []).some((f) => f.kind === 'noTreasure') || zuckerschockAktiv(player));
+}
+
+// Alle Schatzkarten im Besitz: Hand und Angelegtes.
+function besesseneSchaetze(player) {
+  return [...player.hand, ...equippedItemIds(player)].filter((id) => (card(id) || {}).type === 'treasure');
+}
+
+// GUMMI-GOLEM: die Sperre endet, sobald die Person eine Schatzkarte verliert -
+// gemessen am Stand beim Eintragen. Geprueft beim LESEN (wie
+// stinktierStrafeAktiv), damit kein Verlustweg vergessen werden kann: ablegen,
+// verkaufen, gestohlen, verflucht, gehandelt zaehlen alle gleich.
+function zuckerschockAktiv(player) {
+  const eintrag = (player && player.activeCurses || []).find((f) => f.kind === 'zuckerschock');
+  if (!eintrag) return false;
+  if (besesseneSchaetze(player).length < (eintrag.schatzStand || 0)) {
+    player.activeCurses = player.activeCurses.filter((f) => f !== eintrag);
+    return false;
+  }
+  return true;
 }
 
 // Fuer jeden Weg, auf dem eine Karte OHNE drawTreasure() in eine Hand
@@ -3421,6 +3463,12 @@ function gegenstandHatSonderkraft(name) {
 // inzwischen alle Wuerfe laufen. Der Wert bleibt bei mindestens 1: ein
 // Wuerfel zeigt keine 0, und mehrere Karten lesen den Wurf als 1..6
 // (3.872 ORKS: "bei einer 1 oder 2").
+// Gibt es einen Tracker-Eintrag dieser Wirkungsart? (TOURISTENFALLE,
+// TEMPORÄRE ANMNESIE, HUNGRIGER RUCKSACK - siehe LINGERING_CURSES.)
+function hatFluchArt(player, kind) {
+  return !!player && (player.activeCurses || []).some((f) => f.kind === kind);
+}
+
 function curseRollModifier(player) {
   return (player && player.activeCurses || [])
     .filter((f) => f.kind === 'rollMalus')
@@ -3549,7 +3597,11 @@ function monsterTraitBonusSum(room) {
         // Der Raum kommt als zweites Argument dazu, damit eine Regel den
         // Kampfzustand sehen kann (FEUERLÖSCHER: "+5, wenn dir niemand
         // hilft"). Alle aelteren Regeln ignorieren ihn.
-        || (rule.wennErfuellt ? rule.wennErfuellt(p, room) : false));
+        // nachteilFuer: eine wennErfuellt-Regel, die (auch) an einer Rasse
+        // oder Klasse haengt, bekommt denselben Halb-Blut-/Super-Munchkin-
+        // Schutz wie rule.races/rule.classes (RIESENKAKERLAKE).
+        || (rule.wennErfuellt && !(immun && rule.nachteilFuer && traitImmun(p, rule.nachteilFuer))
+          ? rule.wennErfuellt(p, room) : false));
       return teil + (hit ? rule.bonus : 0);
     }, 0);
   }, 0);
@@ -3573,6 +3625,7 @@ function monsterTraitBonusSum(room) {
 function fleeIsAutomatic(room, player) {
   if (combatHasMonster(room, FLEE_AUTOMATIC)) return true;
   if (!room.combat || !player) return false;
+  if (hatFluchArt(player, 'traitsVergessen')) return false; // siehe hasRace
   const regeln = player.races.map((id) => {
     const c = card(id);
     return c && FLEE_AUTOMATIC_BY_RACE[c.name.toUpperCase()];
@@ -3649,6 +3702,38 @@ function rollWithWindow(room, player, purpose, onResolve) {
   if (!holders.length || room.pendingRoll) { onResolve(roll); return; }
   room.pendingRoll = { playerId: player.id, purpose, roll, holders, onResolve };
   log(room, `${player.name} würfelt ${roll}${malus ? ` (${malus} durch einen Fluch)` : ''} - es darf noch auf den Wurf reagiert werden.`);
+}
+
+// Eine Stelle fuer den Phasenwechsel, damit Effekte, die an einer Phase
+// haengen, nicht an jedem der Uebergaenge einzeln stehen muessen.
+function setzeZugphase(room, phase) {
+  room.turnPhase = phase;
+  if (phase === 'gabe') rucksackWurf(room);
+}
+
+// HUNGRIGER RUCKSACK: der Wurf faellt beim Uebergang in die Milde Gabe -
+// "bevor Milde Gabe verteilt oder abgelegt wird". Pro Zug nur einmal
+// (room.rucksackWurfZug, in endTurn zurueckgesetzt), und nur fuer die Person,
+// die gerade am Zug ist - der Fluch nennt "jedes deiner Zuege".
+function rucksackWurf(room) {
+  const p = currentPlayer(room);
+  if (!p || !hatFluchArt(p, 'hungrigerRucksack')) return;
+  if (room.rucksackWurfZug === room.turnIndex) return;
+  room.rucksackWurfZug = room.turnIndex;
+  wurfMitFenster(room, p, 'hungrigerRucksack', (roll) => {
+    if (roll === 6) {
+      clearActiveCurseByKind(p, 'hungrigerRucksack');
+      return `Würfelwurf ${roll} -> der Hungrige Rucksack verschluckt sich selbst und verschwindet`;
+    }
+    const anzahl = Math.min(roll, p.hand.length);
+    for (let i = 0; i < anzahl; i++) {
+      const id = p.hand[Math.floor(Math.random() * p.hand.length)];
+      removeFromHand(p, id);
+      clearCheatIfLost(p, id);
+      discardCard(room, id);
+    }
+    return `Würfelwurf ${roll} -> der Hungrige Rucksack frisst ${anzahl} Handkarte(n)`;
+  });
 }
 
 // Wuerfelwurf fuer Stellen, die ihr Ergebnis als Text zurueckgeben muessen
@@ -4129,7 +4214,7 @@ function handLimit(player) {
 function dryadeWirkung(room, player) {
   if (!room.combat || !player) return;
   if (!room.combat.monsterIds.some((id) => (card(id) || {}).name === 'DRYADE')) return;
-  if (!player.classes.some((id) => /ZAUBERER/i.test((card(id) || {}).name || ''))) return;
+  if (!hasClass(player, 'ZAUBERER')) return; // respektiert TEMPORÄRE ANMNESIE
   const desc = applyPrimitiveAction(room, player, { type: 'discardClassCardMatchingElseDeath', substr: 'ZAUBERER' });
   log(room, `Die Dryade schwaecht ${player.name}: ${desc}.`);
 }
@@ -4171,6 +4256,15 @@ function startCombat(room, actorId, monsterIds, opts) {
     readySignature: null,
   };
   dryadeWirkung(room, findPlayer(room, actorId));
+  // GUMMI-GOLEM: "Du musst in jedem Kampf deine Hilfe anbieten." Der Server
+  // meldet das Angebot an - annehmen muss es niemand (siehe Karte), deshalb
+  // nur eine Logzeile und keine Anfrage.
+  const kaempfer = findPlayer(room, actorId);
+  room.players.forEach((p) => {
+    if (p.id !== actorId && zuckerschockAktiv(p)) {
+      log(room, `${p.name} steht unter Zuckerschock und bietet ${kaempfer ? kaempfer.name : 'der kämpfenden Person'} seine Hilfe an.`);
+    }
+  });
   touchRoom(room);
 }
 
@@ -4445,7 +4539,7 @@ const COMBAT_POTION_CARD_NAMES = [...new Set(ALL_CARDS.filter(isCombatPotionCard
 function beendeKampfOhneSieg(room, c, thenLoot) {
   clearNextCombatCurses(combatParticipants(room));
   room.combat = null;
-  room.turnPhase = combatEndPhase(c, thenLoot);
+  setzeZugphase(room, combatEndPhase(c, thenLoot));
 }
 
 function combatEndPhase(c, thenLoot) {
@@ -5201,6 +5295,12 @@ function handleRespondHelp(room, playerId, accept) {
     log(room, `${target.name} darf nicht ablehnen (Knieschützer der Verlockung).`);
     accept = true;
   }
+  // GUMMI-GOLEM: "Du musst in jedem Kampf deine Hilfe anbieten" - wer im
+  // Zuckerschock steckt, kann eine Anfrage nicht ausschlagen.
+  if (!accept && zuckerschockAktiv(target)) {
+    log(room, `${target.name} steht unter Zuckerschock und muss helfen.`);
+    accept = true;
+  }
   if (accept) {
     const bittsteller = findPlayer(room, c.actorId);
     if (bittsteller && hatHilfeSperre(bittsteller)) {
@@ -5393,6 +5493,20 @@ function resolveCombatWin(room) {
 
 function finishCombatWin(room) {
   const c = room.combat;
+  // TOURISTENFALLE endet, sobald die verfluchte Person als HILFE einen Kampf
+  // gewinnt - der eigene Sieg zaehlt laut Karte nicht. Hier, solange der
+  // Kampf noch steht und die Hilfe bekannt ist.
+  const helferBeiSieg = c.helperId ? findPlayer(room, c.helperId) : null;
+  if (helferBeiSieg && clearActiveCurseByKind(helferBeiSieg, 'keinAergerSuchen')) {
+    log(room, `${helferBeiSieg.name} hat jemandem zum Sieg verholfen - die Touristenfalle ist vorbei.`);
+  }
+  // TEMPORÄRE ANMNESIE endet mit einem gewonnenen Kampf - "wenn du ein Monster
+  // getoetet hast oder dabei geholfen hast", also fuer alle Beteiligten.
+  combatParticipants(room).forEach((p) => {
+    if (clearActiveCurseByKind(p, 'traitsVergessen')) {
+      log(room, `${p.name} erinnert sich wieder an Rasse und Klasse.`);
+    }
+  });
   const actor = findPlayer(room, c.actorId);
   const helper = c.helperId ? findPlayer(room, c.helperId) : null;
   // "... bis du ein Monster ohne Hilfe tötest." Die Loeschung steht VOR der
@@ -5580,7 +5694,7 @@ function finishCombatWin(room) {
   // ÜBERFALLTRANK: siehe combatEndPhase - der urspruengliche Spieler (nicht
   // die/der Kaempfende) darf danach den Raum pluendern, room.turnIndex zeigt
   // ohnehin noch auf sie/ihn, der Zug ist nie gewechselt.
-  if (!won) room.turnPhase = combatEndPhase(c, false);
+  if (!won) setzeZugphase(room, combatEndPhase(c, false));
   touchRoom(room);
 }
 
@@ -5756,7 +5870,7 @@ function beendeFluchtphase(room, c) {
   // kassiert, wechselt die Phase erst mit ihrer Bestaetigung (wie bisher,
   // siehe handleAckConsequence). Sonst jetzt.
   const actorGescheitert = gescheitert.some((p) => p.id === c.actorId);
-  if (!actorGescheitert) room.turnPhase = combatEndPhase(c, false);
+  if (!actorGescheitert) setzeZugphase(room, combatEndPhase(c, false));
   if (!gescheitert.length) return;
   // Helfer:innen zuerst, die kaempfende Person zuletzt - deren Bestaetigung
   // gibt den Zug wieder frei, also soll sie am Ende stehen.
@@ -7137,7 +7251,8 @@ module.exports = {
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,
   curseCombatModifier, curseSuppressesItemBonuses, curseHidesHandItems, hatHilfeSperre, hatSchatzSperre,
   hatKampfschatzSperre, hatUntotenAngst, cursedItemIds, unequipSlotCard, ownTradeIds,
-  clearNextCombatCurses, COMBAT_REACTION_CARDS, applyCombatReaction, handleAckConsequence, handleResolveConsequenceChoice,
+  clearNextCombatCurses, COMBAT_REACTION_CARDS, TREASURE_REACTION_CARDS, applyCombatReaction, handleAckConsequence, setzeZugphase,
+  zieheSchaetzeFuer, zuckerschockAktiv, besesseneSchaetze, handleResolveConsequenceChoice,
   autoApplyLossConsequence,
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
   scheduleBotActionsIfNeeded,

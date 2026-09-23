@@ -188,8 +188,8 @@ module.exports = (ctx) => {
     // "Lass jeden Ork im Spiel eine Karte aus deiner Hand ziehen."
     'BOBBELKOPF': () => ({ type: 'queuedTakeFromHand', mode: 'after', nurRasse: 'ORK' }),
     // "Zuckerschock! Du musst in jedem Kampf deine Hilfe anbieten, darfst
-    // keinen Schatz annehmen, bis du einen verlierst." - eine Dauerpflicht
-    // ueber viele Zuege, fuer die es keinen Tracker gibt; bleibt manuell:
+    // keinen Schatz annehmen, bis du einen verlierst." Laeuft ueber den
+    // Fluch-Tracker (LINGERING_CURSES, kind 'zuckerschock') - kein Sofort-Effekt:
     'GUMMI-GOLEM': () => null,
     // "Ein Strichmaennchen hat kein Geschlecht, und du jetzt auch nicht. Du
     // bist weder maennlich noch weiblich, bis ein anderer Spieler das
@@ -378,6 +378,8 @@ module.exports = (ctx) => {
     'GESCHLECHTSUMWANDLUNG': () => ({ type: 'setGender', value: 'wechseln' }),
     'HUHN AUF DEINEM KOPF': () => null,
     'NARRENGOLD': () => null,
+    // TOURISTENFALLE wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES, kind 'keinAergerSuchen') - kein Sofort-Effekt:
     'TOURISTENFALLE': () => null,
     'MIESER SPIEGEL': () => null,
     // ZWERGENBIER wirkt ausschliesslich ueber den Fluch-Tracker
@@ -392,8 +394,12 @@ module.exports = (ctx) => {
     // mitten in der Konsequenz-Auflösung, unterdrückter Rassen/Klassen-
     // Status) - bleiben bewusst manuell:
     'EDELMUT': () => ({ type: 'curseEdelmut' }),
+    // HUNGRIGER RUCKSACK wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES, kind 'hungrigerRucksack') - der Wurf faellt am Zugende:
     'HUNGRIGER RUCKSACK': () => null,
     'KLEINER FEHLER': () => ({ type: 'curseKleinerFehler' }),
+    // TEMPORÄRE ANMNESIE wirkt ausschliesslich ueber den Fluch-Tracker
+    // (LINGERING_CURSES, kind 'traitsVergessen') - kein Sofort-Effekt:
     'TEMPORÄRE ANMNESIE': () => null,
 
     // "Du verlierst deinen wertvollsten Gegenstand, den du im Spiel ausliegen

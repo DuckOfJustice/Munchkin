@@ -77,6 +77,27 @@ module.exports = () => {
     // Weihnachtsmanns, kind 'noTreasure').
     'NARRENGOLD': { kind: 'noCombatTreasure', dauer: 'naechsterKampf',
       hinweis: 'Im nächsten Kampf gibt es für dich keinen Schatz.' },
+    // GUMMI-GOLEM, Schlimme Dinge: "Zuckerschock! Du musst in JEDEM Kampf
+    // deine Hilfe anbieten, darfst keinen Schatz annehmen, bis du einen
+    // verlierst." Angebot und Ende: zuckerschockAktiv in server.js.
+    'GUMMI-GOLEM': { kind: 'zuckerschock', dauer: 'dauerhaft',
+      hinweis: 'Du musst in jedem Kampf Hilfe anbieten und bekommst keinen Schatz, bis du einen verlierst.' },
+    // "Am Ende jedes deiner Zuege wuerfelst du, bevor 'Milde Gabe' verteilt
+    // oder abgelegt wird. Dein Rucksack frisst entsprechend des Wurfs so viele
+    // zufaellige Karten deiner Hand! Bei einer gewuerfelten 6 verschluckt der
+    // Rucksack sich selbst und verschwindet." Wurf: rucksackWurf in server.js.
+    'HUNGRIGER RUCKSACK': { kind: 'hungrigerRucksack', dauer: 'dauerhaft',
+      hinweis: 'Am Ende jedes deiner Züge frisst der Rucksack gewürfelt viele Handkarten (bei einer 6 ist er weg).' },
+    // "Eine Beule am Kopf laesst dich deine Klasse(n) und Rasse(n) vergessen
+    // ... Bis dahin wirst du ueberall als klassenloser Mensch gezaehlt."
+    // Wirkung in hasRace/hasClass/itemGrantsTrait, Ende in finishCombatWin.
+    'TEMPORÄRE ANMNESIE': { kind: 'traitsVergessen', dauer: 'dauerhaft',
+      hinweis: 'Rasse und Klasse zählen nicht, bis du einen Kampf gewinnst.' },
+    // "Du darfst nicht 'Auf Aerger aus sein'. Dieser Fluch bleibt bestehen,
+    // bis du einem anderen Spieler geholfen hast, einen Kampf zu gewinnen."
+    // Sperre und Ende: keinAergerSuchen in server.js.
+    'TOURISTENFALLE': { kind: 'keinAergerSuchen', dauer: 'dauerhaft',
+      hinweis: 'Kein "Auf Ärger aus sein", bis du jemandem zum Sieg verhilfst.' },
     // "Du hast Angst vor den Untoten." Dauerhaft - der Kartentext nennt kein
     // Ende, nur der WUNSCHRING beendet ihn.
     'TODESANGST': { kind: 'fearUndead', dauer: 'dauerhaft',

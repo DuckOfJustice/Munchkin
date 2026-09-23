@@ -4,6 +4,7 @@
 module.exports = (ctx) => {
   const {
     hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
+    hatFluchArt,
   } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
@@ -276,7 +277,9 @@ module.exports = (ctx) => {
   // Dazu die Monsterbrille fuer den einen Gegenstand, der eine Rasse verleiht:
   // wer FALSCHE OHREN traegt, gilt fuer Monster als Elf und damit nicht als
   // Mensch (ITEM_GRANTS_TRAIT kennt sonst keine Rasse).
-  const istMensch = (p) => !p.races.length && !monsterSeesRace(p, 'ELF');
+  // TEMPORÄRE ANMNESIE: "ueberall als klassenloser Mensch gezaehlt" - wer den
+  // Fluch traegt, zaehlt als Mensch, auch wenn Rassenkarten ausliegen.
+  const istMensch = (p) => (hatFluchArt(p, 'traitsVergessen') || !p.races.length) && !monsterSeesRace(p, 'ELF');
 
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
@@ -387,7 +390,9 @@ module.exports = (ctx) => {
     },
     // "+5 gegen Elfen oder Menschen." - eine Regel, nicht zwei: ein Elf ist
     // kein Mensch, die Faelle schliessen sich aus.
-    'RIESENKAKERLAKE': { wennErfuellt: (p) => monsterSeesRace(p, 'ELF') || istMensch(p), bonus: 5 },
+    // nachteilFuer: HALB-BLUT schuetzt auch hier - ein Halb-Elf ist weder Elf
+    // mit Nachteil noch Mensch (er hat ja eine Rassenkarte).
+    'RIESENKAKERLAKE': { wennErfuellt: (p) => monsterSeesRace(p, 'ELF') || istMensch(p), bonus: 5, nachteilFuer: 'races' },
     'GRASGNOLL': { wennErfuellt: (p) => istMensch(p), bonus: 5 },   // "+5 gegen Menschen."
     // "Greift mit zahlreichen Koepfen an. Erhaelt +5, wenn dir niemand hilft."
     // Haengt am Kampf, nicht an der Person - deshalb ueber den Raum.
