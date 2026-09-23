@@ -2514,7 +2514,7 @@ const treasuresFactory = require('./src/cards/treasures.js');
 const {
   TREASURE_POWER_OVERRIDES, COMBAT_POTION_OVERRIDES, DOOR_COMBAT_CARDS,
   POST_FLEE_ESCAPE_CARDS, GUARANTEED_FLEE_CARDS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
-} = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre });
+} = treasuresFactory({ card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre, enhancerKartenIds });
 
 // ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, DOOR_POWER_CARDS, LINGERING_CURSES:
 // siehe src/cards/reactions.js.
@@ -2894,7 +2894,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn', 'juckpulverDiscard']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn', 'juckpulverDiscard', 'verstaerkerAufMonster']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -3522,12 +3522,52 @@ function combatHasUndead(room) {
   if (!room.combat) return false;
   if (combatHasMonster(room, UNDEAD_MONSTERS)) return true;
   if (room.combat.hasUndeadCurse) return true;
-  return (room.combat.enhancerIds || []).some((id) => { const c = card(id); return c && c.name === 'UNTOT'; });
+  return enhancerKartenIds(room).some((id) => { const c = card(id); return c && c.name === 'UNTOT'; });
+}
+
+// Verstaerker-Eintraege, deren Monster noch im Kampf steht.
+function aktiveEnhancers(room) {
+  const c = room.combat;
+  if (!c) return [];
+  return (c.enhancers || []).filter((e) => c.monsterIds.includes(e.monsterId));
+}
+// Kartenbonus eines Verstaerkers - GIGANTISCH auf dem FUNGUS ("+25 statt +10")
+// und der RAPIER-TROTTEL ("doppelter Effekt") haengen am Zielmonster.
+function enhancerBonusEintrag(room, eintrag) {
+  const karte = card(eintrag.cardId);
+  const ziel = card(eintrag.monsterId);
+  if (!karte || !ziel) return 0;
+  if (karte.name === 'GIGANTISCH' && ziel.name === 'FUNGUS') return 25;
+  if (ziel.name === 'RAPIER-TROTTEL') return (karte.bonus || 0) * 2;
+  return karte.bonus || 0;
+}
+// Summe der Verstaerker eines Monsters. monsterIds kann dieselbe Id zweimal
+// enthalten (KUMPEL: "ein weiteres Monster mit den gleichen Verstaerkern") -
+// die Summe wird deshalb je Vorkommen gezaehlt, nicht je Eintrag.
+function enhancerBonusSumme(room) {
+  const c = room.combat;
+  if (!c) return 0;
+  return (c.monsterIds || []).reduce((sum, mid) => sum
+    + (c.enhancers || []).filter((e) => e.monsterId === mid)
+      .reduce((teil, e) => teil + enhancerBonusEintrag(room, e), 0), 0);
+}
+// Schatzzuschlag der Verstaerker (GIGANTISCH/URALT +2, BABY -1), ebenfalls je
+// Vorkommen des Monsters.
+function enhancerTreasureSumme(room) {
+  const c = room.combat;
+  if (!c) return 0;
+  return (c.monsterIds || []).reduce((sum, mid) => sum
+    + (c.enhancers || []).filter((e) => e.monsterId === mid)
+      .reduce((teil, e) => teil + (typeof card(e.cardId).treasureCount === 'number' ? card(e.cardId).treasureCount : 0), 0), 0);
+}
+// Karten-Ids der noch wirksamen Verstaerker (UNTOT-Pruefung, BABY/MAMI).
+function enhancerKartenIds(room) {
+  return aktiveEnhancers(room).map((e) => e.cardId);
 }
 
 function monsterTraitBonusSum(room) {
   const parts = combatParticipants(room);
-  return room.combat.monsterIds.concat(room.combat.enhancerIds || []).reduce((sum, id) => {
+  return room.combat.monsterIds.concat(enhancerKartenIds(room)).reduce((sum, id) => {
     const c = card(id);
     const regeln = c && MONSTER_TRAIT_BONUS[c.name];
     if (!regeln) return sum;
@@ -3816,7 +3856,7 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
   if (c && c.mommyMonsterId) {
     levels += 1;
     treasures += 1;
-    if (c.enhancerIds && c.enhancerIds.some(id => card(id).name === 'BABY')) {
+    if (enhancerKartenIds(room).some((id) => card(id).name === 'BABY')) {
       treasures += 1; // BABY gab -1 Basis-Schatz, MAMI gleicht aus
     }
   }
@@ -4159,14 +4199,12 @@ function startCombat(room, actorId, monsterIds, opts) {
     classDiscards: {}, // "<playerId>:combat"/"<playerId>:flee" -> Anzahl bereits abgeworfener Karten
     fleeBonus: 0,        // Summe der Flugzauber-Karten
     playedFleeBonus: 0,  // STEAM-CODE: Weglauf-Zuschlag aus gespielten Kampfkarten
-    treasureDelta: 0,  // Schatzbonus/-malus gespielter Monster-Verstärker
-    // Gespielte Monster-Verstärker. Die meisten wirken nur über ihr
-    // bonus-Feld (sofort in monsterModifier), zwei aber über den weiteren
-    // Kampfverlauf: "… aus der Hölle." (+5 gegen Priester, MONSTER_TRAIT_BONUS)
-    // und UNTOT ("Das Monster zählt jetzt als Untoter für alle Zwecke").
-    enhancerIds: [],
-    enhancerBonus: 0,      // Anteil der Verstaerker am monsterModifier (KUMPEL)
-    enhancerTreasure: 0,   // dasselbe fuer treasureDelta
+    treasureDelta: 0,  // Schatzbonus/-malus, der nicht an ein Monster haengt
+    // Gespielte Monster-Verstaerker mit ihrem Zielmonster: { cardId, monsterId }.
+    // Verschwindet ein Monster, verschwinden seine Verstaerker mit ihm - die
+    // ILLUSION sagt das ausdruecklich ("zusammen mit allen Karten, die
+    // gespielt wurden, um es zu veraendern").
+    enhancers: [],
     ready: {},         // playerId -> true, sobald jemand die Auswertung freigibt
     readySignature: null,
   };
@@ -4212,7 +4250,7 @@ function combatSignature(room) {
   if (!c) return null;
   const t = combatTotals(room);
   return JSON.stringify([c.monsterIds, c.helperId, c.actorModifier, c.monsterModifier,
-    t.playerStrength, t.monsterStrength, c.mustFlee]);
+    enhancerBonusSumme(room), t.playerStrength, t.monsterStrength, c.mustFlee]);
 }
 
 function refreshCombatReady(room) {
@@ -4305,7 +4343,7 @@ function combatTotals(room) {
   // DOPPELGAENGER: "Verdopple deine Kampfstaerke" - auf die fertige Summe der
   // Munchkin-Seite, gespielte Karten eingeschlossen.
   if (c.doubleActor) playerStrength *= 2;
-  const monsterStrength = monsterLevel + c.monsterModifier + monsterTraitBonusSum(room);
+  const monsterStrength = monsterLevel + c.monsterModifier + monsterTraitBonusSum(room) + enhancerBonusSumme(room);
   return { playerStrength, monsterStrength, monsterLevel };
 }
 
@@ -4647,10 +4685,9 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const schatzHinweis = (!drawn.length && actorFuerSchatz && (m.treasureCount || 0) && hatSchatzSperre(actorFuerSchatz))
         ? `, aber ${actorFuerSchatz.name} steht auf der Störerliste und bekommt nichts`
         : (drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : '');
-      // ponytail: der Anteil gespielter Verstaerker (monsterModifier,
-      // treasureDelta) bleibt im Kampf, auch wenn er auf dem entfernten
-      // Monster lag - genau wie bei ILLUSION. Aufruestweg waere ein
-      // monsterModifier pro Monster-ID.
+      // Die Verstaerker des entfernten Monsters fallen mit ihm weg: sie
+      // rechnen ueber enhancerBonusSumme()/enhancerTreasureSumme() nur noch
+      // fuer Monster-Ids, die noch in c.monsterIds stehen.
       if (!c.monsterIds.length) {
         beendeKampfOhneSieg(room, c, action.thenLoot);
         return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${schatzHinweis}`;
@@ -4690,12 +4727,16 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     }
     case 'duplicateMonsterMommy': {
       const mid = action.monsterId || action.validMonsterIds[0];
+      const hasBaby = enhancerKartenIds(room).some((id) => card(id).name === 'BABY');
       c.monsterIds.push(mid);
       c.mommyMonsterId = mid;
-      const hasBaby = (c.enhancerIds || []).some(id => card(id).name === 'BABY');
-      const enhancerBonus = (c.enhancerIds || []).reduce((sum, id) => sum + (card(id).bonus || 0), 0);
-      let mamiBonus = 10 + enhancerBonus;
-      if (hasBaby) mamiBonus += 5; // Compensate for Baby's -5
+      // "Mami ist von allen Verbesserungen ihres Babys betroffen, ausser der
+      // BABY-Karte selbst": mit dem zweiten Vorkommen von mid zaehlen alle an
+      // mid haengenden Verstaerker (enhancerBonusSumme, siehe combatTotals)
+      // automatisch ein zweites Mal - das ist fuer URALT & Co. genau richtig.
+      // Nur BABYs -5 soll NICHT doppelt gelten, deshalb hier ausgeglichen.
+      let mamiBonus = 10;
+      if (hasBaby) mamiBonus += 5; // gleicht BABYs verdoppeltes -5 aus
       c.monsterModifier += mamiBonus;
       refreshCombatReady(room);
       return `ruft die MAMI von "${card(mid).name}" (+${mamiBonus} auf Mami)`;
@@ -4713,23 +4754,38 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const alt = c.monsterIds.shift();
       if (alt) room.doorDiscard.push(alt);
       c.monsterIds.unshift(action.cardId);
-      // monsterModifier ist ein einziges kampfweites Feld, keine Zuordnung
-      // pro Monster - bei genau einem Monster im Kampf (Regelfall) verfaellt
-      // er damit korrekt mit dem ausgetauschten Monster. ponytail: mehrere
-      // Monster im selben Kampf sind KEIN Task-8-Sonderfall - startCombat
-      // nimmt schon immer ein monsterIds-Array (ganz normale Tuer-Aufdeckung
-      // mit zwei Monstern reicht), das gab es lange vor dieser Karte. Die
-      // Falle braucht nur einen Monster-Verstaerker auf dem einen Monster und
-      // ILLUSION auf dem anderen - der Reset trifft dann faelschlich auch das
-      // unbeteiligte Monster. Aufruestweg: monsterModifier pro monsterId
-      // statt kampfweit fuehren, falls das je gebraucht wird.
-      c.monsterModifier = 0;
-      // Der Verstaerker-Anteil gehoert zum ersetzten Monster und darf danach
-      // nicht mehr von KUMPEL verdoppelt werden.
-      c.enhancerBonus = 0;
-      c.enhancerTreasure = 0;
+      // Die Verstaerker des ersetzten Monsters fallen von selbst weg: sie
+      // rechnen ueber enhancerBonusSumme()/enhancerTreasureSumme() nur noch
+      // fuer Monster-Ids in c.monsterIds, und "alt" steht dort nicht mehr.
+      // Kampfweite Boni (Traenke, Wuerfelergebnisse) haengen an keinem
+      // Monster und bleiben deshalb unangetastet.
       refreshCombatReady(room);
       return `"${card(alt).name}" wird durch "${card(action.cardId).name}" ersetzt`;
+    }
+    // Monster-Verstaerker: erst hier weiss der Server, welches Monster
+    // gemeint war (bei nur einem Monster im Kampf sofort, sonst nach der
+    // Zielwahl in handlePlayCombatCard).
+    case 'verstaerkerAufMonster': {
+      if (!c.monsterIds.includes(action.monsterId)) return 'das Monster ist nicht mehr im Kampf';
+      c.enhancers = (c.enhancers || []).concat({ cardId: action.cardId, monsterId: action.monsterId });
+      const karte = card(action.cardId);
+      const eintrag = { cardId: action.cardId, monsterId: action.monsterId };
+      const bonus = enhancerBonusEintrag(room, eintrag);
+      const ziel = card(action.monsterId);
+      const zusatz = (karte.name === 'GIGANTISCH' && ziel.name === 'FUNGUS') ? ' - der Fungus erhält 25 statt 10'
+        : (ziel.name === 'RAPIER-TROTTEL' ? ' - der Rapier-Trottel verdoppelt' : '');
+      const delta = typeof karte.treasureCount === 'number' ? karte.treasureCount : 0;
+      log(room, `${player.name} spielt "${karte.name}" auf "${ziel.name}" (${bonus >= 0 ? '+' : ''}${bonus}${zusatz}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [action.cardId]);
+      announceCardPlay(room, player, action.cardId, `${bonus >= 0 ? '+' : ''}${bonus} für "${ziel.name}"`);
+      // Ein Verstaerker kann Kampfstaerke UND (durch UNTOT) den Untot-Status
+      // aendern - beides muss den Bereit-Status zuruecksetzen.
+      refreshCombatReady(room);
+      // '' statt einer Beschreibung: die Zeile oben ist schon geloggt (mit
+      // Zielmonster und Sonderfaellen) - bei mehreren Monstern haengt sonst
+      // noch eine zweite, redundante Zusammenfassung von
+      // handleResolveCardChoice dahinter (gleiche Bauform wie
+      // 'useLampOnMonster').
+      return '';
     }
     default:
       return '';
@@ -4892,50 +4948,23 @@ function handlePlayCombatCard(room, playerId, cardId) {
   }
   if (isMonsterEnhancerCard(c)) {
     removeFromHand(player, cardId);
-    // RAPIER-TROTTEL: "Jeder Monsterverstaerker, der auf den Trottel gespielt
-    // wird, hat den doppelten Effekt; z.B. eine '+5 fuer Monster'-Karte gibt
-    // ihm +10." ponytail: verdoppelt wird der Kampfbonus, den die Karte
-    // ausdruecklich nennt - der Schatzbonus bleibt wie gedruckt.
-    const trottel = room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'RAPIER-TROTTEL');
-    // FUNGUS: "Wenn der Fungus Gigantisch wird, erhaelt er einen Bonus von
-    // +25, statt +10!" Gleiche Bauform wie der RAPIER-TROTTEL, nur ein fester
-    // Wert statt einer Verdopplung.
-    const fungusGigantisch = c.name === 'GIGANTISCH'
-      && room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'FUNGUS');
-    const zuschlag = fungusGigantisch ? 25 : (trottel ? c.bonus * 2 : c.bonus);
-    // Fungus hat Vorrang: sein Text setzt einen FESTEN Ersatzwert (25 statt
-    // 10), keine Verdopplung des Kartenbonus - im Unterschied zum Trottel, der
-    // den gedruckten Bonus verdoppelt. Bei beiden gleichzeitig (Fungus +
-    // Rapier-Trottel im selben Kampf) greift nur die feste Zahl, der Trottel
-    // traegt nichts mehr bei - die Logzeile darf deshalb nur den Zusatz
-    // nennen, der tatsaechlich gegriffen hat, sonst behauptet sie zwei
-    // einander ausschliessende Dinge (siehe Review M3).
-    const zusatzText = fungusGigantisch ? ' - der Fungus erhält 25 statt 10'
-      : (trottel ? ' - der Rapier-Trottel verdoppelt' : '');
-    room.combat.monsterModifier += zuschlag;
-    // Getrennt mitgezaehlt, weil KUMPEL ("ein weiteres Monster mit den
-    // gleichen Monsterverstaerker-Karten") genau diesen Anteil ein zweites
-    // Mal braucht - monsterModifier enthaelt auch Traenke, die nicht
-    // mitverdoppelt werden duerfen.
-    room.combat.enhancerBonus = (room.combat.enhancerBonus || 0) + zuschlag;
-    room.combat.enhancerIds = (room.combat.enhancerIds || []).concat(cardId);
-    // "Wird das Monster besiegt, ziehe 2 zusätzliche Schätze" (GIGANTISCH,
-    // URALT) bzw. "ziehe 1 Schatz weniger, mindestens 1" (BABY): der Wert
-    // steckt in treasureCount der Verstärkerkarte. Aufgesammelt hier,
-    // ausgezahlt in resolveCombatWin.
-    const delta = typeof c.treasureCount === 'number' ? c.treasureCount : 0;
-    if (delta) {
-      room.combat.treasureDelta = (room.combat.treasureDelta || 0) + delta;
-      room.combat.enhancerTreasure = (room.combat.enhancerTreasure || 0) + delta;
+    // Bei mehreren Monstern muss gesagt werden, welches verstaerkt wird
+    // (gleiche Bauform wie die Monster-Wahl der MAGISCHEN LAMPE).
+    if (room.combat.monsterIds.length > 1) {
+      room.doorDiscard.push(cardId);
+      openCardChoice(room, player, c.name, [...new Set(room.combat.monsterIds)].map((mId) => ({
+        id: `verstaerker-${mId}`,
+        label: `Auf "${card(mId).name}" spielen`,
+        action: { type: 'verstaerkerAufMonster', cardId, monsterId: mId },
+      })));
+      room.pendingCardAction.sourceCardId = cardId;
+      log(room, `${player.name} spielt "${c.name}" im Kampf - Zielmonster nötig.`, [cardId]);
+      announceCardPlay(room, player, cardId, 'Zielmonster wird noch gewählt');
+      touchRoom(room);
+      return;
     }
     room.doorDiscard.push(cardId);
-    log(room, `${player.name} spielt "${c.name}" im Kampf (${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster${zusatzText}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
-    announceCardPlay(room, player, cardId, `${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster`);
-    // Fehlte bisher hier: ein Monsterverstaerker kann die Kampfstaerke UND
-    // (durch die Karte UNTOT) den Untot-Status aendern - beides muss den
-    // Bereit-Status zuruecksetzen bzw. TODESANGST auswerten (siehe
-    // refreshCombatReady).
-    refreshCombatReady(room);
+    applyCombatPotionAction(room, player, { type: 'verstaerkerAufMonster', cardId, monsterId: room.combat.monsterIds[0] }, c);
     touchRoom(room);
     return;
   }
@@ -5067,12 +5096,10 @@ function applyCombatReaction(room, player, cardId, regel) {
     const erstes = c.monsterIds[0];
     if (!erstes) return;
     c.monsterIds.push(erstes);
-    // "... mit den gleichen Monsterverstaerker-Karten": Stufe und Schatzzahl
-    // verdoppeln sich ueber die zweite Karten-ID von selbst, die bereits
-    // gespielten Verstaerker zaehlen aber nur einmal in monsterModifier/
-    // treasureDelta - deshalb hier ein zweites Mal.
-    c.monsterModifier += (c.enhancerBonus || 0);
-    if (c.enhancerTreasure) c.treasureDelta = (c.treasureDelta || 0) + c.enhancerTreasure;
+    // "... mit den gleichen Monsterverstaerker-Karten": Stufe, Schatzzahl UND
+    // die an "erstes" haengenden Verstaerker verdoppeln sich jetzt von selbst
+    // ueber die zweite Vorkommen von "erstes" in monsterIds - siehe
+    // enhancerBonusSumme()/enhancerTreasureSumme(). Kein Code mehr noetig.
     removeFromHand(player, cardId);
     discardCard(room, cardId);
     zeigen();
@@ -5138,7 +5165,8 @@ function kampfSchatzZahl(room) {
     if (c.zeroTreasureMonsterIds && c.zeroTreasureMonsterIds.includes(id)) return sum;
     return sum + ((card(id) || {}).treasureCount || 0);
   }, 0);
-  return Math.max(0, c.treasureDelta ? Math.max(1, basis + c.treasureDelta) : basis);
+  const delta = (c.treasureDelta || 0) + enhancerTreasureSumme(room);
+  return Math.max(0, delta ? Math.max(1, basis + delta) : basis);
 }
 
 function handleRequestHelp(room, playerId, targetId, reward) {
@@ -5465,10 +5493,12 @@ function finishCombatWin(room) {
       ? `Die Piñata platzt - jede:r am Tisch zieht 1 Schatzkarte.`
       : `Die Piñata platzt - ${grund}: nur ${gezogen} von ${room.players.length} Personen ziehen je 1 Schatzkarte.`);
   }
-  // Monster-Verstärker aus dem Kampf zählen mit; BABY sagt ausdrücklich
+  // Monster-Verstärker aus dem Kampf zählen mit (enhancerTreasureSumme, je
+  // Verstärker nur, solange sein Monster noch steht); BABY sagt ausdrücklich
   // "mindestens 1", deshalb die Untergrenze - aber nur, wenn überhaupt ein
-  // Verstärker im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
-  const treasureCount = c.treasureDelta ? Math.max(1, baseTreasures + c.treasureDelta) : baseTreasures;
+  // Zuschlag im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
+  const treasureDelta = (c.treasureDelta || 0) + enhancerTreasureSumme(room);
+  const treasureCount = treasureDelta ? Math.max(1, baseTreasures + treasureDelta) : baseTreasures;
   // Gezogen wird nur, was auch ankommt, und nur fuer die Person, die es
   // ueberhaupt bekommen kann. Steht die kaempfende Person auf der
   // Stoererliste (oder unter NARRENGOLD), zieht stattdessen die Helfer:in
@@ -5780,8 +5810,13 @@ function oeffneVerlustKonsequenz(room, player, monsters, c, keepPhase) {
     keepPhase: !!keepPhase,
   };
   // Die Verstaerker des Kampfs reisen mit (FUNGUS: "Verdoppelt die Strafe,
-  // wenn der Fungus Gigantisch ist") - room.combat ist hier schon weg.
-  const verstaerker = (c.enhancerIds || []).map((id) => (card(id) || {}).name).filter(Boolean);
+  // wenn der Fungus Gigantisch ist") - room.combat ist hier schon weg, also
+  // direkt auf dem mitgegebenen c (nicht aktiveEnhancers/enhancerKartenIds,
+  // die room.combat lesen wuerden). ponytail: noch kampfweit, nicht je
+  // Zielmonster gefiltert - Aufruestweg ist Task 2 der Regelluecken-Welle-3
+  // (GIGANTISCH/Fungus-Schlimme-Dinge nur am Zielmonster).
+  const verstaerker = (c.enhancers || []).filter((e) => c.monsterIds.includes(e.monsterId))
+    .map((e) => (card(e.cardId) || {}).name).filter(Boolean);
   const sources = monsters.map((m) => ({ name: m.name, text: m.badstuff, verstaerker }));
   if (room.pendingConsequence) {
     room._pendingConsequenceBacklog = (room._pendingConsequenceBacklog || [])
@@ -7101,6 +7136,7 @@ module.exports = {
   monsterRefusesTarget, monsterPassOption, fleeModifierParts, monsterTraitBonusSum,
   istGeschlecht, GENDER_IMMUNE_ITEMS, pruefeSlipperVerlust, handleEquipItem,
   applyCombatPotionAction, combatHasUndead, addActiveCurse, curseCombatModifier,
+  aktiveEnhancers, enhancerBonusEintrag, enhancerBonusSumme, enhancerTreasureSumme, enhancerKartenIds,
   handleAttachCard, attachmentIds, attachmentBonusSum, istGrosserGegenstand, backstabMalus,
   canCarryAnotherBigItem, applyPrimitiveAction, fluchZiel, ROLL_REROLL_CARDS,
   rollWithWindow, handlePlayReactionCard, ITEM_GRANTS_TRAIT, itemGrantsTrait,

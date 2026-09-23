@@ -35,7 +35,7 @@ function makeRoom(players, monsterIds) {
     itemAttachments: {}, logs: [], combatHappenedThisTurn: false,
     lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
     combat: monsterIds ? {
-      actorId: players[0].id, helperId: null, monsterIds, enhancerIds: [],
+      actorId: players[0].id, helperId: null, monsterIds, enhancers: [],
       actorModifier: 0, monsterModifier: 0, treasureDelta: 0, backstabs: {},
       mustFlee: false, classDiscards: {}, ready: {}, readySignature: null,
     } : null,

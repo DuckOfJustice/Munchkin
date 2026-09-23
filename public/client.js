@@ -1054,7 +1054,8 @@
     // Monster da (state.undeadMonsters, z.B. MR. BONES), oder die
     // Verstaerkerkarte UNTOT wurde gespielt - dann zaehlen ALLE Monster
     // dieses Kampfes als untot.
-    const untotVerstaerkt = (c.enhancerIds || []).some((eid) => { const ec = card(eid); return ec && ec.name === 'UNTOT'; });
+    const untotVerstaerkt = (c.enhancers || []).filter((e) => c.monsterIds.includes(e.monsterId))
+      .some((e) => { const ec = card(e.cardId); return ec && ec.name === 'UNTOT'; });
     const istUntot = untotVerstaerkt || c.monsterIds.some((id) => (state.undeadMonsters || []).includes((card(id).name || '').toUpperCase()));
 
     const monsterRow = document.createElement('div');

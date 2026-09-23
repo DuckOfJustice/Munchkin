@@ -126,7 +126,7 @@ function makeRoom(players, extra) {
   const b = makePlayer({ id: 'p2', name: 'B' });
   const combat = {
     actorId: a.id, helperId: null, helperPending: null,
-    monsterIds: [findCard('MEDUSA', 'monster').id], enhancerIds: [],
+    monsterIds: [findCard('MEDUSA', 'monster').id], enhancers: [],
     actorModifier: 0, monsterModifier: 0, treasureDelta: 0, backstabs: {},
     mustFlee: false, classDiscards: {}, ready: {}, readySignature: null,
   };

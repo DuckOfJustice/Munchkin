@@ -31,7 +31,7 @@ function makeRoom(players, monsterIds) {
     logs: [], combatHappenedThisTurn: false,
     lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
     combat: monsterIds ? {
-      actorId: players[0].id, helperId: null, monsterIds, enhancerIds: [],
+      actorId: players[0].id, helperId: null, monsterIds, enhancers: [],
       actorModifier: 0, monsterModifier: 0, treasureDelta: 0, backstabbed: {},
       mustFlee: false, classDiscards: {}, ready: {}, readySignature: null,
     } : null,
@@ -116,11 +116,12 @@ function makeRoom(players, monsterIds) {
   const p = makePlayer({});
   const peitsche = findCard('GHOULPEITSCHE');
   p.equipped.hands = [peitsche.id, null];
-  const room = makeRoom([p], [findCard('MEDUSA', 'monster').id]);
+  const medusaId = findCard('MEDUSA', 'monster').id;
+  const room = makeRoom([p], [medusaId]);
   assert.ok(!combatHasUndead(room), 'Medusa ist nicht untot');
   const ohne = combatTotals(room).playerStrength;
 
-  room.combat.enhancerIds = [findCard('UNTOT', 'door_other').id];
+  room.combat.enhancers = [{ cardId: findCard('UNTOT', 'door_other').id, monsterId: medusaId }];
   assert.ok(combatHasUndead(room), 'die Verstaerkerkarte UNTOT macht das Monster untot');
   assert.strictEqual(combatTotals(room).playerStrength - ohne, 3, 'Ghoulpeitsche gibt +3 gegen Untote');
 
@@ -136,8 +137,9 @@ function makeRoom(players, monsterIds) {
   const ohne = makePlayer({});
   const mit = makePlayer({ classes: [priester.id] });
   const staerke = (p) => {
-    const room = makeRoom([p], [findCard('MEDUSA', 'monster').id]);
-    room.combat.enhancerIds = [holle.id];
+    const medusaId = findCard('MEDUSA', 'monster').id;
+    const room = makeRoom([p], [medusaId]);
+    room.combat.enhancers = [{ cardId: holle.id, monsterId: medusaId }];
     return combatTotals(room).monsterStrength;
   };
   assert.strictEqual(staerke(mit) - staerke(ohne), 5, 'zusaetzliches +5 gegen Priester');

@@ -4,7 +4,7 @@
 // GUARANTEED_FLEE_MAX_MONSTER_LEVEL). Kuratiert statt per Regex - siehe die
 // Erklärung bei den anderen Kartentabellen.
 module.exports = (ctx) => {
-  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre } = ctx;
+  const { card, hasRace, findPlayer, currentPlayer, isTopLevel, combatParticipants, equippedItemIds, hatSchatzSperre, enhancerKartenIds } = ctx;
 
   // "Beendet jeden Fluch." - gemeinsame Vorlage fuer WUNSCHRING und DER
   // ANDERE RING (gleicher Kartentext, gleiche Mechanik).
@@ -327,7 +327,7 @@ module.exports = (ctx) => {
     'MAMI': (player, room) => {
       const validMonsterIds = room.combat.monsterIds.filter((m) => {
         const lv = card(m).level || 0;
-        const hasBaby = (room.combat.enhancerIds || []).some(id => (card(id)||{}).name === 'BABY');
+        const hasBaby = enhancerKartenIds(room).some((id) => (card(id) || {}).name === 'BABY');
         return lv <= 5 || hasBaby;
       });
       if (validMonsterIds.length === 0) return null;

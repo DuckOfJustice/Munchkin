@@ -68,7 +68,7 @@ function makeRoom(players, extra) {
     const elfe = makePlayer({ id: 'p2', name: 'B', level: 8, races: [elfId] });
     const room = makeRoom([kaempfer, elfe], { turnPhase: 'kampf' });
     const c = { actorId: 'p1', helperId: 'p2', monsterIds: [fungus.id], actorModifier: 0, monsterModifier: 0,
-      enhancerIds: mitGigantisch ? [gigantisch.id] : [], fleeFailed: ['p1', 'p2'], mustFlee: false };
+      enhancers: mitGigantisch ? [{ cardId: gigantisch.id, monsterId: fungus.id }] : [], fleeFailed: ['p1', 'p2'], mustFlee: false };
     room.combat = c;
     beendeFluchtphase(room, c);
     // Helfer:in zuerst, dann die kaempfende Person aus dem Nachlauf.

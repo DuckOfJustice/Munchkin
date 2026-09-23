@@ -342,7 +342,7 @@ module.exports = (ctx) => {
     // Verstaerkerkarte statt Monster: "... aus der Hoelle." gibt "+5 fuer das
     // Monster" (ueber das bonus-Feld) und "ein zusaetzliches +5 gegen
     // Priester" - Letzteres haengt an den Kaempfenden und gehoert deshalb
-    // hierher. Siehe combat.enhancerIds in server.js.
+    // hierher. Siehe combat.enhancers / enhancerKartenIds() in server.js.
     '… aus der Hölle.': { classes: ['PRIESTER'], bonus: 5 },
     'GOTHYANKI': [
       { wennErfuellt: (p) => !!p.classCapCard, bonus: 5 },

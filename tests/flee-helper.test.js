@@ -47,7 +47,7 @@ function fluchtRaum(monsterName, extra) {
     lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
     combat: {
       actorId: a.id, helperId: b.id, helperPending: null,
-      monsterIds: [findCard(monsterName, 'monster').id], enhancerIds: [],
+      monsterIds: [findCard(monsterName, 'monster').id], enhancers: [],
       actorModifier: 0, monsterModifier: 0, treasureDelta: 0, backstabs: {},
       mustFlee: true, fleeQueue: null, fleeingId: null, fleeFailed: [],
       classDiscards: {}, ready: {}, readySignature: null,
