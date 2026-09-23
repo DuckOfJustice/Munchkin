@@ -2774,6 +2774,7 @@ function applyTargetAction(room, actor, target, action) {
       c.actorId = target.id;
       c.helperId = null;
       c.helperPending = null;
+      c.bardenZwang = false; // die Zusage war an die alte Helfer:in gebunden
       // Die Zusage gehoerte zur alten Kampfpaarung - sie geht nicht auf die
       // neue kaempfende Person ueber.
       c.helperReward = 0;
@@ -3249,6 +3250,7 @@ function applyLingeringRule(room, player, cardName, cardId, regel) {
       const weg = findPlayer(room, room.combat.helperId);
       room.combat.helperId = null;
       room.combat.helperReward = 0;
+      room.combat.bardenZwang = false;
       log(room, `${weg ? weg.name : 'Die Helfer:in'} zieht sich straffrei zurück - niemand bleibt neben dem Gestank.`);
       refreshCombatReady(room);
     }
@@ -3927,6 +3929,7 @@ function bardenVerzauberInfo(room, player) {
   const dran = currentPlayer(room);
   if (!dran || dran.id !== player.id) return null;       // "in deinem Zug"
   if (!hasClass(player, 'BARDE') || c.helperId || c.helperPending) return null;
+  if (c.mustFlee || room.pendingRoll || room.pendingCardAction) return null;
   if (!player.hand.length) return null;
   // Dieselben Sperren wie beim normalen "Um Hilfe bitten" (Stinktier,
   // MONSTER_FORBIDS_HELP, Stinktier-Strafe, Todesangst vor Untoten) - siehe
@@ -3955,6 +3958,14 @@ function handleBardeVerzaubern(room, playerId, cardId, targetId) {
     rollWithWindow(room, ziel, 'verzaubern', (wurfZiel) => {
       const c = room.combat;
       if (!c) return;
+      if (c.helperId || c.helperPending) {
+        // Waehrend das Wurf-Fenster offen war, ist schon jemand anderes
+        // helfende Person geworden (freiwillig oder durch einen zweiten
+        // Verzauber-Versuch) - die nicht ersetzen.
+        log(room, `Der Verzauber-Versuch von ${player.name} kommt zu spaet - ${ziel.name} kann nicht mehr helfende Person werden.`);
+        touchRoom(room);
+        return;
+      }
       if (wurfBarde > wurfZiel) {
         log(room, `Verzaubert: ${wurfBarde} gegen ${wurfZiel} - ${ziel.name} muss ${player.name} helfen (ohne Belohnung).`);
         // Gleiche Bauform wie KNIESCHUETZER DER VERLOCKUNG: die Hilfe ist
@@ -4328,6 +4339,7 @@ function refreshCombatReady(room) {
     if (hatUntotenAngst(helfer)) {
       c.helperId = null;
       c.helperReward = 0;
+      c.bardenZwang = false;
       log(room, `${helfer.name} hat Todesangst vor Untoten und verlässt den Kampf - ohne Strafe.`);
     }
   }
@@ -4696,6 +4708,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.helperId = player.id;
       c.helperPending = null;
       c.helperReward = 0; // "Du kannst keine Belohnung einfordern."
+      c.bardenZwang = false; // draengt sich freiwillig rein, keine Verzauber-Zusage
 
       refreshCombatReady(room);
       return `${player.name} draengt sich als Helfer in den Kampf (ohne Belohnung)`;
@@ -4713,6 +4726,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const helper = findPlayer(room, c.helperId);
       c.helperId = null;
       c.helperReward = 0; // mit der Helfer:in faellt auch ihre Zusage weg
+      c.bardenZwang = false;
       return `${helper ? helper.name : 'Helfer'} verlässt den Kampf`;
     }
     // POLLYVERWANDLUNGSTRANK/TRANK DER IRRELEVANZ/ENTLASSUNGSGLOCKE nennen
@@ -5015,12 +5029,24 @@ function handlePlayCombatCard(room, playerId, cardId) {
     return;
   }
   if (isMonsterEnhancerCard(c)) {
+    // Nur wirklich unterschiedliche Monster brauchen eine Zielwahl - KUMPEL
+    // legt dasselbe Monster zweimal in monsterIds, das waere sonst ein
+    // Wahldialog mit einer einzigen Option.
+    const zielMonster = [...new Set(room.combat.monsterIds)];
+    if (zielMonster.length > 1 && (room.pendingCardAction || room.pendingConsequence)) {
+      // Es laeuft schon eine andere Kartenwahl (z.B. ein zweiter Verstaerker) -
+      // diese hier wuerde room.pendingCardAction ueberschreiben und die erste
+      // Wahl verwaisen lassen. Karte bleibt auf der Hand, nochmal versuchen.
+      log(room, `"${c.name}" wartet: eine andere Kartenwahl läuft noch - die Karte bleibt bei ${player.name} auf der Hand.`);
+      touchRoom(room);
+      return;
+    }
     removeFromHand(player, cardId);
     // Bei mehreren Monstern muss gesagt werden, welches verstaerkt wird
     // (gleiche Bauform wie die Monster-Wahl der MAGISCHEN LAMPE).
-    if (room.combat.monsterIds.length > 1) {
+    if (zielMonster.length > 1) {
       room.doorDiscard.push(cardId);
-      openCardChoice(room, player, c.name, [...new Set(room.combat.monsterIds)].map((mId) => ({
+      openCardChoice(room, player, c.name, zielMonster.map((mId) => ({
         id: `verstaerker-${mId}`,
         label: `Auf "${card(mId).name}" spielen`,
         action: { type: 'verstaerkerAufMonster', cardId, monsterId: mId },
@@ -5032,7 +5058,7 @@ function handlePlayCombatCard(room, playerId, cardId) {
       return;
     }
     room.doorDiscard.push(cardId);
-    applyCombatPotionAction(room, player, { type: 'verstaerkerAufMonster', cardId, monsterId: room.combat.monsterIds[0] }, c);
+    applyCombatPotionAction(room, player, { type: 'verstaerkerAufMonster', cardId, monsterId: zielMonster[0] }, c);
     touchRoom(room);
     return;
   }
@@ -5335,6 +5361,7 @@ function handleRespondHelp(room, playerId, accept) {
       return;
     }
     c.helperId = playerId;
+    c.bardenZwang = false; // neue Zusage - handleBardeVerzaubern setzt es danach ggf. wieder
     // Die Zusage aus der Anfrage wird beim Sieg eingeloest (resolveCombatWin).
     c.helperReward = c.helperPending.reward || 0;
     dryadeWirkung(room, findPlayer(room, playerId));
