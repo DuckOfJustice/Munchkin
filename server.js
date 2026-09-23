@@ -2957,7 +2957,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn', 'juckpulverDiscard', 'verstaerkerAufMonster']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn', 'juckpulverDiscard', 'verstaerkerAufMonster', 'trojanerOhneMonster', 'trojanerMitMonster']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -3911,40 +3911,35 @@ function handlePlayReactionCard(room, playerId, cardId, value) {
   }
 }
 
-// TROJANISCHER PFERD: Spieler spielt die Karte (optional mit einem Monster
-// aus der Hand). monsterId ist null (nur Schatz wegnehmen) oder die ID eines
-// Handmonsters (neuer Kampf gegen dieses Monster).
-function handlePlayTrojaner(room, playerId, cardId, monsterId) {
+// TROJANISCHER PFERD: "Spiele diese Karte zusammen mit einem Monster aus
+// deiner Hand aus, wenn jemand gerade nach dem Kampf einen Schatz ziehen
+// will ... (Oder spiele diese Karte ohne Monster, um einfach den Schatz
+// wegzunehmen.)" Die Monsterwahl laeuft ueber den vorhandenen
+// openCardChoice-Dialog (Vorbild: WANDERNDES MONSTER/ILLUSION,
+// regel.kind === 'addMonsterFromHand' weiter unten in dieser Datei) - der
+// Client zeigt die Wahl bereits generisch ueber renderCardAction(), keine
+// neue Client-UI noetig.
+function handlePlayTrojaner(room, playerId, cardId) {
   const combat = room.combat;
   if (!combat || !combat.trojanerOffer || !combat.trojanerOffer.includes(playerId)) return;
   const p = findPlayer(room, playerId);
   const c = card(cardId);
   if (!p || !c || !p.hand.includes(cardId) || !TREASURE_REACTION_CARDS.has(c.name)) return;
-  const actor = findPlayer(room, combat.actorId);
   removeFromHand(p, cardId);
   discardCard(room, cardId);
   combat.trojanerOffer = null;
   combat.trojanerDone = true;
-  if (monsterId && p.hand.includes(monsterId)) {
-    const m = card(monsterId);
-    if (m && m.category === 'door_monster') {
-      removeFromHand(p, monsterId);
-      // Kampf gewonnen, aber Schätze gestrichen → Monster ablegen, Level geben,
-      // dann neuen Kampf starten gegen das Trojaner-Monster.
-      // Levels und Sieg-Check laufen in finishCombatWin; der Schatz wird aber
-      // NICHT gezogen, weil wir trojanerNoTreasure setzen.
-      combat.trojanerNoTreasure = true;
-      combat.trojanerMonsterId = monsterId;
-      combat.trojanerPlayerId = p.id;
-      log(room, `${p.name} spielt "${c.name}" mit "${m.name}": ${actor.name} bekommt keinen Schatz und muss stattdessen gegen "${m.name}" kämpfen!`, [cardId, monsterId]);
-      finishCombatWin(room);
-      return;
-    }
-  }
-  // Ohne Monster: einfach keinen Schatz
-  combat.trojanerNoTreasure = true;
-  log(room, `${p.name} spielt "${c.name}": ${actor.name} bekommt keinen Schatz!`, [cardId]);
-  finishCombatWin(room);
+  const eigeneMonster = p.hand.filter((id) => (card(id) || {}).category === 'monster');
+  const options = [
+    { id: 'ohne', label: 'Ohne Monster: nur den Schatz wegnehmen', action: { type: 'trojanerOhneMonster' } },
+  ].concat(eigeneMonster.map((id) => ({
+    id: `mon-${id}`,
+    label: `Mit "${card(id).name}": neuer Kampf gegen dieses Monster`,
+    action: { type: 'trojanerMitMonster', cardId: id },
+  })));
+  openCardChoice(room, p, 'TROJANISCHER PFERD', options);
+  log(room, `${p.name} spielt "${c.name}" - der Kampf um den Schatz geht weiter.`);
+  touchRoom(room);
 }
 
 // Eine Person faellt weg (Verbindung verloren): sie kann auf nichts mehr
@@ -5047,6 +5042,27 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       refreshCombatReady(room);
       return `"${card(alt).name}" wird durch "${card(action.cardId).name}" ersetzt`;
     }
+    // TROJANISCHER PFERD ohne Monster: nur der Schatz entfaellt, der Kampf
+    // bleibt beim urspruenglichen Sieg.
+    case 'trojanerOhneMonster': {
+      c.trojanerNoTreasure = true;
+      finishCombatWin(room);
+      return 'kein Schatz';
+    }
+    // TROJANISCHER PFERD mit Monster: kein Schatz, stattdessen ein neuer
+    // Kampf gegen genau dieses Monster. aktorId wird VOR finishCombatWin
+    // gelesen, weil die Funktion room.combat auf null setzt - c selbst
+    // bleibt als Referenz auf das alte (jetzt losgeloeste) Objekt gueltig.
+    case 'trojanerMitMonster': {
+      removeFromHand(player, action.cardId);
+      const monsterName = card(action.cardId).name;
+      const aktorId = c.actorId;
+      c.trojanerNoTreasure = true;
+      c.trojanerMonsterId = action.cardId;
+      finishCombatWin(room);
+      if (!room.winner) startCombat(room, aktorId, [action.cardId], { fromHand: true });
+      return `kein Schatz - neuer Kampf gegen "${monsterName}"`;
+    }
     // Monster-Verstaerker: erst hier weiss der Server, welches Monster
     // gemeint war (bei nur einem Monster im Kampf sofort, sonst nach der
     // Zielwahl in handlePlayCombatCard).
@@ -5855,7 +5871,12 @@ function finishCombatWin(room) {
   const sollZiehen = actorGesperrt
     ? (helferKannZiehen ? Math.min(treasureCount, c.helperReward || 0) : 0)
     : treasureCount;
-  const drawn = ziehendFuer ? zieheSchaetzeFuer(room, ziehendFuer, sollZiehen) : [];
+  // TROJANISCHER PFERD: "Die Person erhaelt keinen Schatz." Betrifft die
+  // GESAMTE Kampfbeute (auch eine zugesagte Helfer:in-Quote, da fuerHelfer
+  // ein Ausschnitt von drawn ist) - nicht nur den Anteil der kaempfenden
+  // Person. PINATA (eigener, additiver Ziehweg oben in dieser Funktion)
+  // bleibt unberuehrt, ponytail: seltener Kombinationsfall.
+  const drawn = (ziehendFuer && !c.trojanerNoTreasure) ? zieheSchaetzeFuer(room, ziehendFuer, sollZiehen) : [];
   // einfache Aufteilung: alles an actor, außer helper wurde per Vorabsprache
   // (README) etwas zugesagt - hier immer erst alles an die/den Angreifer:in,
   // Weitergabe von Schätzen kann jederzeit frei "gehandelt" werden.
@@ -7546,4 +7567,5 @@ module.exports = {
   COMBAT_START_OPTIONS, COMBAT_START_COST, STAFF_ITEMS, combatStartOptionRule,
   scheduleBotActionsIfNeeded,
   handleAnswerZaubercouch,
+  handlePlayTrojaner,
 };
