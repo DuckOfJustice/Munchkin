@@ -222,5 +222,37 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(room.winner, null, 'aber der Sieg zaehlt nicht als Spielsieg');
 }
 
+// --- BARDE "Bardenglueck": Extraschatz, dann sofort eine beliebige Karte
+// abwerfen ("Sieh sie dir alle an und wirf sofort einen ab").
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const a = makePlayer({ id: 'p1', name: 'A', level: 9, classes: [barde.id] });
+  const room = makeRoom([a]);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  assert.ok(room.pendingCardAction, 'die Abwurf-Wahl oeffnet sich');
+  assert.strictEqual(room.pendingCardAction.playerId, 'p1');
+  const vorher = a.hand.length;
+  const wahl = room.pendingCardAction.candidateIds ? room.pendingCardAction.candidateIds[0]
+    : room.pendingCardAction.options[0].id;
+  if (room.pendingCardAction.candidateIds) S.handleResolveCardCardChoice(room, 'p1', wahl);
+  else S.handleResolveCardChoice(room, 'p1', wahl);
+  assert.strictEqual(a.hand.length, vorher - 1, 'genau eine Karte ist abgeworfen');
+  assert.strictEqual(room.pendingCardAction, null, 'die Wahl ist geschlossen');
+}
+// Ohne Handkarten nach der Beute (Schatzstapel leer, theoretisch moeglich)
+// entfaellt die Wahl.
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const a = makePlayer({ id: 'p1', name: 'A', level: 5, classes: [barde.id], hand: [] });
+  const room = makeRoom([a], { treasureDeck: [] });
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  assert.strictEqual(a.hand.length, 0, 'kein Schatz gezogen (Stapel leer)');
+  assert.strictEqual(room.pendingCardAction, null, 'ohne Handkarten gibt es nichts abzuwerfen');
+}
+
 fertig();
 console.log('card-regelluecken-welle3: alle Checks gruen');

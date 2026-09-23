@@ -3874,11 +3874,8 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
   }
   // BARDE, "Bardenglueck": "Wenn du in deinem Zug einen Kampf gewinnst, ziehe
   // einen zusaetzlichen Schatz. Sieh sie dir alle an und wirf sofort einen ab
-  // (beliebig)."
-  // ponytail: das Abwerfen bleibt manuell (Ablegen-Knopf) - der Server haette
-  // dafuer eine Wahl mitten im Siegesablauf zu oeffnen, direkt neben der
-  // Belohnungsanimation. Aufruestweg: pendingConsequence-Wahl ueber die
-  // frisch gezogenen Karten in resolveCombatWin.
+  // (beliebig)." Das Abwerfen selbst passiert in finishCombatWin (ueber die
+  // ganze Hand, nachdem die Beute drauf liegt) - hier zaehlt nur der Extraschatz.
   if (hasClass(actor, 'BARDE')) treasures += 1;
   return { levels, treasures };
 }
@@ -5669,7 +5666,19 @@ function finishCombatWin(room) {
   log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${gemeldeteSchaetze} Schatzkarte(n) gezogen.`, c.monsterIds);
   if (extras.levels) log(room, `Kartenbonus: +${extras.levels} zusätzliche Stufe(n).`);
   if (extras.treasures) log(room, `Kartenbonus: +${extras.treasures} zusätzliche(r) Schatz.`);
-  if (hasClass(actor, 'BARDE')) log(room, `Bardenglück: ${actor.name} zieht 1 Extraschatz und wirft dafür sofort 1 beliebige Karte ab.`);
+  if (hasClass(actor, 'BARDE')) log(room, `Bardenglück: ${actor.name} zieht 1 Extraschatz.`);
+  // BARDE "Bardenglueck": "Sieh sie dir alle an und wirf sofort einen ab
+  // (beliebig)." Die Wahl geht ueber die GANZE Hand (Beute ist schon drin),
+  // nicht nur ueber den Extraschatz. Reiht sich hinter eine schon offene
+  // Kartenwahl ein (z.B. UNFASSBAR REICH oben) statt sie zu verdraengen -
+  // openQueuedCardAction uebernimmt das. Ohne Handkarten (Schatzstapel leer
+  // o.ae., theoretisch moeglich) entfaellt die Wahl.
+  if (hasClass(actor, 'BARDE') && actor.hand.length) {
+    openQueuedCardAction(room, 'BARDENGLÜCK', [actor.id], () => ({
+      kind: 'chooseCard', prompt: 'Bardenglück: eine Karte abwerfen',
+      candidateIds: actor.hand.slice(), discardOwn: true,
+    }));
+  }
   if (helper) log(room, `(${helper.name} hat geholfen.)`);
   // ELF: "Für jedes Monster, das du jemandem anderen hilfst zu töten,
   // steigst du 1 Stufe auf."
