@@ -1304,3 +1304,69 @@ geplant als Wellen B und C) und 14 Schatzkarten. Drei davon (SÜSSER
 SCHULTERDRACHE, STACHELIGER GENITALSCHONER, TASCHE MIT KRÄHENFÜSSEN)
 haben keinen `slotKind` und sind deshalb gar nicht anlegbar; daran haengt
 die Halbumsetzung beim PSYCHO-EICHHÖRNCHEN.
+
+## 12. Regellücken Welle 3: Barde und Verstärker pro Monster (Runde vom 2026-09-22)
+
+Zwei letzte große Lücken aus der Prüfung vom 2026-09-22. Spec:
+`docs/superpowers/specs/2026-09-22-regelluecken-welle3-design.md`. Branch
+`fix/welle3-barde-verstaerker`.
+
+**Monster-Verstärker pro Monster statt kampfweit:** `room.combat.enhancers`
+ist jetzt eine Liste `{ cardId, monsterId }` je gespielter Verstärkerkarte;
+`enhancerIds`/`enhancerBonus`/`enhancerTreasure` sind weg, ihre Leser
+rechnen über `enhancerBonusSumme()`/`enhancerTreasureSumme()`/
+`aktiveEnhancers()` aus der Liste. Bei mehr als einem *unterschiedlichen*
+Monster im Kampf öffnet das Ausspielen eine Zielwahl (gleiche Bauform wie
+die MAGISCHE LAMPE); bei genau einem Monster im Kampf (auch KUMPEL: zwei
+gleiche Monster-Ids zählen als eines) läuft es ohne Rückfrage direkt durch.
+Verschwindet ein Monster, gehen seine Verstärker mit - GIGANTISCH auf dem FUNGUS (+25
+statt +10, inklusive doppeltem Miesem Zeug), RAPIER-TROTTEL (verdoppelt nur
+eigene Verstärker) und UNTOT (nur das Zielmonster gilt als untot) lesen
+jetzt alle das Zielmonster aus der Liste statt "irgendein Monster im
+Kampf". BABY/MAMI-Sonderrechnung und die Hilfe-Obergrenze pro Monster
+(`kampfSchatzZahl`, jetzt Teil des öffentlichen Zustands) laufen über
+dieselbe Liste.
+
+**BARDE "Verzaubern"** (`bardenVerzauberInfo`/`handleBardeVerzaubern`):
+Karte abwerfen, Rivalen wählen, beide würfeln über das normale Wurf-Fenster
+(GEZINKTER WÜRFEL/KATZENINTERVENTION dürfen reagieren). Höherer Wurf des
+Barden zwingt Hilfe ohne Belohnung und ohne Ablehnmöglichkeit - gleiche
+Bauform wie der KNIESCHÜTZER DER VERLOCKUNG (`helperPending.compelled`),
+aber mit eigenem Sperrfeld `bardenZwang` statt `noWinLevel`: "kann das
+Spiel damit nicht gewinnen" ist eine andere Regel als "keine Siegesstufe".
+Angeboten wird die Kraft nur, solange der Kampf noch keine Hilfe hat, im
+eigenen Zug, und die Rivalenliste geht durch dieselbe Sperrprüfung wie ein
+normales "Um Hilfe bitten" (`hilfeVerbotenGrund`: Stinktier, PAVILLON,
+Todesangst).
+
+**BARDE "Bardenglück"**: der Extraschatz nach einem gewonnenen Kampf öffnet
+sofort eine Abwurf-Wahl über die ganze Hand (`pendingConsequence`/
+Kartenwähler, kein zweiter Wartezustand neben der Beute). Ohne Handkarten
+entfällt die Wahl.
+
+**Nebenbei mitgefixt (Review-Runde, Findings in
+`.superpowers/sdd/2026-09-22-regelluecken-welle3/final-findings.md`,
+Fix-Report `final-fix-report.md` im selben Ordner):**
+
+- Zweiter Verstärker während einer offenen Zielwahl überschrieb
+  `room.pendingCardAction` der ersten Wahl ersatzlos - die Karte bleibt
+  jetzt auf der Hand, bis die laufende Wahl entschieden ist.
+- `bardenVerzauberInfo` bot die Kraft fälschlich noch während einer Flucht,
+  eines offenen Wurfs oder einer anderen Kartenwahl an.
+- Ein Helfer, der während des asynchronen Wurf-Fensters eines
+  Verzauber-Versuchs zustande kam (GEZINKTER WÜRFEL macht das Fenster
+  asynchron), konnte vom verspätet abgeschlossenen Versuch überschrieben
+  werden.
+- `bardenZwang` blieb hängen, wenn die erzwungene Hilfe endete
+  (`removeHelper`, Todesangst-Rauswurf, Kampfübergabe, Stinker) oder eine
+  neue Zusage kam - jetzt an jeder Stelle zurückgesetzt, an der
+  `c.helperId` gesetzt oder geleert wird.
+
+**Weiterhin bewusst offen** (unverändert seit der Spec, nicht Teil dieser
+Runde): die DRYADE liest Klassen direkt statt eine Zaubercouch-Zusage zu
+respektieren; "Verzaubern" bietet auch Rivalen an, die selbst bei Erfolg nie
+helfen könnten (z.B. gegen ein LUSTMONSTER mit falschem Geschlecht oder mit
+Todesangst gegen Untote - die Wahl steht trotzdem da, das Scheitern zeigt
+sich erst nach dem Wurf); der UNGLÄUBIGKEITSTRANK entfernt kein
+Verstärker-Schatzguthaben des Monsters, das er aus dem Kampf nimmt.
+`node tools/coverage-scan.js base` bleibt dadurch unverändert.
