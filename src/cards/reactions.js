@@ -86,6 +86,12 @@ module.exports = () => {
     // Ende: finishCombatWin (Helfer:in eines gewonnenen Kampfes).
     'TOURISTENFALLE': { kind: 'keinAerger', dauer: 'dauerhaft',
       hinweis: 'Kein "Auf Ärger aus sein", bis du jemandem geholfen hast, einen Kampf zu gewinnen.' },
+    // "Am Ende jedes deiner Zuege wuerfelst du, bevor 'Milde Gabe' verteilt
+    // oder abgelegt wird. Dein Rucksack frisst entsprechend des Wurfs so viele
+    // zufaellige Karten deiner Hand! Bei einer gewuerfelten 6 ... endet der
+    // Fluch." Ausgeloest in setzeZugphase (server.js) beim Eintritt in 'gabe'.
+    'HUNGRIGER RUCKSACK': { kind: 'rucksack', dauer: 'dauerhaft',
+      hinweis: 'Am Ende jedes deiner Züge frisst der Rucksack Handkarten (Würfel); bei einer 6 endet der Fluch.' },
   };
 
   // Karten, die einen LAUFENDEN Kampf veraendern. Sie reiten auf der

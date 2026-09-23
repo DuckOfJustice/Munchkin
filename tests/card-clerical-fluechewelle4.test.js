@@ -71,5 +71,48 @@ const hatFluch = (p, name) => (p.activeCurses || []).some((f) => f.name === name
   assert.ok(!hatFluch(b, 'TOURISTENFALLE'), 'als Helfer:in gewonnen: der Fluch endet');
 }
 
+// --- HUNGRIGER RUCKSACK: am Ende des eigenen Zuges (vor der Milden Gabe)
+// wuerfeln; der Rucksack frisst so viele zufaellige Handkarten; bei 6 endet
+// der Fluch und die Hand bleibt unversehrt.
+{
+  const tuer = ALL_CARDS.filter((c) => c.type === 'door' && c.category === 'monster').slice(0, 1).map((c) => c.id);
+  const schaetze = ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 5).map((c) => c.id);
+  const spiele = (wurf, fluch) => {
+    const p = makePlayer({ hand: schaetze.slice() });
+    const room = makeRoom([p], { turnPhase: 'pluendern', doorDeck: tuer.slice() });
+    if (fluch) verfluche(room, p, 'HUNGRIGER RUCKSACK');
+    const zufall = Math.random;
+    let erster = true;
+    // Erster Aufruf = Wuerfel, danach die Zufallsauswahl der Karten.
+    Math.random = () => { if (erster) { erster = false; return (wurf - 1) / 6 + 0.01; } return 0; };
+    try { S.handleLootRoom(room, 'p1'); } finally { Math.random = zufall; }
+    return { p, room };
+  };
+  const drei = spiele(3, true);
+  assert.strictEqual(drei.room.turnPhase, 'gabe');
+  assert.strictEqual(drei.p.hand.length, 6 - 3, 'Wurf 3: drei Karten gefressen (5 + 1 geplündert - 3)');
+  assert.ok(hatFluch(drei.p, 'HUNGRIGER RUCKSACK'), 'der Fluch bleibt');
+
+  const sechs = spiele(6, true);
+  assert.strictEqual(sechs.p.hand.length, 6, 'Wurf 6: die Hand bleibt unversehrt');
+  assert.ok(!hatFluch(sechs.p, 'HUNGRIGER RUCKSACK'), 'Wurf 6: der Fluch endet');
+
+  const ohne = spiele(3, false);
+  assert.strictEqual(ohne.p.hand.length, 6, 'ohne Fluch frisst nichts');
+}
+// Kleine Hand: der Rucksack frisst hoechstens, was da ist.
+{
+  const tuer = ALL_CARDS.filter((c) => c.type === 'door' && c.category === 'monster').slice(0, 1).map((c) => c.id);
+  const p = makePlayer({ hand: [] });
+  const room = makeRoom([p], { turnPhase: 'pluendern', doorDeck: tuer.slice() });
+  verfluche(room, p, 'HUNGRIGER RUCKSACK');
+  const zufall = Math.random;
+  let erster = true;
+  Math.random = () => { if (erster) { erster = false; return 4 / 6 + 0.01; } return 0; };
+  try { S.handleLootRoom(room, 'p1'); } finally { Math.random = zufall; }
+  assert.strictEqual(p.hand.length, 0, 'Wurf 5 bei einer Karte: die eine Karte ist weg');
+  assert.ok(room.doorDiscard.includes(tuer[0]), 'die gefressene Karte liegt auf dem Ablagestapel');
+}
+
 fertig();
 console.log('card-clerical-fluechewelle4: alle Checks gruen');

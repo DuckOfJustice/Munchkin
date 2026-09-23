@@ -1201,7 +1201,7 @@ function handleAckConsequence(room, playerId) {
     // oeffneVerlustKonsequenz und combatEndPhase), dann bekommt die
     // urspruengliche Person trotz
     // verlorenem Kampf ihre Pluenderphase.
-    room.turnPhase = combatEndPhase({ originalActorId: pc.originalActorId }, false);
+    setzeZugphase(room, combatEndPhase({ originalActorId: pc.originalActorId }, false));
     log(room, room.turnPhase === 'pluendern'
       ? `${player.name} macht weiter mit Phase 3: Raum plündern.`
       : `${player.name} macht weiter mit Phase 4: Milde Gabe.`);
@@ -3104,7 +3104,7 @@ function handleLootRoom(room, playerId) {
     };
     log(room, `${player.name} plündert den Raum: 1 verdeckte Türkarte auf die Hand.`);
   }
-  room.turnPhase = 'gabe';
+  setzeZugphase(room, 'gabe');
   touchRoom(room);
 }
 
@@ -4566,11 +4566,37 @@ const COMBAT_POTION_CARD_NAMES = [...new Set(ALL_CARDS.filter(isCombatPotionCard
 function beendeKampfOhneSieg(room, c, thenLoot) {
   clearNextCombatCurses(combatParticipants(room));
   room.combat = null;
-  room.turnPhase = combatEndPhase(c, thenLoot);
+  setzeZugphase(room, combatEndPhase(c, thenLoot));
 }
 
 function combatEndPhase(c, thenLoot) {
   return (thenLoot || (c && c.originalActorId)) ? 'pluendern' : 'gabe';
+}
+
+// Einzige Stelle, die die Zugphase wechselt, wenn Phase 4 (Milde Gabe)
+// erreicht werden kann - HUNGRIGER RUCKSACK wuerfelt "am Ende jedes deiner
+// Zuege ... bevor 'Milde Gabe' verteilt oder abgelegt wird".
+function setzeZugphase(room, phase) {
+  room.turnPhase = phase;
+  if (phase !== 'gabe') return;
+  const p = currentPlayer(room);
+  if (!p || !(p.activeCurses || []).some((f) => f.kind === 'rucksack')) return;
+  rollWithWindow(room, p, 'rucksack', (wurf) => {
+    if (wurf >= 6) {
+      clearActiveCurseByKind(p, 'rucksack');
+      log(room, `${p.name} würfelt eine 6: der Hungrige Rucksack verschluckt sich selbst und verschwindet.`);
+      return;
+    }
+    const gefressen = [];
+    for (let i = 0; i < wurf && p.hand.length; i++) {
+      const id = p.hand[Math.floor(Math.random() * p.hand.length)];
+      removeFromHand(p, id);
+      discardCard(room, id);
+      gefressen.push(id);
+    }
+    // Karten aus der Hand sind geheim - der Verlauf nennt nur die Anzahl.
+    log(room, `Der Hungrige Rucksack von ${p.name} frisst ${gefressen.length} Karte(n) (Wurf ${wurf}).`);
+  });
 }
 
 // Wendet eine bereits aufgelöste Kampf-Trank-Aktion an (mutiert
@@ -5745,7 +5771,7 @@ function finishCombatWin(room) {
   // ÜBERFALLTRANK: siehe combatEndPhase - der urspruengliche Spieler (nicht
   // die/der Kaempfende) darf danach den Raum pluendern, room.turnIndex zeigt
   // ohnehin noch auf sie/ihn, der Zug ist nie gewechselt.
-  if (!won) room.turnPhase = combatEndPhase(c, false);
+  if (!won) setzeZugphase(room, combatEndPhase(c, false));
   touchRoom(room);
 }
 
@@ -5921,7 +5947,7 @@ function beendeFluchtphase(room, c) {
   // kassiert, wechselt die Phase erst mit ihrer Bestaetigung (wie bisher,
   // siehe handleAckConsequence). Sonst jetzt.
   const actorGescheitert = gescheitert.some((p) => p.id === c.actorId);
-  if (!actorGescheitert) room.turnPhase = combatEndPhase(c, false);
+  if (!actorGescheitert) setzeZugphase(room, combatEndPhase(c, false));
   if (!gescheitert.length) return;
   // Helfer:innen zuerst, die kaempfende Person zuletzt - deren Bestaetigung
   // gibt den Zug wieder frei, also soll sie am Ende stehen.
@@ -7257,7 +7283,7 @@ if (require.main === module) {
 
 module.exports = {
   shuffle, ALL_CARDS, CARDS_BY_ID, SET_KEYS, MIN_PLAYERS, MAX_PLAYERS, MAX_LEVEL, HAND_LIMIT,
-  buildDecks, DEAKTIVIERTE_KARTEN, handlePlayMonsterFromHand, handleSkipToLoot,
+  buildDecks, DEAKTIVIERTE_KARTEN, handlePlayMonsterFromHand, handleSkipToLoot, handleLootRoom,
   parseAutoConsequence, isMonsterEnhancerCard, resolveConsequenceSpec, CONSEQUENCE_OVERRIDES,
   DOOR_OTHER_AS_CURSE, isInstantLevelUpCard, TREASURE_POWER_OVERRIDES,
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
