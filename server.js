@@ -5684,6 +5684,11 @@ function haseAnwenden(room, c, hase, wurf) {
 
 function handleEvaluateCombat(room, playerId) {
   if (!room.combat) return;
+  // TROJANISCHES PFERD: sobald das Reaktionsfenster gezeigt wurde (oder
+  // schon aufgeloest ist), gilt dieser Kampf als abgeschlossen - ein
+  // zweites "Kampf auswerten" wuerde den Sieg nochmal auswerten und die
+  // Trojaner-Karte/das Monster der spielenden Person umsonst verbrauchen.
+  if (room.combat.trojanerOffer || room.combat.trojanerDone) return;
   // Waehrend eines offenen Wurf-Fensters (Hase, Halbfinal-Schlag) nicht
   // auswerten: der Wurf gehoert noch zu diesem Kampf, sein Callback wuerde
   // sonst in einen bereits beendeten Kampf hineinschreiben.

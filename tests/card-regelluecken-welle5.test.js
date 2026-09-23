@@ -53,9 +53,11 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(room.pendingCardAction.kind, 'choice');
   const monsterOption = room.pendingCardAction.options.find((o) => o.id === `mon-${zweitesMonster.id}`);
   assert.ok(monsterOption, 'MR. BONES steht als Wahlmoeglichkeit');
-  const action = room._pendingCardActionResolvers[monsterOption.id];
-  const desc = S.applyCombatPotionAction(room, spieler, action, null);
-  assert.ok(/neuer Kampf/.test(desc));
+  // Ueber den echten Weg (handleResolveCardChoice) statt applyCombatPotionAction
+  // direkt: so faellt auf, wenn 'trojanerMitMonster' mal aus den
+  // COMBAT_ACTION_TYPES verschwindet und die Wahl falsch geroutet wird.
+  S.handleResolveCardChoice(room, 'p2', monsterOption.id);
+  assert.ok(/neuer Kampf/.test(room.logs[room.logs.length - 1].text), 'Log nennt den neuen Kampf');
   assert.ok(!spieler.hand.includes(zweitesMonster.id), 'MR. BONES ist aus Bs Hand verschwunden');
   assert.deepStrictEqual(room.combat.monsterIds, [zweitesMonster.id], 'der neue Kampf laeuft gegen MR. BONES');
   assert.strictEqual(room.combat.actorId, 'p1', 'A muss gegen MR. BONES kaempfen');
@@ -124,5 +126,32 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(room.combat, null, 'das Fenster loest sich ohne die getrennte Person auf');
 }
 
+// --- "Kampf auswerten" waehrend offenem/gerade aufgeloestem Trojaner-Fenster
+// ist gesperrt: sonst koennte die kaempfende Person waehrend der laufenden
+// Kartenwahl (Karte schon gespielt, trojanerDone=true, aber die Wahl "ohne
+// Monster"/"mit Monster" noch offen) einfach nochmal auswerten - resolveCombat
+// wuerde dann via finishCombatWin sofort Schatz ziehen, obwohl die
+// Trojaner-Reaktion noch gar nicht fertig ist.
+{
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  const pferd = findCard('TROJANISCHER PFERD');
+  const actor = makePlayer({ id: 'p1', name: 'A' });
+  const spieler = makePlayer({ id: 'p2', name: 'B', hand: [pferd.id] });
+  const room = makeRoom([actor, spieler]);
+  S.startCombat(room, 'p1', [goblin.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  assert.ok(room.combat.trojanerOffer && room.combat.trojanerOffer.includes('p2'),
+    'das Fenster ist offen');
+  S.handlePlayTrojaner(room, 'p2', pferd.id);
+  assert.strictEqual(room.pendingCardAction.kind, 'choice', 'die Wahl (ohne/mit Monster) steht noch offen');
+  assert.ok(room.combat.trojanerDone, 'die Karte ist gespielt, das Fenster gilt als beantwortet');
+  const vorherHand = actor.hand.length;
+  room.combat.ready = { p2: true }; // "alle bereit", wie es im echten Spiel waere
+  S.handleEvaluateCombat(room, 'p1');
+  assert.ok(room.combat, 'der Kampf ist waehrend der laufenden Wahl NICHT durchgewunken worden');
+  assert.ok(room.pendingCardAction, 'die Wahl steht immer noch offen');
+  assert.strictEqual(actor.hand.length, vorherHand, 'kein Schatz durch das erneute Auswerten');
+}
+
 fertig();
-console.log('card-regelluecken-welle5: Task 3 (Absagen/Verbindungsabbruch) gruen');
+console.log('card-regelluecken-welle5: alle Checks gruen');

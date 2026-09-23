@@ -1206,7 +1206,7 @@
     const actions = document.createElement('div');
     actions.className = 'row gap wrap';
 
-    if (iAmActor && !c.mustFlee) {
+    if (iAmActor && !c.mustFlee && !c.trojanerOffer && !c.trojanerDone) {
       const evalBtn = document.createElement('button');
       evalBtn.className = 'primary'; evalBtn.textContent = 'Kampf auswerten';
       evalBtn.disabled = !c.allReady;
