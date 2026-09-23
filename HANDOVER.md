@@ -1370,3 +1370,15 @@ Todesangst gegen Untote - die Wahl steht trotzdem da, das Scheitern zeigt
 sich erst nach dem Wurf); der UNGLÄUBIGKEITSTRANK entfernt kein
 Verstärker-Schatzguthaben des Monsters, das er aus dem Kampf nimmt.
 `node tools/coverage-scan.js base` bleibt dadurch unverändert.
+
+## 13. Regellücken Welle 4: drei Flüche aus Clerical Errors
+
+Die drei anhaltenden Flüche aus Clerical Errors wurden automatisiert:
+- **TOURISTENFALLE**: Sperrt die Phase "Auf Ärger aus sein" (`handlePlayMonsterFromHand`), bis das Opfer jemand anderem geholfen hat, einen Kampf zu gewinnen. Ende-Bedingung in `finishCombatWin` (`clearActiveCurseByKind(helper, 'keinAerger')`).
+- **HUNGRIGER RUCKSACK**: Neue Funktion `setzeZugphase(room, phase)` fängt den Übergang zur Phase `gabe` ab und lässt würfeln. Entsprechend dem Wurf werden Handkarten gefressen (`discardCard`). Bei Wurf 6 endet der Fluch.
+- **TEMPORÄRE ANMNESIE**: Unterdrückt alle Boni und Effekte von Klassen und Rassen, bis das Opfer ein Monster besiegt oder dabei geholfen hat. Die neuen Hilfsfunktionen `aktiveKlassen(player)` und `aktiveRassen(player)` ersetzen direkte Zugriffe auf `player.classes`/`player.races`, wenn diese eine **Wirkung** (z.B. Boni) repräsentieren. Wenn es um **Besitz** geht (Obergrenzen, Ablegen), bleibt der direkte Zugriff bestehen.
+
+**Bewusst offen / Besonderheiten:**
+- Die ZAUBERCOUCH wirkt auch unter Amnesie weiter (da sie ein Gegenstand ist, keine Erinnerung).
+- Monster ohne Kampfsieg beenden die Amnesie nicht.
+- Der Verlauf nennt die gefressenen Karten des Hungrigen Rucksacks nicht beim Namen, da Handkarten geheim sind.

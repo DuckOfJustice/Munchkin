@@ -164,5 +164,19 @@ const hatFluch = (p, name) => (p.activeCurses || []).some((f) => f.name === name
   assert.ok(!hatFluch(b, 'TEMPORÄRE ANMNESIE'), 'beim Toeten geholfen: der Fluch endet');
 }
 
+// Alle drei Flueche beendet der WUNSCHRING wie jeden anhaltenden Fluch
+// (gleicher Aufrufweg wie tests/card-curses.test.js).
+{
+  ['TOURISTENFALLE', 'HUNGRIGER RUCKSACK', 'TEMPORÄRE ANMNESIE'].forEach((name) => {
+    const p = makePlayer();
+    const room = makeRoom([p]);
+    verfluche(room, p, name);
+    const spec = S.TREASURE_POWER_OVERRIDES['WUNSCHRING'](p);
+    assert.strictEqual(spec.type, 'clearCurse', `WUNSCHRING beendet "${name}" ohne Wahl`);
+    S.applyPrimitiveAction(room, p, spec);
+    assert.ok(!hatFluch(p, name), `"${name}" ist beendet`);
+  });
+}
+
 fertig();
 console.log('card-clerical-fluechewelle4: alle Checks gruen');
