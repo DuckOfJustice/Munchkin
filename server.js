@@ -3959,6 +3959,14 @@ function loeseReaktionsfensterOhne(room, playerId) {
       finishFleeSuccess(room, actor, c);
     }
   }
+  if (c && c.trojanerOffer && c.trojanerOffer.includes(playerId)) {
+    c.trojanerOffer = c.trojanerOffer.filter((id) => id !== playerId);
+    if (!c.trojanerOffer.length) {
+      c.trojanerOffer = null;
+      c.trojanerDone = true;
+      finishCombatWin(room);
+    }
+  }
 }
 
 function handlePassReaction(room, playerId) {
@@ -3977,6 +3985,16 @@ function handlePassReaction(room, playerId) {
       const actor = findPlayer(room, combat.actorId);
       combat.escapeReactionOffer = null;
       finishFleeSuccess(room, actor, combat);
+    }
+    touchRoom(room);
+  }
+  const trojaner = combat && combat.trojanerOffer;
+  if (trojaner && trojaner.includes(playerId)) {
+    combat.trojanerOffer = trojaner.filter((id) => id !== playerId);
+    if (!combat.trojanerOffer.length) {
+      combat.trojanerOffer = null;
+      combat.trojanerDone = true;
+      finishCombatWin(room);
     }
     touchRoom(room);
   }
@@ -7138,6 +7156,7 @@ function scheduleBotActionsIfNeeded(room) {
       return;
     }
     if (c.escapeReactionOffer) return; // erst das Kleberflaeschchen-Fenster
+    if (c.trojanerOffer) return; // erst das Trojaner-Fenster beantworten
     // Beim Weglaufen ist nicht zwingend die kaempfende Person dran: jede
     // beteiligte Person laeuft einzeln weg (fleeingId). Ein Bot als Helfer:in
     // muss deshalb hier eingeplant werden, sonst steht die Partie.
@@ -7448,6 +7467,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'useLamp', ({ cardId, monsterId }) => act(socket, (room, pid) => handleUseLamp(room, pid, cardId, monsterId)));
   onSafe(socket, 'playReactionCard', ({ cardId, value }) => act(socket, (room, pid) => handlePlayReactionCard(room, pid, cardId, value)));
   onSafe(socket, 'passReaction', () => act(socket, (room, pid) => handlePassReaction(room, pid)));
+  onSafe(socket, 'playTrojaner', ({ cardId }) => act(socket, (room, pid) => handlePlayTrojaner(room, pid, cardId)));
   onSafe(socket, 'enchantMonster', () => act(socket, (room, pid) => handleEnchantMonster(room, pid)));
   onSafe(socket, 'thiefBackstab', ({ cardId, targetId }) => act(socket, (room, pid) => handleThiefBackstab(room, pid, cardId, targetId)));
   onSafe(socket, 'thiefSteal', ({ cardId, targetId }) => act(socket, (room, pid) => handleThiefSteal(room, pid, cardId, targetId)));
@@ -7555,7 +7575,7 @@ module.exports = {
   handleProposeTrade, handleCancelTrade, handleRespondTrade, tradableCardIds,
   BIG_ITEMS, isBigItem, bigItemCount, canCarryAnotherBigItem,
   ROLL_REACTION_CARDS, ESCAPE_REACTION_CARDS, reactionHolders, rollWithWindow,
-  handlePlayReactionCard, handlePassReaction, LAMP_CARDS, lampCardIds, handleUseLamp,
+  handlePlayReactionCard, handlePassReaction, loeseReaktionsfensterOhne, LAMP_CARDS, lampCardIds, handleUseLamp,
   fluechtenderId, naechsterFluechtling, beendeFluchtphase,
   handleUseCardPower, DOOR_POWER_CARDS,
   LINGERING_CURSES, addActiveCurse, clearActiveCurseByKind, applyLingeringRule,

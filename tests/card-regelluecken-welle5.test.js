@@ -96,5 +96,33 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(room.combat, null, 'kein zweiter Kampf nach Spielsieg');
 }
 
+// --- Passen: die letzte haltende Person sagt ab, der urspruengliche Sieg
+// wird ganz normal verbucht (Schatz kommt an).
+{
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  const pferd = findCard('TROJANISCHER PFERD');
+  const actor = makePlayer({ id: 'p1', name: 'A' });
+  const spieler = makePlayer({ id: 'p2', name: 'B', hand: [pferd.id] });
+  const room = makeRoom([actor, spieler]);
+  S.startCombat(room, 'p1', [goblin.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  assert.ok(room.combat.trojanerOffer.includes('p2'));
+  S.handlePassReaction(room, 'p2');
+  assert.strictEqual(room.combat, null, 'der Kampf ist normal zu Ende');
+  assert.ok(actor.hand.length > 0 || room.treasureDeck.length === 0, 'A haette normal Schatz bekommen (oder der Stapel ist leer)');
+}
+// Verbindungsabbruch der einzigen haltenden Person loest das Fenster auf.
+{
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  const pferd = findCard('TROJANISCHER PFERD');
+  const actor = makePlayer({ id: 'p1', name: 'A' });
+  const spieler = makePlayer({ id: 'p2', name: 'B', hand: [pferd.id] });
+  const room = makeRoom([actor, spieler]);
+  S.startCombat(room, 'p1', [goblin.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  S.loeseReaktionsfensterOhne(room, 'p2');
+  assert.strictEqual(room.combat, null, 'das Fenster loest sich ohne die getrennte Person auf');
+}
+
 fertig();
-console.log('card-regelluecken-welle5: Task 2 (Trojanisches Pferd, Serverlogik) gruen');
+console.log('card-regelluecken-welle5: Task 3 (Absagen/Verbindungsabbruch) gruen');
