@@ -450,7 +450,7 @@ git commit -m "fix: TEMPORAERE ANMNESIE - Klassen und Rassen zaehlen bis zum nae
 
 ### Task 4: Abschluss
 
-- [ ] **Step 1: WUNSCHRING-Gegenprobe (vor `fertig();` anhängen)**
+- [x] **Step 1: WUNSCHRING-Gegenprobe (vor `fertig();` anhängen)**
 
 ```js
 // Alle drei Flueche beendet der WUNSCHRING wie jeden anhaltenden Fluch
@@ -470,16 +470,16 @@ git commit -m "fix: TEMPORAERE ANMNESIE - Klassen und Rassen zaehlen bis zum nae
 
 Run: `node tests/card-clerical-fluechewelle4.test.js` → grün (ohne Codeänderung erwartet; schlägt er fehl, ist das ein Befund für den Report).
 
-- [ ] **Step 2: Abdeckungs-Scan**
+- [x] **Step 2: Abdeckungs-Scan**
 
 Run: `node tools/coverage-scan.js clericalerrors`
 Expected: TEMPORÄRE ANMNESIE, HUNGRIGER RUCKSACK und TOURISTENFALLE stehen nicht mehr in der Liste.
 
-- [ ] **Step 3: HANDOVER.md**
+- [x] **Step 3: HANDOVER.md**
 
 Neuen Abschnitt `## 13. Regellücken Welle 4: drei Flüche aus Clerical Errors` im Stil von §12 anhängen: je Fluch Wirkung, Ende, Code-Stelle (`setzeZugphase`, `aktiveKlassen`/`aktiveRassen`, `keinAerger`); die Einordnungsregel Wirkung vs. Besitz; bewusst offen (ZAUBERCOUCH unter Amnesie, Monster ohne Kampfsieg beenden die Amnesie nicht, gefressene Karten werden im Verlauf nicht genannt).
 
-- [ ] **Step 4: volle Suite, Commit**
+- [x] **Step 4: volle Suite, Commit**
 
 Run: `npm test` → alle erfolgreich.
 
