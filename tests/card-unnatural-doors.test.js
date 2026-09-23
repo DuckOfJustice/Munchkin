@@ -13,7 +13,8 @@ const {
   fleeModifierParts, monsterRefusesTarget, monsterSeesRace, hasRace,
   handleAttachCard, attachmentBonusSum,
   handleThiefSteal, handleThiefBackstab, handlePlayCurseFromHand,
-  handleUseClassCombatDiscard, baseStrength, handItemIds
+  handleUseClassCombatDiscard, baseStrength, handItemIds,
+  DOOR_COMBAT_CARDS, applyCombatPotionAction, monsterVictoryExtras,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -593,31 +594,66 @@ function makeRoom(players) {
   // Basis-Monster
   const nase = findCard('LAHMER GOBLIN').id; // Lvl 1
   startCombat(room, p1.id, [nase], { fromHand: true });
-  room.combat.enhancerIds = room.combat.enhancerIds || [];
-  room.combat.enhancerIds.push(findCard('BABY').id);
-  room.combat.monsterModifier -= 5;
-  
-  // MAMI + BABY spielen! Wait, we don't have BABY yet but we can test MAMI.
+  // BABY haengt schon am Monster, bevor MAMI gerufen wird - ueber die neue
+  // Verstaerker-Liste (Task "Verstaerker haengen am Monster"), nicht mehr
+  // manuell in monsterModifier vorgerechnet: der Malus rechnet sich jetzt
+  // dynamisch ueber enhancerBonusSumme() aus c.enhancers.
+  room.combat.enhancers.push({ cardId: findCard('BABY').id, monsterId: nase });
+
+  // MAMI spielen.
   const mami = findCard('MAMI').id;
   p1.hand.push(mami);
   handlePlayCombatCard(room, p1.id, mami);
-  
+
   // MAMI fügt eine weitere Kopie der LAUFENDE NASE hinzu (als 'mommyMonsterId')
   assert.strictEqual(room.combat.monsterIds.length, 2);
   assert.ok(room.combat.mommyMonsterId);
   assert.strictEqual(room.combat.mommyMonsterId, nase);
-  
-  // Mami gibt +10 auf den Modifikator, und das verdoppelte Monster 
-  // wurde hinzugefügt (Lvl +2 = 12 total bonus vom Duplikat).
-  assert.strictEqual(room.combat.monsterModifier, 5);
-  
+
+  // Stufe (1+1) + Mamis eigener Bonus (+10, +5 Ausgleich fuer BABY) - BABYs
+  // -5 zaehlt jetzt automatisch fuer beide Vorkommen von "nase" (-10), macht
+  // in Summe wieder genau die -5, die Mamis Kartentext vorschreibt
+  // ("betroffen von allen Verbesserungen ihres Babys, ausser der BABY-Karte
+  // selbst"): 2 + 15 - 10 = 7.
+  assert.strictEqual(combatTotals(room).monsterStrength, 7, 'BABYs Malus zaehlt effektiv nur einmal, Mamis eigener Bonus zaehlt');
+
   const extras = monsterVictoryExtras(room, p1, null, [findCard('LAHMER GOBLIN'), findCard('LAHMER GOBLIN')]);
   assert.strictEqual(extras.levels, 1, 'Mami gibt 1 Extra-Stufe');
   assert.strictEqual(extras.treasures, 2, 'Mami gibt 1 Extra-Schatz + 1 Ausgleich für Baby');
 }
 
+// --- MAMI/BABY sind pro Monster, nicht kampfweit ---------------------------
+// BABY haengt an einem ANDEREN Monster im selben Kampf - das darf weder die
+// MAMI-Zulassung fuer Monster > Stufe 5 oeffnen, noch die +5-Kompensation
+// oder den Extra-Schatz-Ausgleich einer Mami auf dem unbeteiligten Monster
+// ausloesen (Regression aus dem Code-Review zu Task 1).
+{
+  const goblin = findCard('LAHMER GOBLIN'); // Stufe 1, hat BABY
+  const orks = findCard('3.872 ORKS');      // Stufe 10, hat KEIN BABY
+  const p1 = makePlayer({ id: 'p1', name: 'Spieler 1' });
+  const room = makeRoom([p1]);
 
+  startCombat(room, p1.id, [goblin.id, orks.id], { fromHand: true });
+  room.combat.enhancers.push({ cardId: findCard('BABY').id, monsterId: goblin.id });
 
+  // 1. Zulassung: MAMI darf fuer den Goblin gespielt werden (Stufe <=5 UND
+  // sein eigenes BABY), aber NICHT fuer die Orks (Stufe 10, kein BABY auf
+  // den Orks selbst - das BABY des Goblins zaehlt hier nicht mit).
+  const spec = DOOR_COMBAT_CARDS['MAMI'](p1, room);
+  assert.ok(spec.validMonsterIds.includes(goblin.id), 'der Goblin ist ein gueltiges Ziel');
+  assert.ok(!spec.validMonsterIds.includes(orks.id),
+    'die Orks sind KEIN gueltiges Ziel - das BABY haengt am Goblin, nicht an ihnen');
+
+  // 2. Rechnung: wird MAMI trotzdem direkt auf die Orks angesetzt (Primitiv
+  // ohne den Zulassungsfilter, Verteidigung in der Tiefe), darf das fremde
+  // BABY weder die +5-Kompensation noch den Extra-Schatz-Ausgleich ausloesen.
+  const desc = applyCombatPotionAction(room, p1, { type: 'duplicateMonsterMommy', monsterId: orks.id, validMonsterIds: [orks.id] }, null);
+  assert.ok(desc.includes('+10 auf Mami'), `keine BABY-Kompensation fuer die Orks: ${desc}`);
+  assert.strictEqual(room.combat.mommyMonsterId, orks.id);
+
+  const extras = monsterVictoryExtras(room, p1, null, [orks, orks]);
+  assert.strictEqual(extras.treasures, 1, 'kein Ausgleich-Schatz - das BABY betrifft die Orks nicht');
+}
 
 {
   // Test: SCHICKSALHAFTE KARTEN

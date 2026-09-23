@@ -10,6 +10,7 @@ const {
   handleResolveCardTarget, handleAttemptFlee, handleAckConsequence, resolveCombatWin,
   newEquipped, equippedItemIds, COMBAT_REACTION_CARDS,
   handleSetCombatReady, scheduleBotActionsIfNeeded, fleeModifierParts,
+  enhancerBonusSumme,
 } = require('../server.js');
 
 function byName(name) {
@@ -216,22 +217,32 @@ function run() {
   }
 
   // -------------------------------------------------------------------
-  // ILLUSION: tauscht ein Monster gegen eines von der Hand - der alte
-  // Monster-Verstaerker (monsterModifier) verfaellt mit dem alten Monster.
+  // ILLUSION: tauscht ein Monster gegen eines von der Hand - der Verstaerker
+  // des alten Monsters verfaellt mit ihm (Regelluecken Welle 3, Task 1:
+  // Verstaerker haengen jetzt am Monster, nicht mehr kampfweit in
+  // monsterModifier). Ein kampfweiter Bonus (z.B. ein Trank "fuer das
+  // Monster") haengt an KEINEM Monster und bleibt deshalb ausdruecklich
+  // erhalten.
   // -------------------------------------------------------------------
   {
     const orks = byName('3.872 ORKS');
     const goblin = byName('LAHMER GOBLIN');
     const illusion = byName('ILLUSION');
+    const uralt = byName('URALT');
     const a = makePlayer('a', { hand: [illusion.id, goblin.id] });
-    const room = combatRoom([a, makePlayer('b')], [orks.id], { monsterModifier: 7 });
+    const room = combatRoom([a, makePlayer('b')], [orks.id], {
+      monsterModifier: 7, // kampfweiter Trank-Bonus, kein Verstaerker
+      enhancers: [{ cardId: uralt.id, monsterId: orks.id }],
+    });
     handlePlayCombatCard(room, 'a', illusion.id);
     const optionId = room.pendingCardAction.options.find((o) => o.label === goblin.name).id;
     handleResolveCardChoice(room, 'a', optionId);
     assert.deepStrictEqual(room.combat.monsterIds, [goblin.id], 'das alte Monster ist ersetzt');
     assert.ok(room.doorDiscard.includes(orks.id), 'das alte Monster landet im Ablagestapel');
-    assert.strictEqual(room.combat.monsterModifier, 0,
-      'Verstaerker galten dem alten Monster und verfallen mit ihm');
+    assert.strictEqual(enhancerBonusSumme(room), 0,
+      'der Verstaerker galt dem alten Monster und verfaellt mit ihm');
+    assert.strictEqual(room.combat.monsterModifier, 7,
+      'ein kampfweiter Bonus haengt an keinem Monster und bleibt erhalten');
     done(room);
   }
 

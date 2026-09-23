@@ -47,7 +47,7 @@ function makeRoom(players, extra) {
 function mitKampf(room, monsterIds, actorId) {
   room.combat = {
     actorId: actorId || room.players[0].id, helperId: null, helperPending: null,
-    monsterIds, enhancerIds: [], actorModifier: 0, monsterModifier: 0,
+    monsterIds, enhancers: [], actorModifier: 0, monsterModifier: 0,
     treasureDelta: 0, backstabs: {}, mustFlee: false, classDiscards: {},
     ready: {}, readySignature: null,
   };
@@ -394,7 +394,7 @@ function mitKampf(room, monsterIds, actorId) {
     // alt -> neu: der SPASSBREMSE liegt oben, der KETTEN-BIKINI darunter.
     treasureDiscard: [findCard('KETTEN-BIKINI').id, findCard('MONSTERFUTTER').id, findCard('SPASSBREMSE').id],
   });
-  room.combat = { actorId: 'p1', helperId: null, monsterIds: [], enhancerIds: [], actorModifier: 0, monsterModifier: 0, treasureDelta: 0, backstabs: {}, mustFlee: false, classDiscards: {}, ready: {}, readySignature: null };
+  room.combat = { actorId: 'p1', helperId: null, monsterIds: [], enhancers: [], actorModifier: 0, monsterModifier: 0, treasureDelta: 0, backstabs: {}, mustFlee: false, classDiscards: {}, ready: {}, readySignature: null };
   const spec = TREASURE_POWER_OVERRIDES['EINHEITSGRÖSSE'](p, room);
   applyPrimitiveAction(room, p, spec);
   assert.deepStrictEqual(p.hand, [findCard('SPASSBREMSE').id], 'der oberste tragbare Gegenstand');

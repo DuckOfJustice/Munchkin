@@ -22,6 +22,7 @@ const {
   SPECIAL_SLOT_ITEMS, ITEM_GRANTS_TRAIT, SPECIAL_SLOTS,
   handleEnchantMonster, enchantInfo, handleFleeEscape, handleFleeReroll,
   DOOR_COMBAT_CARDS, POST_FLEE_ESCAPE_CARDS,
+  enhancerBonusSumme, enhancerTreasureSumme,
 } = require('../server.js');
 
 function makePlayer(overrides) {
@@ -527,9 +528,9 @@ function run() {
 
   const gigantisch = enhancerRoom('GIGANTISCH');
   handlePlayCombatCard(gigantisch.room, 'p1', gigantisch.enhancerId);
-  assert.strictEqual(gigantisch.room.combat.monsterModifier, gigantisch.enh.bonus,
-    'GIGANTISCH verstärkt das Monster wie bisher');
-  assert.strictEqual(gigantisch.room.combat.treasureDelta, gigantisch.enh.treasureCount,
+  assert.strictEqual(enhancerBonusSumme(gigantisch.room), gigantisch.enh.bonus,
+    'GIGANTISCH verstärkt das Monster wie bisher (jetzt ueber die Verstaerker-Liste statt monsterModifier)');
+  assert.strictEqual(enhancerTreasureSumme(gigantisch.room), gigantisch.enh.treasureCount,
     'der Schatzbonus des Verstärkers wird für die Auswertung gemerkt');
   handleEvaluateCombat(gigantisch.room, 'p1');
   if (gigantisch.room.cleanupTimer) clearTimeout(gigantisch.room.cleanupTimer);
@@ -540,7 +541,7 @@ function run() {
   // einem Schatz greift ausdrücklich die Untergrenze.
   const baby = enhancerRoom('BABY', tc1Monster.id);
   handlePlayCombatCard(baby.room, 'p1', baby.enhancerId);
-  assert.strictEqual(baby.room.combat.treasureDelta, -1, 'BABY merkt sich den Schatzmalus');
+  assert.strictEqual(enhancerTreasureSumme(baby.room), -1, 'BABY merkt sich den Schatzmalus');
   handleEvaluateCombat(baby.room, 'p1');
   if (baby.room.cleanupTimer) clearTimeout(baby.room.cleanupTimer);
   assert.strictEqual(baby.room.players[0].hand.length, 1,

@@ -707,6 +707,9 @@ function sendInfoTo(room, player) {
     // darf (Berserken/Vertreiben/Flugzauber) - privat, weil sie von der
     // eigenen Hand und Klasse abhängt.
     classCombatPower: classCombatPowerInfo(room, player),
+    // BARDE "Verzaubern": haengt an eigener Klasse, eigenem Zug und eigener
+    // Hand - deshalb privat wie classCombatPower.
+    bardeVerzaubern: room.combat ? bardenVerzauberInfo(room, player) : null,
     // ZAUBERER "Verzauberung" und die Rettungskarten nach einem verpatzten
     // Weglaufwurf haengen an der eigenen Hand - deshalb privat und nicht im
     // oeffentlichen Kampfzustand.
@@ -1351,6 +1354,13 @@ function applyDeathConsequence(room, player) {
 // denen gibt es heute keinen Gegenstand mit "für Gnome/Barden" im Text.
 const RACE_ADJECTIVE_DE = { ELF: 'Elfen', ZWERG: 'Zwerge', HALBLING: 'Halblinge', ORK: 'Orks' };
 const CLASS_ADJECTIVE_DE = { ZAUBERER: 'Zauberer', PRIESTER: 'Priester', DIEB: 'Diebe', KRIEGER: 'Krieger' };
+
+// TEMPORAERE ANMNESIE: solange der Fluch wirkt, zaehlen die ausliegenden
+// Klassen- und Rassenkarten nicht - "ueberall als klassenloser Mensch". Wer
+// die Karten als BESITZ braucht (Ablegen, Obergrenzen, Anzeige), liest
+// weiter player.classes/player.races direkt. Derselbe Fluch wie in hasRace/
+// hasClass (kind 'traitsVergessen', siehe hatFluchArt) - eine Stelle statt
+// zwei getrennter Mechanismen fuer dieselbe Karte.
 
 function hasRace(player, substr) {
   // TEMPORÄRE ANMNESIE: "ueberall als klassenloser Mensch gezaehlt" - die
@@ -2818,6 +2828,7 @@ function applyTargetAction(room, actor, target, action) {
       c.actorId = target.id;
       c.helperId = null;
       c.helperPending = null;
+      c.bardenZwang = false; // die Zusage war an die alte Helfer:in gebunden
       // Die Zusage gehoerte zur alten Kampfpaarung - sie geht nicht auf die
       // neue kaempfende Person ueber.
       c.helperReward = 0;
@@ -2946,7 +2957,7 @@ function handleResolveCardChoice(room, playerId, optionId) {
     touchRoom(room);
     return;
   }
-  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn', 'juckpulverDiscard']);
+  const COMBAT_ACTION_TYPES = new Set(['modifier', 'endCombatNoLevel', 'removeHelper', 'killMonsterInCombat', 'removeOneMonster', 'doubleStrength', 'combatAddMonster', 'combatReplaceMonster', 'treatMonsterAsLevel1', 'tripleItemBonus', 'forceSelfAsHelper', 'schatzUmtauschAnmelden', 'zeroMonsterTreasure', 'duplicateMonsterMommy', 'freundlichFightOn', 'juckpulverDiscard', 'verstaerkerAufMonster']);
   const sourceCard = pa.sourceCardId ? card(pa.sourceCardId) : null;
   const desc = COMBAT_ACTION_TYPES.has(action.type)
     ? applyCombatPotionAction(room, player, action, sourceCard)
@@ -3183,6 +3194,8 @@ function handleLootRoom(room, playerId) {
 function hasClass(player, substr) {
   if (hatFluchArt(player, 'traitsVergessen')) return false; // siehe hasRace
   // ZAUBERCOUCH: "... wirst du in allen Belangen ... als Zauberer angesehen."
+  // ponytail: die ZAUBERCOUCH wirkt auch unter TEMPORAERER ANMNESIE - sie ist
+  // ein Gegenstand, keine Erinnerung.
   if (itemGrantsTrait(player, 'class', substr, true)) return true;
   return player.classes.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
 }
@@ -3312,6 +3325,7 @@ function applyLingeringRule(room, player, cardName, cardId, regel) {
       const weg = findPlayer(room, room.combat.helperId);
       room.combat.helperId = null;
       room.combat.helperReward = 0;
+      room.combat.bardenZwang = false;
       log(room, `${weg ? weg.name : 'Die Helfer:in'} zieht sich straffrei zurück - niemand bleibt neben dem Gestank.`);
       refreshCombatReady(room);
     }
@@ -3620,12 +3634,52 @@ function combatHasUndead(room) {
   if (!room.combat) return false;
   if (combatHasMonster(room, UNDEAD_MONSTERS)) return true;
   if (room.combat.hasUndeadCurse) return true;
-  return (room.combat.enhancerIds || []).some((id) => { const c = card(id); return c && c.name === 'UNTOT'; });
+  return enhancerKartenIds(room).some((id) => { const c = card(id); return c && c.name === 'UNTOT'; });
+}
+
+// Verstaerker-Eintraege, deren Monster noch im Kampf steht.
+function aktiveEnhancers(room) {
+  const c = room.combat;
+  if (!c) return [];
+  return (c.enhancers || []).filter((e) => c.monsterIds.includes(e.monsterId));
+}
+// Kartenbonus eines Verstaerkers - GIGANTISCH auf dem FUNGUS ("+25 statt +10")
+// und der RAPIER-TROTTEL ("doppelter Effekt") haengen am Zielmonster.
+function enhancerBonusEintrag(room, eintrag) {
+  const karte = card(eintrag.cardId);
+  const ziel = card(eintrag.monsterId);
+  if (!karte || !ziel) return 0;
+  if (karte.name === 'GIGANTISCH' && ziel.name === 'FUNGUS') return 25;
+  if (ziel.name === 'RAPIER-TROTTEL') return (karte.bonus || 0) * 2;
+  return karte.bonus || 0;
+}
+// Summe der Verstaerker eines Monsters. monsterIds kann dieselbe Id zweimal
+// enthalten (KUMPEL: "ein weiteres Monster mit den gleichen Verstaerkern") -
+// die Summe wird deshalb je Vorkommen gezaehlt, nicht je Eintrag.
+function enhancerBonusSumme(room) {
+  const c = room.combat;
+  if (!c) return 0;
+  return (c.monsterIds || []).reduce((sum, mid) => sum
+    + (c.enhancers || []).filter((e) => e.monsterId === mid)
+      .reduce((teil, e) => teil + enhancerBonusEintrag(room, e), 0), 0);
+}
+// Schatzzuschlag der Verstaerker (GIGANTISCH/URALT +2, BABY -1), ebenfalls je
+// Vorkommen des Monsters.
+function enhancerTreasureSumme(room) {
+  const c = room.combat;
+  if (!c) return 0;
+  return (c.monsterIds || []).reduce((sum, mid) => sum
+    + (c.enhancers || []).filter((e) => e.monsterId === mid)
+      .reduce((teil, e) => teil + (typeof card(e.cardId).treasureCount === 'number' ? card(e.cardId).treasureCount : 0), 0), 0);
+}
+// Karten-Ids der noch wirksamen Verstaerker (UNTOT-Pruefung, BABY/MAMI).
+function enhancerKartenIds(room) {
+  return aktiveEnhancers(room).map((e) => e.cardId);
 }
 
 function monsterTraitBonusSum(room) {
   const parts = combatParticipants(room);
-  return room.combat.monsterIds.concat(room.combat.enhancerIds || []).reduce((sum, id) => {
+  return room.combat.monsterIds.concat(enhancerKartenIds(room)).reduce((sum, id) => {
     const c = card(id);
     const regeln = c && MONSTER_TRAIT_BONUS[c.name];
     if (!regeln) return sum;
@@ -3953,7 +4007,9 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
   if (c && c.mommyMonsterId) {
     levels += 1;
     treasures += 1;
-    if (c.enhancerIds && c.enhancerIds.some(id => card(id).name === 'BABY')) {
+    // Nur wenn BABY auf GENAU dem Baby-Monster dieser Mami liegt - BABY auf
+    // einem anderen Monster im selben Kampf betrifft diese Mami nicht.
+    if ((c.enhancers || []).some((e) => e.monsterId === c.mommyMonsterId && (card(e.cardId) || {}).name === 'BABY')) {
       treasures += 1; // BABY gab -1 Basis-Schatz, MAMI gleicht aus
     }
   }
@@ -3966,11 +4022,8 @@ function monsterVictoryExtras(room, actor, helper, monsters) {
   }
   // BARDE, "Bardenglueck": "Wenn du in deinem Zug einen Kampf gewinnst, ziehe
   // einen zusaetzlichen Schatz. Sieh sie dir alle an und wirf sofort einen ab
-  // (beliebig)."
-  // ponytail: das Abwerfen bleibt manuell (Ablegen-Knopf) - der Server haette
-  // dafuer eine Wahl mitten im Siegesablauf zu oeffnen, direkt neben der
-  // Belohnungsanimation. Aufruestweg: pendingConsequence-Wahl ueber die
-  // frisch gezogenen Karten in resolveCombatWin.
+  // (beliebig)." Das Abwerfen selbst passiert in finishCombatWin (ueber die
+  // ganze Hand, nachdem die Beute drauf liegt) - hier zaehlt nur der Extraschatz.
   if (hasClass(actor, 'BARDE')) treasures += 1;
   return { levels, treasures };
 }
@@ -4009,6 +4062,74 @@ function classCombatPowerInfo(room, player) {
   const power = classDiscardPower(room, player);
   if (!power) return null;
   return { label: power.label, className: power.className, bonus: power.bonus, kind: power.kind, remaining: power.remaining };
+}
+
+// BARDE "Verzaubern": "Im Kampf kannst du in deinem Zug eine Karte abwerfen
+// und einen Rivalen waehlen. Ihr wuerfelt beide, wenn dein Wurf besser ist als
+// seiner, muss er dir helfen und kann keine Belohnung verlangen." Ein Versuch
+// pro Aufruf - "bis du Erfolg hast, aufgibst oder dir die Karten oder Gegner
+// ausgehen" ergibt sich daraus, dass man erneut klicken darf.
+function bardenVerzauberInfo(room, player) {
+  const c = room.combat;
+  if (!c || !player || c.actorId !== player.id) return null;
+  const dran = currentPlayer(room);
+  if (!dran || dran.id !== player.id) return null;       // "in deinem Zug"
+  if (!hasClass(player, 'BARDE') || c.helperId || c.helperPending) return null;
+  if (c.mustFlee || room.pendingRoll || room.pendingCardAction) return null;
+  if (!player.hand.length) return null;
+  // Dieselben Sperren wie beim normalen "Um Hilfe bitten" (Stinktier,
+  // MONSTER_FORBIDS_HELP, Stinktier-Strafe, Todesangst vor Untoten) - siehe
+  // hilfeVerbotenGrund. Ohne diesen Filter wuerde die Kraft Hilfe erzwingen,
+  // die selbst freiwillig nicht zustande kaeme.
+  const rivalen = room.players.filter((p) => p.id !== player.id && p.connected
+    && !hilfeVerbotenGrund(room, player, p.id))
+    .map((p) => ({ id: p.id, name: p.name }));
+  return rivalen.length ? { rivalen } : null;
+}
+
+function handleBardeVerzaubern(room, playerId, cardId, targetId) {
+  const player = findPlayer(room, playerId);
+  const ziel = findPlayer(room, targetId);
+  if (!player || !ziel || !bardenVerzauberInfo(room, player)) return;
+  if (!player.hand.includes(cardId) || ziel.id === player.id) return;
+  if (room.pendingRoll || room.pendingCardAction) return; // keine offene Wahl ueberschreiben
+  // Fremdeingabe: targetId kommt vom Client und koennte trotz gefilterter
+  // Rivalen-Liste ein gesperrtes Ziel nennen (veralteter Stand, manipulierter
+  // Payload) - deshalb hier nochmal geprueft, VOR dem Abwerfen der Karte.
+  if (hilfeVerbotenGrund(room, player, targetId)) return;
+  removeFromHand(player, cardId);
+  discardCard(room, cardId);
+  log(room, `${player.name} (Barde) wirft "${card(cardId).name}" ab und versucht, ${ziel.name} zu verzaubern.`, [cardId]);
+  rollWithWindow(room, player, 'verzaubern', (wurfBarde) => {
+    rollWithWindow(room, ziel, 'verzaubern', (wurfZiel) => {
+      const c = room.combat;
+      if (!c) return;
+      if (c.helperId || c.helperPending) {
+        // Waehrend das Wurf-Fenster offen war, ist schon jemand anderes
+        // helfende Person geworden (freiwillig oder durch einen zweiten
+        // Verzauber-Versuch) - die nicht ersetzen.
+        log(room, `Der Verzauber-Versuch von ${player.name} kommt zu spaet - ${ziel.name} kann nicht mehr helfende Person werden.`);
+        touchRoom(room);
+        return;
+      }
+      if (wurfBarde > wurfZiel) {
+        log(room, `Verzaubert: ${wurfBarde} gegen ${wurfZiel} - ${ziel.name} muss ${player.name} helfen (ohne Belohnung).`);
+        // Gleiche Bauform wie KNIESCHUETZER DER VERLOCKUNG: die Hilfe ist
+        // erzwungen ("compelled"), handleRespondHelp uebernimmt Stinker-Sperre,
+        // Untotenangst, Logging und den Ready-Status wie bei jeder Hilfe.
+        c.helperPending = { targetId: ziel.id, compelled: true, reward: 0 };
+        handleRespondHelp(room, ziel.id, true);
+        // "Du kannst das Spiel mit dieser Faehigkeit nicht gewinnen." - nur
+        // setzen, wenn die Hilfe wirklich zustande kam (Stinker/Untotenangst/
+        // Lustmonster koennen sie trotz compelled=true noch verhindern).
+        if (room.combat && room.combat.helperId === ziel.id) room.combat.bardenZwang = true;
+      } else {
+        log(room, `Der Zauber misslingt: ${wurfBarde} gegen ${wurfZiel}. ${player.name} darf es erneut versuchen.`);
+      }
+      touchRoom(room);
+    });
+  });
+  touchRoom(room);
 }
 
 // ZAUBERER "Verzauberung": "Du darfst deine ganze Hand ablegen (Minimum 3
@@ -4326,14 +4447,12 @@ function startCombat(room, actorId, monsterIds, opts) {
     classDiscards: {}, // "<playerId>:combat"/"<playerId>:flee" -> Anzahl bereits abgeworfener Karten
     fleeBonus: 0,        // Summe der Flugzauber-Karten
     playedFleeBonus: 0,  // STEAM-CODE: Weglauf-Zuschlag aus gespielten Kampfkarten
-    treasureDelta: 0,  // Schatzbonus/-malus gespielter Monster-Verstärker
-    // Gespielte Monster-Verstärker. Die meisten wirken nur über ihr
-    // bonus-Feld (sofort in monsterModifier), zwei aber über den weiteren
-    // Kampfverlauf: "… aus der Hölle." (+5 gegen Priester, MONSTER_TRAIT_BONUS)
-    // und UNTOT ("Das Monster zählt jetzt als Untoter für alle Zwecke").
-    enhancerIds: [],
-    enhancerBonus: 0,      // Anteil der Verstaerker am monsterModifier (KUMPEL)
-    enhancerTreasure: 0,   // dasselbe fuer treasureDelta
+    treasureDelta: 0,  // Schatzbonus/-malus, der nicht an ein Monster haengt
+    // Gespielte Monster-Verstaerker mit ihrem Zielmonster: { cardId, monsterId }.
+    // Verschwindet ein Monster, verschwinden seine Verstaerker mit ihm - die
+    // ILLUSION sagt das ausdruecklich ("zusammen mit allen Karten, die
+    // gespielt wurden, um es zu veraendern").
+    enhancers: [],
     ready: {},         // playerId -> true, sobald jemand die Auswertung freigibt
     readySignature: null,
   };
@@ -4389,7 +4508,7 @@ function combatSignature(room) {
   if (!c) return null;
   const t = combatTotals(room);
   return JSON.stringify([c.monsterIds, c.helperId, c.actorModifier, c.monsterModifier,
-    t.playerStrength, t.monsterStrength, c.mustFlee]);
+    enhancerBonusSumme(room), t.playerStrength, t.monsterStrength, c.mustFlee]);
 }
 
 function refreshCombatReady(room) {
@@ -4406,6 +4525,7 @@ function refreshCombatReady(room) {
     if (hatUntotenAngst(helfer)) {
       c.helperId = null;
       c.helperReward = 0;
+      c.bardenZwang = false;
       log(room, `${helfer.name} hat Todesangst vor Untoten und verlässt den Kampf - ohne Strafe.`);
     }
   }
@@ -4496,7 +4616,7 @@ function combatTotals(room) {
   // DOPPELGAENGER: "Verdopple deine Kampfstaerke" - auf die fertige Summe der
   // Munchkin-Seite, gespielte Karten eingeschlossen.
   if (c.doubleActor) playerStrength *= 2;
-  const monsterStrength = monsterLevel + c.monsterModifier + monsterTraitBonusSum(room);
+  const monsterStrength = monsterLevel + c.monsterModifier + monsterTraitBonusSum(room) + enhancerBonusSumme(room);
   return { playerStrength, monsterStrength, monsterLevel };
 }
 
@@ -4550,6 +4670,11 @@ function combatConditionalBonusFields(room) {
     forbidsHelp: combatHasMonster(room, MONSTER_FORBIDS_HELP),
     autoKilledMonsters: monsters.filter((m) => monsterAutoKilled(m, [actor, helper].filter(Boolean))).map((m) => m.name),
     warriorTieWins,
+    // Fertig gerechnete Schatzzahl fuer die Hilfe-Zusage-Obergrenze (siehe
+    // kampfSchatzZahl weiter unten) - der Client duplizierte diese Formel
+    // frueher selbst und kannte dabei den Verstaerker-Anteil (enhancers)
+    // nicht mehr, seit der am Monster statt kampfweit haengt.
+    kampfSchatzZahl: kampfSchatzZahl(room),
   };
 }
 
@@ -4785,6 +4910,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.helperPending = null;
       c.helperReward = 0; // "Du kannst keine Belohnung einfordern."
       zaubercouchFragen(player);
+      c.bardenZwang = false; // draengt sich freiwillig rein, keine Verzauber-Zusage
 
       refreshCombatReady(room);
       return `${player.name} draengt sich als Helfer in den Kampf (ohne Belohnung)`;
@@ -4803,6 +4929,7 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       c.helperId = null;
       c.helperReward = 0; // mit der Helfer:in faellt auch ihre Zusage weg
       refreshCombatReady(room); // ZAUBERCOUCH: die Hilfe ist keine combatParticipant mehr
+      c.bardenZwang = false;
       return `${helper ? helper.name : 'Helfer'} verlässt den Kampf`;
     }
     // POLLYVERWANDLUNGSTRANK/TRANK DER IRRELEVANZ/ENTLASSUNGSGLOCKE nennen
@@ -4841,10 +4968,9 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const schatzHinweis = (!drawn.length && actorFuerSchatz && (m.treasureCount || 0) && hatSchatzSperre(actorFuerSchatz))
         ? `, aber ${actorFuerSchatz.name} steht auf der Störerliste und bekommt nichts`
         : (drawn.length ? `, ${drawn.length} zurueckgelassene Schatzkarte(n)` : '');
-      // ponytail: der Anteil gespielter Verstaerker (monsterModifier,
-      // treasureDelta) bleibt im Kampf, auch wenn er auf dem entfernten
-      // Monster lag - genau wie bei ILLUSION. Aufruestweg waere ein
-      // monsterModifier pro Monster-ID.
+      // Die Verstaerker des entfernten Monsters fallen mit ihm weg: sie
+      // rechnen ueber enhancerBonusSumme()/enhancerTreasureSumme() nur noch
+      // fuer Monster-Ids, die noch in c.monsterIds stehen.
       if (!c.monsterIds.length) {
         beendeKampfOhneSieg(room, c, action.thenLoot);
         return `"${m.name}" verschwindet - Kampf vorbei, keine Stufe${schatzHinweis}`;
@@ -4884,12 +5010,18 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
     }
     case 'duplicateMonsterMommy': {
       const mid = action.monsterId || action.validMonsterIds[0];
+      // Nur BABY auf GENAU diesem Monster zaehlt - BABY auf einem anderen
+      // Monster im selben Kampf hat mit dieser Mami nichts zu tun.
+      const hasBaby = (c.enhancers || []).some((e) => e.monsterId === mid && (card(e.cardId) || {}).name === 'BABY');
       c.monsterIds.push(mid);
       c.mommyMonsterId = mid;
-      const hasBaby = (c.enhancerIds || []).some(id => card(id).name === 'BABY');
-      const enhancerBonus = (c.enhancerIds || []).reduce((sum, id) => sum + (card(id).bonus || 0), 0);
-      let mamiBonus = 10 + enhancerBonus;
-      if (hasBaby) mamiBonus += 5; // Compensate for Baby's -5
+      // "Mami ist von allen Verbesserungen ihres Babys betroffen, ausser der
+      // BABY-Karte selbst": mit dem zweiten Vorkommen von mid zaehlen alle an
+      // mid haengenden Verstaerker (enhancerBonusSumme, siehe combatTotals)
+      // automatisch ein zweites Mal - das ist fuer URALT & Co. genau richtig.
+      // Nur BABYs -5 soll NICHT doppelt gelten, deshalb hier ausgeglichen.
+      let mamiBonus = 10;
+      if (hasBaby) mamiBonus += 5; // gleicht BABYs verdoppeltes -5 aus
       c.monsterModifier += mamiBonus;
       refreshCombatReady(room);
       return `ruft die MAMI von "${card(mid).name}" (+${mamiBonus} auf Mami)`;
@@ -4907,23 +5039,38 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const alt = c.monsterIds.shift();
       if (alt) room.doorDiscard.push(alt);
       c.monsterIds.unshift(action.cardId);
-      // monsterModifier ist ein einziges kampfweites Feld, keine Zuordnung
-      // pro Monster - bei genau einem Monster im Kampf (Regelfall) verfaellt
-      // er damit korrekt mit dem ausgetauschten Monster. ponytail: mehrere
-      // Monster im selben Kampf sind KEIN Task-8-Sonderfall - startCombat
-      // nimmt schon immer ein monsterIds-Array (ganz normale Tuer-Aufdeckung
-      // mit zwei Monstern reicht), das gab es lange vor dieser Karte. Die
-      // Falle braucht nur einen Monster-Verstaerker auf dem einen Monster und
-      // ILLUSION auf dem anderen - der Reset trifft dann faelschlich auch das
-      // unbeteiligte Monster. Aufruestweg: monsterModifier pro monsterId
-      // statt kampfweit fuehren, falls das je gebraucht wird.
-      c.monsterModifier = 0;
-      // Der Verstaerker-Anteil gehoert zum ersetzten Monster und darf danach
-      // nicht mehr von KUMPEL verdoppelt werden.
-      c.enhancerBonus = 0;
-      c.enhancerTreasure = 0;
+      // Die Verstaerker des ersetzten Monsters fallen von selbst weg: sie
+      // rechnen ueber enhancerBonusSumme()/enhancerTreasureSumme() nur noch
+      // fuer Monster-Ids in c.monsterIds, und "alt" steht dort nicht mehr.
+      // Kampfweite Boni (Traenke, Wuerfelergebnisse) haengen an keinem
+      // Monster und bleiben deshalb unangetastet.
       refreshCombatReady(room);
       return `"${card(alt).name}" wird durch "${card(action.cardId).name}" ersetzt`;
+    }
+    // Monster-Verstaerker: erst hier weiss der Server, welches Monster
+    // gemeint war (bei nur einem Monster im Kampf sofort, sonst nach der
+    // Zielwahl in handlePlayCombatCard).
+    case 'verstaerkerAufMonster': {
+      if (!c.monsterIds.includes(action.monsterId)) return 'das Monster ist nicht mehr im Kampf';
+      c.enhancers = (c.enhancers || []).concat({ cardId: action.cardId, monsterId: action.monsterId });
+      const karte = card(action.cardId);
+      const eintrag = { cardId: action.cardId, monsterId: action.monsterId };
+      const bonus = enhancerBonusEintrag(room, eintrag);
+      const ziel = card(action.monsterId);
+      const zusatz = (karte.name === 'GIGANTISCH' && ziel.name === 'FUNGUS') ? ' - der Fungus erhält 25 statt 10'
+        : (ziel.name === 'RAPIER-TROTTEL' ? ' - der Rapier-Trottel verdoppelt' : '');
+      const delta = typeof karte.treasureCount === 'number' ? karte.treasureCount : 0;
+      log(room, `${player.name} spielt "${karte.name}" auf "${ziel.name}" (${bonus >= 0 ? '+' : ''}${bonus}${zusatz}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [action.cardId]);
+      announceCardPlay(room, player, action.cardId, `${bonus >= 0 ? '+' : ''}${bonus} für "${ziel.name}"`);
+      // Ein Verstaerker kann Kampfstaerke UND (durch UNTOT) den Untot-Status
+      // aendern - beides muss den Bereit-Status zuruecksetzen.
+      refreshCombatReady(room);
+      // '' statt einer Beschreibung: die Zeile oben ist schon geloggt (mit
+      // Zielmonster und Sonderfaellen) - bei mehreren Monstern haengt sonst
+      // noch eine zweite, redundante Zusammenfassung von
+      // handleResolveCardChoice dahinter (gleiche Bauform wie
+      // 'useLampOnMonster').
+      return '';
     }
     default:
       return '';
@@ -5085,51 +5232,36 @@ function handlePlayCombatCard(room, playerId, cardId) {
     return;
   }
   if (isMonsterEnhancerCard(c)) {
+    // Nur wirklich unterschiedliche Monster brauchen eine Zielwahl - KUMPEL
+    // legt dasselbe Monster zweimal in monsterIds, das waere sonst ein
+    // Wahldialog mit einer einzigen Option.
+    const zielMonster = [...new Set(room.combat.monsterIds)];
+    if (zielMonster.length > 1 && (room.pendingCardAction || room.pendingConsequence)) {
+      // Es laeuft schon eine andere Kartenwahl (z.B. ein zweiter Verstaerker) -
+      // diese hier wuerde room.pendingCardAction ueberschreiben und die erste
+      // Wahl verwaisen lassen. Karte bleibt auf der Hand, nochmal versuchen.
+      log(room, `"${c.name}" wartet: eine andere Kartenwahl läuft noch - die Karte bleibt bei ${player.name} auf der Hand.`);
+      touchRoom(room);
+      return;
+    }
     removeFromHand(player, cardId);
-    // RAPIER-TROTTEL: "Jeder Monsterverstaerker, der auf den Trottel gespielt
-    // wird, hat den doppelten Effekt; z.B. eine '+5 fuer Monster'-Karte gibt
-    // ihm +10." ponytail: verdoppelt wird der Kampfbonus, den die Karte
-    // ausdruecklich nennt - der Schatzbonus bleibt wie gedruckt.
-    const trottel = room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'RAPIER-TROTTEL');
-    // FUNGUS: "Wenn der Fungus Gigantisch wird, erhaelt er einen Bonus von
-    // +25, statt +10!" Gleiche Bauform wie der RAPIER-TROTTEL, nur ein fester
-    // Wert statt einer Verdopplung.
-    const fungusGigantisch = c.name === 'GIGANTISCH'
-      && room.combat.monsterIds.some((mid) => (card(mid) || {}).name === 'FUNGUS');
-    const zuschlag = fungusGigantisch ? 25 : (trottel ? c.bonus * 2 : c.bonus);
-    // Fungus hat Vorrang: sein Text setzt einen FESTEN Ersatzwert (25 statt
-    // 10), keine Verdopplung des Kartenbonus - im Unterschied zum Trottel, der
-    // den gedruckten Bonus verdoppelt. Bei beiden gleichzeitig (Fungus +
-    // Rapier-Trottel im selben Kampf) greift nur die feste Zahl, der Trottel
-    // traegt nichts mehr bei - die Logzeile darf deshalb nur den Zusatz
-    // nennen, der tatsaechlich gegriffen hat, sonst behauptet sie zwei
-    // einander ausschliessende Dinge (siehe Review M3).
-    const zusatzText = fungusGigantisch ? ' - der Fungus erhält 25 statt 10'
-      : (trottel ? ' - der Rapier-Trottel verdoppelt' : '');
-    room.combat.monsterModifier += zuschlag;
-    // Getrennt mitgezaehlt, weil KUMPEL ("ein weiteres Monster mit den
-    // gleichen Monsterverstaerker-Karten") genau diesen Anteil ein zweites
-    // Mal braucht - monsterModifier enthaelt auch Traenke, die nicht
-    // mitverdoppelt werden duerfen.
-    room.combat.enhancerBonus = (room.combat.enhancerBonus || 0) + zuschlag;
-    room.combat.enhancerIds = (room.combat.enhancerIds || []).concat(cardId);
-    // "Wird das Monster besiegt, ziehe 2 zusätzliche Schätze" (GIGANTISCH,
-    // URALT) bzw. "ziehe 1 Schatz weniger, mindestens 1" (BABY): der Wert
-    // steckt in treasureCount der Verstärkerkarte. Aufgesammelt hier,
-    // ausgezahlt in resolveCombatWin.
-    const delta = typeof c.treasureCount === 'number' ? c.treasureCount : 0;
-    if (delta) {
-      room.combat.treasureDelta = (room.combat.treasureDelta || 0) + delta;
-      room.combat.enhancerTreasure = (room.combat.enhancerTreasure || 0) + delta;
+    // Bei mehreren Monstern muss gesagt werden, welches verstaerkt wird
+    // (gleiche Bauform wie die Monster-Wahl der MAGISCHEN LAMPE).
+    if (zielMonster.length > 1) {
+      room.doorDiscard.push(cardId);
+      openCardChoice(room, player, c.name, zielMonster.map((mId) => ({
+        id: `verstaerker-${mId}`,
+        label: `Auf "${card(mId).name}" spielen`,
+        action: { type: 'verstaerkerAufMonster', cardId, monsterId: mId },
+      })));
+      room.pendingCardAction.sourceCardId = cardId;
+      log(room, `${player.name} spielt "${c.name}" im Kampf - Zielmonster nötig.`, [cardId]);
+      announceCardPlay(room, player, cardId, 'Zielmonster wird noch gewählt');
+      touchRoom(room);
+      return;
     }
     room.doorDiscard.push(cardId);
-    log(room, `${player.name} spielt "${c.name}" im Kampf (${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster${zusatzText}${delta ? `, ${delta >= 0 ? '+' : ''}${delta} Schatz` : ''}).`, [cardId]);
-    announceCardPlay(room, player, cardId, `${zuschlag >= 0 ? '+' : ''}${zuschlag} für das Monster`);
-    // Fehlte bisher hier: ein Monsterverstaerker kann die Kampfstaerke UND
-    // (durch die Karte UNTOT) den Untot-Status aendern - beides muss den
-    // Bereit-Status zuruecksetzen bzw. TODESANGST auswerten (siehe
-    // refreshCombatReady).
-    refreshCombatReady(room);
+    applyCombatPotionAction(room, player, { type: 'verstaerkerAufMonster', cardId, monsterId: zielMonster[0] }, c);
     touchRoom(room);
     return;
   }
@@ -5261,12 +5393,10 @@ function applyCombatReaction(room, player, cardId, regel) {
     const erstes = c.monsterIds[0];
     if (!erstes) return;
     c.monsterIds.push(erstes);
-    // "... mit den gleichen Monsterverstaerker-Karten": Stufe und Schatzzahl
-    // verdoppeln sich ueber die zweite Karten-ID von selbst, die bereits
-    // gespielten Verstaerker zaehlen aber nur einmal in monsterModifier/
-    // treasureDelta - deshalb hier ein zweites Mal.
-    c.monsterModifier += (c.enhancerBonus || 0);
-    if (c.enhancerTreasure) c.treasureDelta = (c.treasureDelta || 0) + c.enhancerTreasure;
+    // "... mit den gleichen Monsterverstaerker-Karten": Stufe, Schatzzahl UND
+    // die an "erstes" haengenden Verstaerker verdoppeln sich jetzt von selbst
+    // ueber die zweite Vorkommen von "erstes" in monsterIds - siehe
+    // enhancerBonusSumme()/enhancerTreasureSumme(). Kein Code mehr noetig.
     removeFromHand(player, cardId);
     discardCard(room, cardId);
     zeigen();
@@ -5332,7 +5462,38 @@ function kampfSchatzZahl(room) {
     if (c.zeroTreasureMonsterIds && c.zeroTreasureMonsterIds.includes(id)) return sum;
     return sum + ((card(id) || {}).treasureCount || 0);
   }, 0);
-  return Math.max(0, c.treasureDelta ? Math.max(1, basis + c.treasureDelta) : basis);
+  const delta = (c.treasureDelta || 0) + enhancerTreasureSumme(room);
+  return Math.max(0, delta ? Math.max(1, basis + delta) : basis);
+}
+
+// Gemeinsame Sperrpruefung fuer JEDE Anfrage nach Hilfe - ob ueber den
+// normalen "Um Hilfe bitten"-Knopf (handleRequestHelp) oder ueber BARDE
+// "Verzaubern" (bardenVerzauberInfo/handleBardeVerzaubern). handleRespondHelp
+// prueft das absichtlich NICHT erneut (das waere ein zweiter, leicht
+// abweichender Kopiersatz) - wer bis zur Annahme kommt, hat diese Pruefung
+// schon hinter sich. Reihenfolge und Texte 1:1 wie zuvor in handleRequestHelp,
+// nur an einer Stelle statt an zweien.
+function hilfeVerbotenGrund(room, actor, targetId) {
+  if (stinktierSperre(room, targetId)) {
+    return 'Das Riesenstinktier hält alle anderen auf 20 Meter Abstand - niemand hilft.';
+  }
+  // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
+  // Steht VOR der Stinktier-Strafe: was das Monster im Kampf verbietet, ist
+  // der naeherliegende Grund - sonst bekaeme eine besprühte Person am
+  // Pavillon die Meldung, sie solle ihre Kleidung ablegen.
+  if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
+    return 'Gegen dieses Monster darf niemand helfen.';
+  }
+  if (stinktierStrafeAktiv(actor)) {
+    return `${actor.name} stinkt noch aus dem Riesenstinktier-Kampf - niemand hilft, solange Kleidung und Rüstung anliegen.`;
+  }
+  if (hatHilfeSperre(actor)) {
+    return `${actor.name} stinkt - in diesem Kampf hilft niemand.`;
+  }
+  if (hatUntotenAngst(actor) && combatHasUndead(room)) {
+    return `${actor.name} kämpft gegen Untote - die Todesangst schreckt jede Hilfe ab.`;
+  }
+  return null;
 }
 
 function handleRequestHelp(room, playerId, targetId, reward) {
@@ -5342,32 +5503,9 @@ function handleRequestHelp(room, playerId, targetId, reward) {
   const actor = findPlayer(room, playerId);
   const target = findPlayer(room, targetId);
   if (!target || targetId === c.actorId) return;
-  if (stinktierSperre(room, targetId)) {
-    log(room, 'Das Riesenstinktier hält alle anderen auf 20 Meter Abstand - niemand hilft.');
-    touchRoom(room);
-    return;
-  }
-  // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
-  // Steht VOR der Stinktier-Strafe: was das Monster im Kampf verbietet, ist
-  // der naeherliegende Grund - sonst bekaeme eine besprühte Person am
-  // Pavillon die Meldung, sie solle ihre Kleidung ablegen.
-  if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
-    log(room, 'Gegen dieses Monster darf niemand helfen.');
-    touchRoom(room);
-    return;
-  }
-  if (stinktierStrafeAktiv(actor)) {
-    log(room, `${actor.name} stinkt noch aus dem Riesenstinktier-Kampf - niemand hilft, solange Kleidung und Rüstung anliegen.`);
-    touchRoom(room);
-    return;
-  }
-  if (hatHilfeSperre(actor)) {
-    log(room, `${actor.name} stinkt - in diesem Kampf hilft niemand.`);
-    touchRoom(room);
-    return;
-  }
-  if (hatUntotenAngst(actor) && combatHasUndead(room)) {
-    log(room, `${actor.name} kämpft gegen Untote - die Todesangst schreckt jede Hilfe ab.`);
+  const verbotenGrund = hilfeVerbotenGrund(room, actor, targetId);
+  if (verbotenGrund) {
+    log(room, verbotenGrund);
     touchRoom(room);
     return;
   }
@@ -5380,7 +5518,12 @@ function handleRequestHelp(room, playerId, targetId, reward) {
   // Zusage aus dem Client ist Fremdeingabe: ganze Zahl, nicht negativ, nicht
   // mehr als der Kampf ueberhaupt hergibt.
   const zusage = Math.max(0, Math.min(kampfSchatzZahl(room), Math.floor(Number(reward) || 0)));
-  c.helperPending = { targetId, compelled, reward: zusage };
+  // noWinLevel ist die KNIESCHÜTZER-eigene Folge von "compelled" (Sperre der
+  // Siegesstufe) - BARDE "Verzaubern" setzt spaeter ebenfalls compelled:true,
+  // aber ohne noWinLevel: seine Sperre ist bardenZwang (Sieg zaehlt nicht),
+  // nicht eine gekappte Stufe. Deshalb getrennte Felder statt "compelled"
+  // wiederzuverwenden.
+  c.helperPending = { targetId, compelled, noWinLevel: compelled, reward: zusage };
   log(room, `${actor.name} bittet ${target.name} um Hilfe${zusage ? ` (Zusage: ${zusage} Schatzkarte(n))` : ' (ohne Belohnung)'}${compelled ? ' - Knieschützer der Verlockung: kann nicht ablehnen' : ''}.`);
   touchRoom(room);
 }
@@ -5428,12 +5571,13 @@ function handleRespondHelp(room, playerId, accept) {
     }
     c.helperId = playerId;
     zaubercouchFragen(findPlayer(room, playerId));
+    c.bardenZwang = false; // neue Zusage - handleBardeVerzaubern setzt es danach ggf. wieder
     // Die Zusage aus der Anfrage wird beim Sieg eingeloest (resolveCombatWin).
     c.helperReward = c.helperPending.reward || 0;
     dryadeWirkung(room, findPlayer(room, playerId));
     // "In einem Kampf, bei dem der Helfer ... genötigt wurde, kannst du
     // nicht die Siegesstufe erreichen." Greift in resolveCombatWin.
-    if (compelled) c.noWinLevel = true;
+    if (c.helperPending.noWinLevel) c.noWinLevel = true;
     log(room, `${target.name} hilft im Kampf.`);
   } else {
     log(room, `${target.name} lehnt ab.`);
@@ -5690,10 +5834,12 @@ function finishCombatWin(room) {
       ? `Die Piñata platzt - jede:r am Tisch zieht 1 Schatzkarte.`
       : `Die Piñata platzt - ${grund}: nur ${gezogen} von ${room.players.length} Personen ziehen je 1 Schatzkarte.`);
   }
-  // Monster-Verstärker aus dem Kampf zählen mit; BABY sagt ausdrücklich
+  // Monster-Verstärker aus dem Kampf zählen mit (enhancerTreasureSumme, je
+  // Verstärker nur, solange sein Monster noch steht); BABY sagt ausdrücklich
   // "mindestens 1", deshalb die Untergrenze - aber nur, wenn überhaupt ein
-  // Verstärker im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
-  const treasureCount = c.treasureDelta ? Math.max(1, baseTreasures + c.treasureDelta) : baseTreasures;
+  // Zuschlag im Spiel war (ohne ihn bleibt es bei der Kartenangabe).
+  const treasureDelta = (c.treasureDelta || 0) + enhancerTreasureSumme(room);
+  const treasureCount = treasureDelta ? Math.max(1, baseTreasures + treasureDelta) : baseTreasures;
   // Gezogen wird nur, was auch ankommt, und nur fuer die Person, die es
   // ueberhaupt bekommen kann. Steht die kaempfende Person auf der
   // Stoererliste (oder unter NARRENGOLD), zieht stattdessen die Helfer:in
@@ -5781,7 +5927,19 @@ function finishCombatWin(room) {
   log(room, `${actor.name} besiegt ${monsters.map((m) => m.name).join(' + ')}! +${levelsGained} Stufe(n), ${gemeldeteSchaetze} Schatzkarte(n) gezogen.`, c.monsterIds);
   if (extras.levels) log(room, `Kartenbonus: +${extras.levels} zusätzliche Stufe(n).`);
   if (extras.treasures) log(room, `Kartenbonus: +${extras.treasures} zusätzliche(r) Schatz.`);
-  if (hasClass(actor, 'BARDE')) log(room, `Bardenglück: ${actor.name} zieht 1 Extraschatz und wirft dafür sofort 1 beliebige Karte ab.`);
+  if (hasClass(actor, 'BARDE')) log(room, `Bardenglück: ${actor.name} zieht 1 Extraschatz.`);
+  // BARDE "Bardenglueck": "Sieh sie dir alle an und wirf sofort einen ab
+  // (beliebig)." Die Wahl geht ueber die GANZE Hand (Beute ist schon drin),
+  // nicht nur ueber den Extraschatz. Reiht sich hinter eine schon offene
+  // Kartenwahl ein (z.B. UNFASSBAR REICH oben) statt sie zu verdraengen -
+  // openQueuedCardAction uebernimmt das. Ohne Handkarten (Schatzstapel leer
+  // o.ae., theoretisch moeglich) entfaellt die Wahl.
+  if (hasClass(actor, 'BARDE') && actor.hand.length) {
+    openQueuedCardAction(room, 'BARDENGLÜCK', [actor.id], () => ({
+      kind: 'chooseCard', prompt: 'Bardenglück: eine Karte abwerfen',
+      candidateIds: actor.hand.slice(), discardOwn: true,
+    }));
+  }
   if (helper) log(room, `(${helper.name} hat geholfen.)`);
   // ELF: "Für jedes Monster, das du jemandem anderen hilfst zu töten,
   // steigst du 1 Stufe auf."
@@ -5799,9 +5957,15 @@ function finishCombatWin(room) {
   }
   room.combat = null;
   zaubercouchZuruecksetzen(room);
+  // BARDE "Verzaubern": "Du kannst das Spiel mit dieser Faehigkeit nicht
+  // gewinnen." Die Stufe steigt (oben schon geschehen), der Spielsieg faellt
+  // aus - checkWin wird fuer diesen Sieg gar nicht erst aufgerufen.
+  let won = c.bardenZwang ? false : checkWin(room, actor);
+  if (c.bardenZwang && actor.level >= MAX_LEVEL) {
+    log(room, `${actor.name} erreicht Stufe 10 - aber mit erzwungener Hilfe des Barden zählt das nicht als Sieg.`);
+  }
   // Auch die Helfer:in kann so Stufe 10 erreichen - die Stufe kommt aus einem
   // besiegten Monster, damit zählt sie als Sieg.
-  let won = checkWin(room, actor);
   if (!won && helper) won = checkWin(room, helper);
   // ÜBERFALLTRANK: siehe combatEndPhase - der urspruengliche Spieler (nicht
   // die/der Kaempfende) darf danach den Raum pluendern, room.turnIndex zeigt
@@ -6008,10 +6172,16 @@ function oeffneVerlustKonsequenz(room, player, monsters, c, keepPhase) {
     originalActorId: c.originalActorId || null,
     keepPhase: !!keepPhase,
   };
-  // Die Verstaerker des Kampfs reisen mit (FUNGUS: "Verdoppelt die Strafe,
-  // wenn der Fungus Gigantisch ist") - room.combat ist hier schon weg.
-  const verstaerker = (c.enhancerIds || []).map((id) => (card(id) || {}).name).filter(Boolean);
-  const sources = monsters.map((m) => ({ name: m.name, text: m.badstuff, verstaerker }));
+  // Die Verstaerker reisen mit (FUNGUS: "Verdoppelt die Strafe, wenn der
+  // Fungus Gigantisch ist") - aber nur die des jeweiligen Monsters, GIGANTISCH
+  // auf einem anderen Monster verdoppelt den Fungus nicht. room.combat ist
+  // hier schon weg, also direkt auf dem mitgegebenen c (nicht
+  // aktiveEnhancers/enhancerKartenIds, die room.combat lesen wuerden).
+  const sources = monsters.map((m) => ({
+    name: m.name, text: m.badstuff,
+    verstaerker: (c.enhancers || []).filter((e) => e.monsterId === m.id)
+      .map((e) => (card(e.cardId) || {}).name).filter(Boolean),
+  }));
   if (room.pendingConsequence) {
     room._pendingConsequenceBacklog = (room._pendingConsequenceBacklog || [])
       .concat({ eintrag, playerId: player.id, sources });
@@ -7247,6 +7417,7 @@ io.on('connection', (socket) => {
   onSafe(socket, 'respondTrade', ({ tradeId, accept, counterCardIds }) => act(socket, (room, pid) => handleRespondTrade(room, pid, tradeId, accept, counterCardIds)));
   onSafe(socket, 'requestHelp', ({ targetId, reward }) => act(socket, (room, pid) => handleRequestHelp(room, pid, targetId, reward)));
   onSafe(socket, 'respondHelp', ({ accept }) => act(socket, (room, pid) => handleRespondHelp(room, pid, accept)));
+  onSafe(socket, 'bardeVerzaubern', ({ cardId, targetId }) => act(socket, (room, pid) => handleBardeVerzaubern(room, pid, cardId, targetId)));
   onSafe(socket, 'setCombatReady', ({ ready }) => act(socket, (room, pid) => handleSetCombatReady(room, pid, ready !== false)));
   onSafe(socket, 'answerZaubercouch', ({ benutzen }) => act(socket, (room, pid) => handleAnswerZaubercouch(room, pid, benutzen === true)));
   onSafe(socket, 'evaluateCombat', () => act(socket, (room, pid) => handleEvaluateCombat(room, pid)));
@@ -7315,7 +7486,7 @@ if (require.main === module) {
 
 module.exports = {
   shuffle, ALL_CARDS, CARDS_BY_ID, SET_KEYS, MIN_PLAYERS, MAX_PLAYERS, MAX_LEVEL, HAND_LIMIT,
-  buildDecks, DEAKTIVIERTE_KARTEN, handlePlayMonsterFromHand, handleSkipToLoot,
+  buildDecks, DEAKTIVIERTE_KARTEN, handlePlayMonsterFromHand, handleSkipToLoot, handleLootRoom,
   parseAutoConsequence, isMonsterEnhancerCard, resolveConsequenceSpec, CONSEQUENCE_OVERRIDES,
   DOOR_OTHER_AS_CURSE, isInstantLevelUpCard, TREASURE_POWER_OVERRIDES,
   parseCombatPotion, isCombatPotionCard, COMBAT_POTION_OVERRIDES,
@@ -7331,6 +7502,7 @@ module.exports = {
   monsterRefusesTarget, monsterPassOption, fleeModifierParts, monsterTraitBonusSum,
   istGeschlecht, GENDER_IMMUNE_ITEMS, pruefeSlipperVerlust, handleEquipItem,
   applyCombatPotionAction, combatHasUndead, addActiveCurse, curseCombatModifier,
+  aktiveEnhancers, enhancerBonusEintrag, enhancerBonusSumme, enhancerTreasureSumme, enhancerKartenIds,
   handleAttachCard, attachmentIds, attachmentBonusSum, istGrosserGegenstand, backstabMalus,
   canCarryAnotherBigItem, applyPrimitiveAction, fluchZiel, ROLL_REROLL_CARDS,
   rollWithWindow, handlePlayReactionCard, ITEM_GRANTS_TRAIT, itemGrantsTrait,
@@ -7354,6 +7526,7 @@ module.exports = {
   combatTotals, handLimit, hasRace, hasClass,
   CLASS_COMBAT_DISCARD, CLASS_FLEE_DISCARD, UNDEAD_MONSTERS,
   handleUseClassCombatDiscard, classCombatPowerInfo, combatSignature,
+  bardenVerzauberInfo, handleBardeVerzaubern,
   handleThiefBackstab, handleThiefSteal, thiefPowerInfo,
   handlePriestResurrect, priestResurrectPiles,
   handleSetCombatReady, combatReadyRequired, combatAllReady, refreshCombatReady,

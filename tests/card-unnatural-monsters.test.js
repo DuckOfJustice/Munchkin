@@ -7,7 +7,7 @@ const assert = require('assert');
 const {
   ALL_CARDS, newEquipped, combatTotals, monsterRefusesTarget, fleeModifierParts,
   resolveConsequenceSpec, applyPrimitiveAction, handleResolveCardCardChoice, isBigItem,
-  handlePlayCombatCard,
+  handlePlayCombatCard, handleResolveCardChoice, enhancerBonusSumme,
 } = require('../server.js');
 
 function findCard(name, category) {
@@ -416,8 +416,8 @@ const PRIESTER = findCard('PRIESTER', 'class');
     const p = makePlayer({ hand: [gigantisch.id] });
     const room = makeRoom([p]);
     room.combat = { actorId: p.id, helperId: null, monsterIds: [monsterKarte.id],
-      actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
-      treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+      actorModifier: 0, monsterModifier: 0, enhancers: [],
+      treasureDelta: 0, mustFlee: false, backstabs: {} };
     const vorher = combatTotals(room).monsterStrength;
     handlePlayCombatCard(room, p.id, gigantisch.id);
     return combatTotals(room).monsterStrength - vorher;
@@ -428,40 +428,57 @@ const PRIESTER = findCard('PRIESTER', 'class');
 
 // --- FUNGUS + RAPIER-TROTTEL: die Logzeile darf nur den Zusatz nennen, der
 // tatsaechlich gegriffen hat (Review M3) --------------------------------------
-// Der Fungus hat Vorrang (fester Ersatzwert 25 statt einer Verdopplung) -
-// beide Zusaetze gleichzeitig zu nennen waere widerspruechlich, weil der
-// Trottel dann gar nichts mehr beitraegt.
+// Verstaerker haengen jetzt am Zielmonster (Regelluecken Welle 3, Task 1):
+// bei zwei Monstern im Kampf waehlt handlePlayCombatCard erst das Ziel -
+// Fungus und Trottel schliessen sich deshalb nicht mehr gegenseitig aus
+// ("Fungus hat Vorrang"), sondern greifen je nachdem, wer das Ziel ist.
 {
   const fungus = findCard('FUNGUS', 'monster');
   const trottel = findCard('RAPIER-TROTTEL', 'monster');
   const gigantisch = findCard('GIGANTISCH');
-  const letzteLogzeile = (monsterIds) => {
+  const letzteLogzeile = (monsterIds, zielName) => {
     const p = makePlayer({ hand: [gigantisch.id] });
     const room = makeRoom([p]);
     room.combat = { actorId: p.id, helperId: null, monsterIds,
-      actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
-      treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+      actorModifier: 0, monsterModifier: 0, enhancers: [],
+      treasureDelta: 0, mustFlee: false, backstabs: {} };
     handlePlayCombatCard(room, p.id, gigantisch.id);
-    return room.logs[room.logs.length - 1].text;
+    if (monsterIds.length > 1) {
+      const option = room.pendingCardAction.options.find((o) => o.label.includes(zielName));
+      handleResolveCardChoice(room, p.id, option.id);
+    }
+    // Bei einer Zielwahl haengt handleResolveCardChoice noch eine generische
+    // Zusammenfassungszeile an ('verstaerkerAufMonster' loggt selbst und gibt
+    // '' zurueck, um diese Dopplung nicht auch inhaltlich zu wiederholen) -
+    // die eigentliche Zeile mit den Sonderfaellen ist die zum Kartennamen.
+    return [...room.logs].reverse().find((e) => e.text.includes(`spielt "${gigantisch.name}" auf`)).text;
   };
 
   // Nur der Trottel: Verdopplung des gedruckten Bonus.
   const nurTrottel = letzteLogzeile([trottel.id]);
-  assert.ok(nurTrottel.includes(`+${gigantisch.bonus * 2} für das Monster`), 'der Trottel verdoppelt den gedruckten Bonus');
+  assert.ok(nurTrottel.includes(`+${gigantisch.bonus * 2}`), 'der Trottel verdoppelt den gedruckten Bonus');
   assert.ok(nurTrottel.includes('Rapier-Trottel verdoppelt'), 'nennt den Trottel-Zusatz');
   assert.ok(!nurTrottel.includes('Fungus'), 'nennt keinen Fungus-Zusatz');
 
   // Nur der Fungus: fester Ersatzwert +25.
   const nurFungus = letzteLogzeile([fungus.id]);
-  assert.ok(nurFungus.includes('+25 für das Monster'), 'der Fungus ersetzt durch +25');
+  assert.ok(nurFungus.includes('+25'), 'der Fungus ersetzt durch +25');
   assert.ok(nurFungus.includes('Fungus erhält 25 statt 10'), 'nennt den Fungus-Zusatz');
   assert.ok(!nurFungus.includes('Trottel'), 'nennt keinen Trottel-Zusatz');
 
-  // Beide zusammen: Fungus gewinnt, +25 - die Zeile nennt nur diesen Zusatz.
-  const beide = letzteLogzeile([fungus.id, trottel.id]);
-  assert.ok(beide.includes('+25 für das Monster'), 'bei beiden Monstern gilt weiterhin +25');
-  assert.ok(beide.includes('Fungus erhält 25 statt 10'), 'nennt den Fungus-Zusatz');
-  assert.ok(!beide.includes('Trottel'), 'nennt NICHT zusaetzlich den Trottel-Zusatz - das waere widerspruechlich');
+  // Beide im selben Kampf, Ziel ausdruecklich der Fungus: +25, der Trottel
+  // (unbeteiligt) taucht in der Logzeile nicht auf.
+  const zielFungus = letzteLogzeile([fungus.id, trottel.id], fungus.name);
+  assert.ok(zielFungus.includes('+25'), 'Ziel Fungus -> +25');
+  assert.ok(zielFungus.includes('Fungus erhält 25 statt 10'), 'nennt den Fungus-Zusatz');
+  assert.ok(!zielFungus.includes('Trottel'), 'nennt NICHT den Trottel-Zusatz - er war nicht das Ziel');
+
+  // Beide im selben Kampf, Ziel ausdruecklich der Trottel: Verdopplung, der
+  // Fungus (unbeteiligt) taucht in der Logzeile nicht auf.
+  const zielTrottel = letzteLogzeile([fungus.id, trottel.id], trottel.name);
+  assert.ok(zielTrottel.includes(`+${gigantisch.bonus * 2}`), 'Ziel Trottel -> verdoppelt');
+  assert.ok(zielTrottel.includes('Rapier-Trottel verdoppelt'), 'nennt den Trottel-Zusatz');
+  assert.ok(!zielTrottel.includes('Fungus'), 'nennt NICHT den Fungus-Zusatz - er war nicht das Ziel');
 }
 
 // --- Verlauf und Einblendung muessen denselben Bonus nennen -----------------
@@ -474,12 +491,12 @@ const PRIESTER = findCard('PRIESTER', 'class');
   const p = makePlayer({ hand: [gigantisch.id] });
   const room = makeRoom([p]);
   room.combat = { actorId: p.id, helperId: null, monsterIds: [fungus.id],
-    actorModifier: 0, monsterModifier: 0, enhancerIds: [], enhancerBonus: 0,
-    treasureDelta: 0, enhancerTreasure: 0, mustFlee: false, backstabs: {} };
+    actorModifier: 0, monsterModifier: 0, enhancers: [],
+    treasureDelta: 0, mustFlee: false, backstabs: {} };
   handlePlayCombatCard(room, p.id, gigantisch.id);
   const letzterLogEintrag = room.logs[room.logs.length - 1].text;
-  const zahlImLog = letzterLogEintrag.match(/([+-]\d+) für das Monster/)[1];
-  const zahlInEinblendung = room.cardPlay.hinweis.match(/([+-]\d+) für das Monster/)[1];
+  const zahlImLog = letzterLogEintrag.match(/\(([+-]\d+)/)[1];
+  const zahlInEinblendung = room.cardPlay.hinweis.match(/^([+-]\d+)/)[1];
   assert.strictEqual(zahlInEinblendung, zahlImLog,
     `Einblendung (${room.cardPlay.hinweis}) muss denselben Bonus nennen wie der Verlauf (${letzterLogEintrag})`);
   assert.strictEqual(zahlInEinblendung, '+25', 'auf dem Fungus muss auch die Einblendung +25 zeigen');
@@ -786,7 +803,7 @@ const PRIESTER = findCard('PRIESTER', 'class');
     const { room, dritter } = stinktierKampf();
     dritter.hand.push(verstaerker.id);
     handlePlayCombatCard(room, dritter.id, verstaerker.id);
-    assert.ok(room.combat.monsterModifier !== 0,
+    assert.ok(enhancerBonusSumme(room) !== 0,
       'ein Monsterverstaerker ist ausdruecklich erlaubt und wirkt');
   }
   // 5. Die kaempfende Person selbst ist NICHT gesperrt - der Text richtet

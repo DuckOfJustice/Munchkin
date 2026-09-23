@@ -663,10 +663,10 @@
       // Spieler-Modal oeffnen. Steht bewusst UEBER der Ausruestungsreihe.
       const badgeRow = document.createElement('div');
       badgeRow.className = 'prow-badges';
-      p.races.forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
-      p.classes.forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+      p.races.forEach((id) => badgeRow.appendChild(traitTag(p, id, 'var(--c-race)')));
+      p.classes.forEach((id) => badgeRow.appendChild(traitTag(p, id, 'var(--c-class)')));
       (p.powerGroups || []).forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
-      if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badgeRow.appendChild(textNode('Mensch, ohne Klasse'));
+      if (hatAmnesie(p) || (!p.races.length && !p.classes.length && !(p.powerGroups || []).length)) badgeRow.appendChild(textNode('Mensch, ohne Klasse'));
       row.appendChild(badgeRow);
 
       // Kleine Vorschau-Icons der getragenen Gegenstaende direkt in der Zeile
@@ -738,10 +738,10 @@
     const badges = document.createElement('div');
     badges.className = 'row gap wrap';
     badges.style.marginBottom = '12px';
-    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
-    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+    p.races.forEach((id) => badges.appendChild(traitTag(p, id, 'var(--c-race)')));
+    p.classes.forEach((id) => badges.appendChild(traitTag(p, id, 'var(--c-class)')));
     (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
-    if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+    if (hatAmnesie(p) || (!p.races.length && !p.classes.length && !(p.powerGroups || []).length)) badges.appendChild(textNode('Mensch, ohne Klasse'));
     body.appendChild(badges);
     if ((p.activeCurses || []).length) {
       const flueche = document.createElement('div');
@@ -1049,17 +1049,19 @@
     div.className = 'combatbox';
     div.innerHTML = `<h3>⚔️ Kampf gegen ${c.monsterIds.map((id) => card(id).name).join(' + ')}</h3>`;
 
-    // "Untot" gilt fuer den GANZEN Kampf, nicht pro Monster (siehe
-    // combatHasUndead im Server): entweder steht von Haus aus ein untotes
-    // Monster da (state.undeadMonsters, z.B. MR. BONES), oder die
-    // Verstaerkerkarte UNTOT wurde gespielt - dann zaehlen ALLE Monster
-    // dieses Kampfes als untot.
-    const untotVerstaerkt = (c.enhancerIds || []).some((eid) => { const ec = card(eid); return ec && ec.name === 'UNTOT'; });
-    const istUntot = untotVerstaerkt || c.monsterIds.some((id) => (state.undeadMonsters || []).includes((card(id).name || '').toUpperCase()));
+    // "Untot" gilt nur fuer sein Zielmonster, nicht fuer den ganzen Kampf
+    // (siehe combatHasUndead/enhancerKartenIds im Server): ein Monster ist
+    // untot, wenn es von Haus aus untot ist (state.undeadMonsters, z.B.
+    // MR. BONES) oder wenn genau SEIN Verstaerker die Karte UNTOT ist.
+    const untotZiele = new Set((c.enhancers || [])
+      .filter((e) => c.monsterIds.includes(e.monsterId))
+      .filter((e) => { const ec = card(e.cardId); return ec && ec.name === 'UNTOT'; })
+      .map((e) => e.monsterId));
+    const istUntot = (id) => untotZiele.has(id) || (state.undeadMonsters || []).includes((card(id).name || '').toUpperCase());
 
     const monsterRow = document.createElement('div');
     monsterRow.className = 'cardgrid';
-    c.monsterIds.forEach((id) => monsterRow.appendChild(cardTile(id, { undead: istUntot })));
+    c.monsterIds.forEach((id) => monsterRow.appendChild(cardTile(id, { undead: istUntot(id) })));
     div.appendChild(monsterRow);
 
     const iAmActor = c.actorId === myInfo.playerId;
@@ -1209,10 +1211,11 @@
         // Zusage: wie viele der erbeuteten Schatzkarten die Helfer:in bekommt.
         // Die Obergrenze ist die Schatzzahl des Kampfes - der Server klemmt
         // denselben Wert noch einmal (Fremdeingabe).
-        // Dieselbe Rechnung wie kampfSchatzZahl im Server, inklusive der
-        // Untergrenze 1 bei negativen Verstaerkern (BABY: "mindestens 1").
-        const basisSchaetze = (c.monsterIds || []).reduce((sum, id) => sum + ((card(id) || {}).treasureCount || 0), 0);
-        const maxSchaetze = Math.max(0, c.treasureDelta ? Math.max(1, basisSchaetze + c.treasureDelta) : basisSchaetze);
+        // kampfSchatzZahl kommt fertig gerechnet vom Server (siehe
+        // combatConditionalBonusFields) - eigenes Nachrechnen kannte den
+        // Verstaerker-Anteil nicht mehr, seit der am Monster statt kampfweit
+        // haengt (enhancers statt treasureDelta), und lief auseinander.
+        const maxSchaetze = c.kampfSchatzZahl || 0;
         const lohn = document.createElement('input');
         lohn.type = 'number'; lohn.min = '0';
         lohn.value = '0'; lohn.style.width = '4em'; lohn.title = 'Zugesagte Schatzkarten';
@@ -1259,6 +1262,26 @@
         () => socket.emit('enchantMonster', {}));
       btn.className = 'primary';
       div.appendChild(btn);
+    }
+
+    // BARDE "Verzaubern": Karte abwerfen, Rivalen waehlen, beide wuerfeln -
+    // bei hoeherem Wurf muss der Rivale ohne Belohnung helfen. Kein Muster im
+    // Client fuer "Handkarte zuerst waehlen dann Knopf" - deshalb je Rivale
+    // ein Knopf, der die erste Handkarte abwirft.
+    // ponytail: keine Kartenauswahl vor dem Klick, nur die erste Handkarte.
+    // Aufruestweg: eigener Kartenwaehler wie bei anderen Klassenkraeften, falls
+    // das je stoert.
+    const verzaubern = myInfo.bardeVerzaubern;
+    if (verzaubern && !c.mustFlee && myInfo.hand.length) {
+      const cardId = myInfo.hand[0];
+      const box = document.createElement('div');
+      box.className = 'row gap wrap';
+      verzaubern.rivalen.forEach((rivale) => {
+        const btn = mkBtn(`🎵 Verzaubern: ${escapeHtml(rivale.name)} (1 Karte abwerfen)`,
+          () => socket.emit('bardeVerzaubern', { cardId, targetId: rivale.id }));
+        box.appendChild(btn);
+      });
+      div.appendChild(box);
     }
 
     const lampIds = myInfo.lampCardIds || [];
@@ -1573,7 +1596,10 @@
       const skip = document.createElement('button'); skip.className = 'primary phase-btn'; skip.textContent = 'Kein Monster spielen -> weiter';
       skip.onclick = () => socket.emit('skipToLoot');
       box.appendChild(skip);
-      box.appendChild(textNode('Du kannst stattdessen unten bei einer Monster-Karte in deiner Hand "Als Monster spielen" wählen.'));
+      const keinAergerFluch = ((me() || {}).activeCurses || []).some((f) => f.kind === 'keinAerger');
+      box.appendChild(textNode(keinAergerFluch
+        ? 'Touristenfalle: du darfst kein Monster aus der Hand spielen.'
+        : 'Du kannst stattdessen unten bei einer Monster-Karte in deiner Hand "Als Monster spielen" wählen.'));
     } else if (state.turnPhase === 'pluendern') {
       const btn = document.createElement('button'); btn.className = 'primary phase-btn'; btn.textContent = '📦 Raum plündern (verdeckt ziehen)';
       btn.onclick = () => socket.emit('lootRoom');
@@ -1634,10 +1660,10 @@
 
     const badges = $('myBadges');
     badges.innerHTML = '';
-    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
-    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+    p.races.forEach((id) => badges.appendChild(traitTag(p, id, 'var(--c-race)')));
+    p.classes.forEach((id) => badges.appendChild(traitTag(p, id, 'var(--c-class)')));
     (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
-    if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+    if (hatAmnesie(p) || (!p.races.length && !p.classes.length && !(p.powerGroups || []).length)) badges.appendChild(textNode('Mensch, ohne Klasse'));
     if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)', p.raceCapCard));
     if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)', p.classCapCard));
     if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)', p.powerGroupCapCard));
@@ -1814,7 +1840,8 @@
       };
       wrap.appendChild(select);
     }
-    if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger') {
+    if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger'
+      && !((me() || {}).activeCurses || []).some((f) => f.kind === 'keinAerger')) {
       const btn = mkBtn('Als Monster spielen', () => socket.emit('playMonsterFromHand', { cardId: id }));
       wrap.appendChild(btn);
     }
@@ -2279,6 +2306,15 @@
       span.onclick = () => openCardModal(cardId);
     }
     return span;
+  }
+  // TEMPORAERE ANMNESIE: die Klassen-/Rassenkarten liegen weiter aus, zaehlen
+  // aber nicht - ausgegraut und als "vergessen" beschriftet.
+  function hatAmnesie(p) { return (p.activeCurses || []).some((f) => f.kind === 'traitsVergessen'); }
+  function traitTag(p, id, color) {
+    if (!hatAmnesie(p)) return smallTag(card(id).name, color, id);
+    const tag = smallTag(`${card(id).name} (vergessen)`, color, id);
+    tag.style.opacity = '0.45';
+    return tag;
   }
   function textNode(text) { const s = document.createElement('span'); s.className = 'hint'; s.textContent = text; return s; }
   function escapeHtml(s) {

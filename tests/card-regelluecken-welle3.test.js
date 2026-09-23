@@ -1,0 +1,367 @@
+// Regellücken Welle 3 (Spec 2026-09-22-regelluecken-welle3-design.md):
+// Verstärker pro Monster, Barde "Verzaubern" und "Bardenglück".
+const assert = require('assert');
+const S = require('../server.js');
+const { ALL_CARDS, newEquipped } = S;
+
+const findCard = (name, category) => {
+  const c = ALL_CARDS.find((x) => x.name === name && (!category || x.category === category));
+  if (!c) throw new Error(`Testkarte nicht gefunden: ${name}`);
+  return c;
+};
+function makePlayer(o) {
+  return Object.assign({
+    id: 'p1', name: 'A', level: 5, hand: [], races: [], classes: [], powerGroups: [],
+    raceCapCard: null, classCapCard: null, powerGroupCapCard: null,
+    equipped: newEquipped(), attachments: { cheatedItemId: null }, activeCurses: [],
+    isBot: false, connected: true, gender: 'm', genderBeiSlippern: null,
+  }, o || {});
+}
+const raeume = [];
+function makeRoom(players, extra) {
+  const room = Object.assign({
+    code: 'TEST', players, turnIndex: 0, turnPhase: 'kampf', combatHappenedThisTurn: true,
+    doorDeck: [], doorDiscard: [],
+    treasureDeck: ALL_CARDS.filter((c) => c.type === 'treasure').slice(0, 20).map((c) => c.id),
+    treasureDiscard: [], itemAttachments: {},
+    revealedDoorCard: null, pendingConsequence: null, pendingCardAction: null, pendingRoll: null,
+    combat: null, winner: null, logs: [], lastActivity: Date.now(), cleanupTimer: null, botTimer: null,
+    settings: { sets: {} },
+  }, extra || {});
+  raeume.push(room);
+  return room;
+}
+const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.cleanupTimer); if (r.botTimer) clearTimeout(r.botTimer); });
+
+// --- Verstärker haengen am Monster ------------------------------------------
+// URALT: "+10 fuer das Monster", dazu 2 zusaetzliche Schaetze.
+{
+  const uralt = findCard('URALT');
+  const m1 = findCard('LAHMER GOBLIN', 'monster');
+  const m2 = findCard('MR. BONES', 'monster');
+  const p = makePlayer({ hand: [uralt.id] });
+  const room = makeRoom([p]);
+  S.startCombat(room, 'p1', [m1.id, m2.id], { fromHand: false });
+  const vorher = S.combatTotals(room).monsterStrength;
+  S.handlePlayCombatCard(room, 'p1', uralt.id);
+  // Zwei Monster im Kampf: erst das Ziel waehlen.
+  assert.ok(room.pendingCardAction, 'bei zwei Monstern wird das Zielmonster gewaehlt');
+  const option = room.pendingCardAction.options.find((o) => o.label.includes(m1.name));
+  assert.ok(option, `Wahl nennt "${m1.name}"`);
+  S.handleResolveCardChoice(room, 'p1', option.id);
+  assert.strictEqual(S.combatTotals(room).monsterStrength, vorher + uralt.bonus, 'der Bonus zaehlt');
+  assert.deepStrictEqual(room.combat.enhancers.map((e) => e.monsterId), [m1.id], 'der Verstaerker haengt am gewaehlten Monster');
+
+  // Das verstaerkte Monster verschwindet -> sein Bonus geht mit.
+  const polly = findCard('POLLYVERWANDLUNGSTRANK');
+  p.hand.push(polly.id);
+  S.handlePlayCombatCard(room, 'p1', polly.id);
+  const monsterWahl = room.pendingCardAction.options.find((o) => o.label.includes(m1.name));
+  S.handleResolveCardChoice(room, 'p1', monsterWahl.id);
+  assert.ok(!room.combat.monsterIds.includes(m1.id), 'das Monster ist weg');
+  assert.strictEqual(S.combatTotals(room).monsterStrength, m2.level, 'mit dem Monster ist auch sein Verstaerker weg');
+}
+// Gegenprobe: bei genau einem Monster keine Zielabfrage.
+{
+  const uralt = findCard('URALT');
+  const m1 = findCard('LAHMER GOBLIN', 'monster');
+  const p = makePlayer({ hand: [uralt.id] });
+  const room = makeRoom([p]);
+  S.startCombat(room, 'p1', [m1.id], { fromHand: false });
+  S.handlePlayCombatCard(room, 'p1', uralt.id);
+  assert.strictEqual(room.pendingCardAction, null, 'ein Monster: keine Rueckfrage');
+  assert.strictEqual(S.combatTotals(room).monsterStrength, m1.level + uralt.bonus, 'der Bonus zaehlt trotzdem');
+}
+
+// --- GIGANTISCH zaehlt nur fuer sein eigenes Monster ------------------------
+{
+  const gigantisch = findCard('GIGANTISCH');
+  const fungus = findCard('FUNGUS', 'monster');
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  const spiele = (zielName) => {
+    const p = makePlayer({ hand: [gigantisch.id] });
+    const room = makeRoom([p]);
+    S.startCombat(room, 'p1', [fungus.id, goblin.id], { fromHand: false });
+    const vorher = S.combatTotals(room).monsterStrength;
+    S.handlePlayCombatCard(room, 'p1', gigantisch.id);
+    const wahl = room.pendingCardAction.options.find((o) => o.label.includes(zielName));
+    S.handleResolveCardChoice(room, 'p1', wahl.id);
+    return S.combatTotals(room).monsterStrength - vorher;
+  };
+  assert.strictEqual(spiele(fungus.name), 25, 'GIGANTISCH auf dem FUNGUS: +25');
+  assert.strictEqual(spiele(goblin.name), gigantisch.bonus, 'GIGANTISCH auf einem anderen Monster: gedruckter Bonus');
+}
+// --- UNTOT macht nur sein Zielmonster untot ---------------------------------
+{
+  const untot = findCard('UNTOT');
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  // Nicht MR. BONES: der ist selbst in UNDEAD_MONSTERS (src/cards/passives.js)
+  // und wuerde combatHasUndead unabhaengig vom Verstaerker wahr halten - das
+  // wuerde den Per-Monster-Test verdecken.
+  const drache = findCard('PLUTONIUMDRACHE', 'monster');
+  const p = makePlayer({ hand: [untot.id] });
+  const room = makeRoom([p]);
+  S.startCombat(room, 'p1', [goblin.id, drache.id], { fromHand: false });
+  S.handlePlayCombatCard(room, 'p1', untot.id);
+  const wahl = room.pendingCardAction.options.find((o) => o.label.includes(goblin.name));
+  S.handleResolveCardChoice(room, 'p1', wahl.id);
+  assert.ok(S.combatHasUndead(room), 'mit UNTOT gilt der Kampf als untot');
+  // Das verstaerkte Monster verschwindet -> der Untot-Status geht mit.
+  const polly = findCard('POLLYVERWANDLUNGSTRANK');
+  p.hand.push(polly.id);
+  S.handlePlayCombatCard(room, 'p1', polly.id);
+  const monsterWahl = room.pendingCardAction.options.find((o) => o.label.includes(goblin.name));
+  S.handleResolveCardChoice(room, 'p1', monsterWahl.id);
+  assert.ok(!S.combatHasUndead(room), 'ohne das Monster ist auch sein UNTOT weg');
+}
+// --- oeffneVerlustKonsequenz: GIGANTISCH verdoppelt das Miese Zeug nur, wenn
+// es tatsaechlich auf dem FUNGUS liegt (nicht kampfweit) -----------------------
+{
+  const fungus = findCard('FUNGUS', 'monster');
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  const gigantisch = findCard('GIGANTISCH');
+  // Levelverlust ueber eine erzwungene, misslungene Flucht: LAHMER GOBLIN
+  // kostet immer 1 Stufe, FUNGUS 1 (oder 2 mit GIGANTISCH auf ihm) - macht
+  // den Effekt des Verstaerker-Filters direkt am Levelverlust sichtbar.
+  const verlust = (gigantischZielId) => {
+    const p = makePlayer({ level: 10 });
+    const room = makeRoom([p]);
+    room.combat = {
+      actorId: 'p1', helperId: null, monsterIds: [fungus.id, goblin.id],
+      enhancers: [{ cardId: gigantisch.id, monsterId: gigantischZielId }],
+      actorModifier: 0, monsterModifier: 0, mustFlee: true, backstabs: {}, treasureDelta: 0,
+    };
+    S.handleAttemptFlee(room, 'p1', -9); // Modifier -9, Wurf max. 6: immer < 5, Flucht scheitert sicher.
+    return 10 - p.level;
+  };
+  assert.strictEqual(verlust(goblin.id), 2, 'GIGANTISCH auf dem GOBLIN: Fungus bleibt einfach (1) + Goblin (1)');
+  assert.strictEqual(verlust(fungus.id), 3, 'GIGANTISCH auf dem FUNGUS: Fungus verdoppelt (2) + Goblin (1)');
+}
+// --- Gigantischer FUNGUS verdoppelt die Schlimmen Dinge nur als sein Verstaerker
+{
+  const fungus = findCard('FUNGUS', 'monster');
+  const quelle = (verstaerker) => ({ name: 'FUNGUS', text: fungus.badstuff, verstaerker });
+  const p = makePlayer();
+  const spec = (v) => S.resolveConsequenceSpec('FUNGUS', fungus.badstuff, p, makeRoom([p]), quelle(v));
+  assert.strictEqual(spec(['GIGANTISCH']).amount, 2, 'mit GIGANTISCH doppelt');
+  assert.strictEqual(spec([]).amount, 1, 'ohne GIGANTISCH einfach');
+}
+
+// --- BARDE "Verzaubern": Karte abwerfen, beide wuerfeln, hoeherer Wurf zwingt
+// zur Hilfe ("kann keine Belohnung verlangen").
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure').id;
+  const versuch = (wuerfe) => {
+    const a = makePlayer({ id: 'p1', name: 'A', classes: [barde.id], hand: [karte] });
+    const b = makePlayer({ id: 'p2', name: 'B' });
+    const room = makeRoom([a, b]);
+    S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+    const zufall = Math.random;
+    let i = 0;
+    Math.random = () => (wuerfe[i++] - 1) / 6 + 0.01;
+    try { S.handleBardeVerzaubern(room, 'p1', karte, 'p2'); } finally { Math.random = zufall; }
+    return { a, b, room };
+  };
+  const erfolg = versuch([6, 1]);
+  assert.strictEqual(erfolg.room.combat.helperId, 'p2', 'hoeherer Wurf: der Rivale hilft');
+  assert.strictEqual(erfolg.room.combat.helperReward, 0, 'ohne Belohnung');
+  assert.ok(!erfolg.a.hand.includes(karte), 'die abgeworfene Karte ist weg');
+
+  const misserfolg = versuch([2, 5]);
+  assert.strictEqual(misserfolg.room.combat.helperId, null, 'niedrigerer Wurf: keine Hilfe');
+  assert.ok(!misserfolg.a.hand.includes(karte), 'die Karte ist trotzdem weg');
+
+  const gleichstand = versuch([4, 4]);
+  assert.strictEqual(gleichstand.room.combat.helperId, null, 'Gleichstand reicht nicht ("besser als seiner")');
+}
+// Nicht-Barden bekommen die Kraft nicht.
+{
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure').id;
+  const a = makePlayer({ id: 'p1', name: 'A', hand: [karte] });
+  const room = makeRoom([a, makePlayer({ id: 'p2', name: 'B' })]);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  S.handleBardeVerzaubern(room, 'p1', karte, 'p2');
+  assert.strictEqual(room.combat.helperId, null, 'ohne Barden-Klasse passiert nichts');
+  assert.ok(a.hand.includes(karte), 'die Karte bleibt auf der Hand');
+}
+// Gegen ein MONSTER_FORBIDS_HELP-Monster (PAVILLON: "Niemand kann dir
+// helfen") darf "Verzaubern" keine Hilfe erzwingen, die selbst freiwillig
+// nicht zustande kaeme - die Kraft wird gar nicht erst angeboten, und ein
+// trotzdem geschickter Versuch wirft die Karte nicht ab.
+{
+  const barde = findCard('BARDE');
+  const pavillon = findCard('PAVILLON', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure').id;
+  const a = makePlayer({ id: 'p1', name: 'A', classes: [barde.id], hand: [karte] });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([a, b]);
+  S.startCombat(room, 'p1', [pavillon.id], { fromHand: false });
+  assert.strictEqual(S.bardenVerzauberInfo(room, a), null, 'gegen den Pavillon wird die Kraft nicht angeboten');
+  S.handleBardeVerzaubern(room, 'p1', karte, 'p2');
+  assert.ok(a.hand.includes(karte), 'die Karte bleibt trotzdem auf der Hand');
+  assert.strictEqual(room.combat.helperId, null, 'keine erzwungene Hilfe gegen den Pavillon');
+}
+// "Du kannst das Spiel mit dieser Faehigkeit nicht gewinnen."
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure').id;
+  const a = makePlayer({ id: 'p1', name: 'A', level: 9, classes: [barde.id], hand: [karte] });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([a, b]);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  const zufall = Math.random;
+  let i = 0;
+  Math.random = () => ([6, 1][i++] - 1) / 6 + 0.01;
+  try { S.handleBardeVerzaubern(room, 'p1', karte, 'p2'); } finally { Math.random = zufall; }
+  S.resolveCombatWin(room);
+  assert.strictEqual(a.level, 10, 'die Stufe steigt trotzdem');
+  assert.strictEqual(room.winner, null, 'aber der Sieg zaehlt nicht als Spielsieg');
+}
+
+// --- BARDE "Bardenglueck": Extraschatz, dann sofort eine beliebige Karte
+// abwerfen ("Sieh sie dir alle an und wirf sofort einen ab").
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const a = makePlayer({ id: 'p1', name: 'A', level: 9, classes: [barde.id] });
+  const room = makeRoom([a]);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  assert.ok(room.pendingCardAction, 'die Abwurf-Wahl oeffnet sich');
+  assert.strictEqual(room.pendingCardAction.playerId, 'p1');
+  const vorher = a.hand.length;
+  const wahl = room.pendingCardAction.candidateIds ? room.pendingCardAction.candidateIds[0]
+    : room.pendingCardAction.options[0].id;
+  if (room.pendingCardAction.candidateIds) S.handleResolveCardCardChoice(room, 'p1', wahl);
+  else S.handleResolveCardChoice(room, 'p1', wahl);
+  assert.strictEqual(a.hand.length, vorher - 1, 'genau eine Karte ist abgeworfen');
+  assert.strictEqual(room.pendingCardAction, null, 'die Wahl ist geschlossen');
+}
+// Ohne Handkarten nach der Beute (Schatzstapel leer, theoretisch moeglich)
+// entfaellt die Wahl.
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const a = makePlayer({ id: 'p1', name: 'A', level: 5, classes: [barde.id], hand: [] });
+  const room = makeRoom([a], { treasureDeck: [] });
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  assert.strictEqual(a.hand.length, 0, 'kein Schatz gezogen (Stapel leer)');
+  assert.strictEqual(room.pendingCardAction, null, 'ohne Handkarten gibt es nichts abzuwerfen');
+}
+
+// --- Zwei Verstaerker gleichzeitig: die zweite Zielwahl darf die erste nicht
+// ueberschreiben (Review-Fund: room.pendingCardAction ging sonst verloren).
+{
+  const uralt = findCard('URALT');
+  const gigantisch = findCard('GIGANTISCH');
+  const m1 = findCard('LAHMER GOBLIN', 'monster');
+  const m2 = findCard('MR. BONES', 'monster');
+  const b = makePlayer({ id: 'p1', name: 'B', hand: [uralt.id] });
+  const c = makePlayer({ id: 'p2', name: 'C', hand: [gigantisch.id] });
+  const room = makeRoom([b, c]);
+  S.startCombat(room, 'p1', [m1.id, m2.id], { fromHand: false });
+  S.handlePlayCombatCard(room, 'p1', uralt.id);
+  assert.ok(room.pendingCardAction, 'Bs Zielwahl fuer URALT ist offen');
+  const bOptions = room.pendingCardAction.options.slice();
+  S.handlePlayCombatCard(room, 'p2', gigantisch.id);
+  assert.deepStrictEqual(room.pendingCardAction.options, bOptions, 'Cs GIGANTISCH ueberschreibt Bs offene Wahl nicht');
+  assert.ok(c.hand.includes(gigantisch.id), 'GIGANTISCH bleibt bei C auf der Hand, bis Bs Wahl entschieden ist');
+  // B loest seine Wahl auf - jetzt darf C es erneut versuchen.
+  S.handleResolveCardChoice(room, 'p1', bOptions.find((o) => o.label.includes(m1.name)).id);
+  assert.strictEqual(room.pendingCardAction, null, 'Bs Wahl ist entschieden');
+  S.handlePlayCombatCard(room, 'p2', gigantisch.id);
+  assert.ok(room.pendingCardAction, 'C darf jetzt seine eigene Zielwahl oeffnen');
+  assert.ok(!c.hand.includes(gigantisch.id), 'GIGANTISCH ist jetzt gespielt');
+}
+// KUMPEL: dasselbe Monster zweimal in monsterIds ist EIN Ziel, kein Dialog.
+{
+  const uralt = findCard('URALT');
+  const m1 = findCard('LAHMER GOBLIN', 'monster');
+  const p = makePlayer({ hand: [uralt.id] });
+  const room = makeRoom([p]);
+  S.startCombat(room, 'p1', [m1.id, m1.id], { fromHand: false }); // KUMPEL-Duplikat
+  const vorher = S.combatTotals(room).monsterStrength;
+  S.handlePlayCombatCard(room, 'p1', uralt.id);
+  assert.strictEqual(room.pendingCardAction, null, 'zwei gleiche Monster-Ids: keine Zielabfrage');
+  // Der Bonus zaehlt fuer das eine Monster, aber ueber monsterIds.length=2 doppelt.
+  assert.strictEqual(S.combatTotals(room).monsterStrength, vorher + uralt.bonus * 2, 'KUMPEL verdoppelt den Verstaerker seines Monsters');
+}
+
+// --- bardenVerzauberInfo: nicht anbieten, waehrend geflohen werden muss oder
+// eine andere Wahl/ein Wurf offen ist (sonst koennte "Verzaubern" eine
+// laufende Entscheidung ueberschreiben).
+{
+  const barde = findCard('BARDE');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const macheRoom = () => {
+    const a = makePlayer({ id: 'p1', name: 'A', classes: [barde.id], hand: ['irgendeine-karte'] });
+    const b = makePlayer({ id: 'p2', name: 'B' });
+    const room = makeRoom([a, b]);
+    S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+    return { a, room };
+  };
+  let x = macheRoom();
+  x.room.combat.mustFlee = true;
+  assert.strictEqual(S.bardenVerzauberInfo(x.room, x.a), null, 'waehrend der Flucht keine Kraft');
+
+  x = macheRoom();
+  x.room.pendingRoll = { playerId: 'p1', purpose: 'test', roll: 3, holders: ['p1'], onResolve: () => {} };
+  assert.strictEqual(S.bardenVerzauberInfo(x.room, x.a), null, 'waehrend ein Wurf offen ist keine Kraft');
+
+  x = macheRoom();
+  x.room.pendingCardAction = { playerId: 'p1', cardName: 'X', kind: 'choice', options: [] };
+  assert.strictEqual(S.bardenVerzauberInfo(x.room, x.a), null, 'waehrend eine andere Kartenwahl offen ist keine Kraft');
+}
+// Ein Helfer, der waehrend des Wuerfelfensters eines Verzauber-Versuchs
+// (GEZINKTER WUERFEL macht das Fenster asynchron) zustande kommt, darf durch
+// den spaeter abgeschlossenen Versuch nicht ersetzt werden.
+{
+  const barde = findCard('BARDE');
+  const wuerfel = findCard('GEZINKTER WÜRFEL');
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure' && c.name !== 'GEZINKTER WÜRFEL').id;
+  const a = makePlayer({ id: 'p1', name: 'A', classes: [barde.id], hand: [karte, wuerfel.id] });
+  const b = makePlayer({ id: 'p2', name: 'B' }); // Verzauber-Ziel
+  const d = makePlayer({ id: 'p3', name: 'D' }); // wird waehrend des Fensters Helfer
+  const room = makeRoom([a, b, d]);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  const zufall = Math.random;
+  let i = 0;
+  // A wuerfelt 6 (bleibt zunaechst im Fenster stehen), B (das Ziel) wuerfelt
+  // erst nach dem Fenster - mit 1, damit A klar gewinnen wuerde, wenn die
+  // Ersetzung nicht verhindert wird.
+  Math.random = () => ([6, 1][i++] - 1) / 6 + 0.01;
+  try {
+    S.handleBardeVerzaubern(room, 'p1', karte, 'p2');
+    assert.ok(room.pendingRoll, 'A haelt den Gezinkten Wuerfel: der eigene Wurf oeffnet ein Fenster');
+    // Waehrend As Wurf noch offen ist, wird jemand anderes (z.B. durch eine
+    // ganz normale, freiwillige Zusage) helfende Person.
+    room.combat.helperId = 'p3';
+    S.handlePassReaction(room, 'p1'); // A verzichtet auf den Wuerfel -> Fenster schliesst, Versuch laeuft weiter
+  } finally { Math.random = zufall; }
+  assert.strictEqual(room.combat.helperId, 'p3', 'der schon zustande gekommene Helfer bleibt, der spaete (gewonnene) Verzauber-Versuch ersetzt ihn nicht');
+}
+
+// --- bardenZwang faellt weg, sobald die erzwungene Hilfe endet (removeHelper,
+// TODESANGST, ...) - sonst bliebe "kein Spielsieg" haengen, obwohl gar keine
+// erzwungene Hilfe mehr im Kampf ist.
+{
+  const monster = findCard('LAHMER GOBLIN', 'monster');
+  const a = makePlayer({ id: 'p1', name: 'A' });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([a, b]);
+  S.startCombat(room, 'p1', [monster.id], { fromHand: false });
+  room.combat.helperId = 'p2';
+  room.combat.bardenZwang = true;
+  S.applyCombatPotionAction(room, a, { type: 'removeHelper' }, null);
+  assert.strictEqual(room.combat.helperId, null, 'die Helfer:in ist raus');
+  assert.strictEqual(room.combat.bardenZwang, false, 'der Verzauber-Zwang faellt mit der Helfer:in weg');
+}
+
+fertig();
+console.log('card-regelluecken-welle3: alle Checks gruen');
