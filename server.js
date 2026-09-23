@@ -3931,7 +3931,12 @@ function bardenVerzauberInfo(room, player) {
   if (!dran || dran.id !== player.id) return null;       // "in deinem Zug"
   if (!hasClass(player, 'BARDE') || c.helperId || c.helperPending) return null;
   if (!player.hand.length) return null;
-  const rivalen = room.players.filter((p) => p.id !== player.id && p.connected)
+  // Dieselben Sperren wie beim normalen "Um Hilfe bitten" (Stinktier,
+  // MONSTER_FORBIDS_HELP, Stinktier-Strafe, Todesangst vor Untoten) - siehe
+  // hilfeVerbotenGrund. Ohne diesen Filter wuerde die Kraft Hilfe erzwingen,
+  // die selbst freiwillig nicht zustande kaeme.
+  const rivalen = room.players.filter((p) => p.id !== player.id && p.connected
+    && !hilfeVerbotenGrund(room, player, p.id))
     .map((p) => ({ id: p.id, name: p.name }));
   return rivalen.length ? { rivalen } : null;
 }
@@ -3942,6 +3947,10 @@ function handleBardeVerzaubern(room, playerId, cardId, targetId) {
   if (!player || !ziel || !bardenVerzauberInfo(room, player)) return;
   if (!player.hand.includes(cardId) || ziel.id === player.id) return;
   if (room.pendingRoll || room.pendingCardAction) return; // keine offene Wahl ueberschreiben
+  // Fremdeingabe: targetId kommt vom Client und koennte trotz gefilterter
+  // Rivalen-Liste ein gesperrtes Ziel nennen (veralteter Stand, manipulierter
+  // Payload) - deshalb hier nochmal geprueft, VOR dem Abwerfen der Karte.
+  if (hilfeVerbotenGrund(room, player, targetId)) return;
   removeFromHand(player, cardId);
   discardCard(room, cardId);
   log(room, `${player.name} (Barde) wirft "${card(cardId).name}" ab und versucht, ${ziel.name} zu verzaubern.`, [cardId]);
@@ -5231,6 +5240,36 @@ function kampfSchatzZahl(room) {
   return Math.max(0, delta ? Math.max(1, basis + delta) : basis);
 }
 
+// Gemeinsame Sperrpruefung fuer JEDE Anfrage nach Hilfe - ob ueber den
+// normalen "Um Hilfe bitten"-Knopf (handleRequestHelp) oder ueber BARDE
+// "Verzaubern" (bardenVerzauberInfo/handleBardeVerzaubern). handleRespondHelp
+// prueft das absichtlich NICHT erneut (das waere ein zweiter, leicht
+// abweichender Kopiersatz) - wer bis zur Annahme kommt, hat diese Pruefung
+// schon hinter sich. Reihenfolge und Texte 1:1 wie zuvor in handleRequestHelp,
+// nur an einer Stelle statt an zweien.
+function hilfeVerbotenGrund(room, actor, targetId) {
+  if (stinktierSperre(room, targetId)) {
+    return 'Das Riesenstinktier hält alle anderen auf 20 Meter Abstand - niemand hilft.';
+  }
+  // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
+  // Steht VOR der Stinktier-Strafe: was das Monster im Kampf verbietet, ist
+  // der naeherliegende Grund - sonst bekaeme eine besprühte Person am
+  // Pavillon die Meldung, sie solle ihre Kleidung ablegen.
+  if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
+    return 'Gegen dieses Monster darf niemand helfen.';
+  }
+  if (stinktierStrafeAktiv(actor)) {
+    return `${actor.name} stinkt noch aus dem Riesenstinktier-Kampf - niemand hilft, solange Kleidung und Rüstung anliegen.`;
+  }
+  if (hatHilfeSperre(actor)) {
+    return `${actor.name} stinkt - in diesem Kampf hilft niemand.`;
+  }
+  if (hatUntotenAngst(actor) && combatHasUndead(room)) {
+    return `${actor.name} kämpft gegen Untote - die Todesangst schreckt jede Hilfe ab.`;
+  }
+  return null;
+}
+
 function handleRequestHelp(room, playerId, targetId, reward) {
   if (!room.combat) return;
   const c = room.combat;
@@ -5238,32 +5277,9 @@ function handleRequestHelp(room, playerId, targetId, reward) {
   const actor = findPlayer(room, playerId);
   const target = findPlayer(room, targetId);
   if (!target || targetId === c.actorId) return;
-  if (stinktierSperre(room, targetId)) {
-    log(room, 'Das Riesenstinktier hält alle anderen auf 20 Meter Abstand - niemand hilft.');
-    touchRoom(room);
-    return;
-  }
-  // "Niemand kann dir helfen. Du musst dich dem Pavillon allein stellen."
-  // Steht VOR der Stinktier-Strafe: was das Monster im Kampf verbietet, ist
-  // der naeherliegende Grund - sonst bekaeme eine besprühte Person am
-  // Pavillon die Meldung, sie solle ihre Kleidung ablegen.
-  if (combatHasMonster(room, MONSTER_FORBIDS_HELP)) {
-    log(room, 'Gegen dieses Monster darf niemand helfen.');
-    touchRoom(room);
-    return;
-  }
-  if (stinktierStrafeAktiv(actor)) {
-    log(room, `${actor.name} stinkt noch aus dem Riesenstinktier-Kampf - niemand hilft, solange Kleidung und Rüstung anliegen.`);
-    touchRoom(room);
-    return;
-  }
-  if (hatHilfeSperre(actor)) {
-    log(room, `${actor.name} stinkt - in diesem Kampf hilft niemand.`);
-    touchRoom(room);
-    return;
-  }
-  if (hatUntotenAngst(actor) && combatHasUndead(room)) {
-    log(room, `${actor.name} kämpft gegen Untote - die Todesangst schreckt jede Hilfe ab.`);
+  const verbotenGrund = hilfeVerbotenGrund(room, actor, targetId);
+  if (verbotenGrund) {
+    log(room, verbotenGrund);
     touchRoom(room);
     return;
   }

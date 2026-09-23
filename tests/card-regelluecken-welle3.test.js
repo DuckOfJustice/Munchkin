@@ -187,6 +187,23 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(room.combat.helperId, null, 'ohne Barden-Klasse passiert nichts');
   assert.ok(a.hand.includes(karte), 'die Karte bleibt auf der Hand');
 }
+// Gegen ein MONSTER_FORBIDS_HELP-Monster (PAVILLON: "Niemand kann dir
+// helfen") darf "Verzaubern" keine Hilfe erzwingen, die selbst freiwillig
+// nicht zustande kaeme - die Kraft wird gar nicht erst angeboten, und ein
+// trotzdem geschickter Versuch wirft die Karte nicht ab.
+{
+  const barde = findCard('BARDE');
+  const pavillon = findCard('PAVILLON', 'monster');
+  const karte = ALL_CARDS.find((c) => c.type === 'treasure').id;
+  const a = makePlayer({ id: 'p1', name: 'A', classes: [barde.id], hand: [karte] });
+  const b = makePlayer({ id: 'p2', name: 'B' });
+  const room = makeRoom([a, b]);
+  S.startCombat(room, 'p1', [pavillon.id], { fromHand: false });
+  assert.strictEqual(S.bardenVerzauberInfo(room, a), null, 'gegen den Pavillon wird die Kraft nicht angeboten');
+  S.handleBardeVerzaubern(room, 'p1', karte, 'p2');
+  assert.ok(a.hand.includes(karte), 'die Karte bleibt trotzdem auf der Hand');
+  assert.strictEqual(room.combat.helperId, null, 'keine erzwungene Hilfe gegen den Pavillon');
+}
 // "Du kannst das Spiel mit dieser Faehigkeit nicht gewinnen."
 {
   const barde = findCard('BARDE');
