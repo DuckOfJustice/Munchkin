@@ -4,6 +4,7 @@
 module.exports = (ctx) => {
   const {
     hasRace, hasClass, card, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds,
+    aktiveKlassen, aktiveRassen,
   } = ctx;
 
   // --- Fluchschutz -----------------------------------------------------------
@@ -276,7 +277,7 @@ module.exports = (ctx) => {
   // Dazu die Monsterbrille fuer den einen Gegenstand, der eine Rasse verleiht:
   // wer FALSCHE OHREN traegt, gilt fuer Monster als Elf und damit nicht als
   // Mensch (ITEM_GRANTS_TRAIT kennt sonst keine Rasse).
-  const istMensch = (p) => !p.races.length && !monsterSeesRace(p, 'ELF');
+  const istMensch = (p) => !aktiveRassen(p).length && !monsterSeesRace(p, 'ELF');
 
   // --- Monsterboni gegen Rassen/Klassen --------------------------------------
   // Der Bonus gilt einmal pro Monster, sobald IRGENDWER auf der Munchkin-Seite
@@ -333,7 +334,7 @@ module.exports = (ctx) => {
       { wennErfuellt: (p) => waffenAnzahl(p) < 2, bonus: 5, nurKaempfer: true },
     ],
     // "+3 gegen die, die keine Klasse haben."
-    'RÜSSELKÄFER': { wennErfuellt: (p) => !p.classes.length, bonus: 3 },
+    'RÜSSELKÄFER': { wennErfuellt: (p) => !aktiveKlassen(p).length, bonus: 3 },
     // "+5 gegen Super-Munchkins oder Mischlinge. +10 gegen beide." - als zwei
     // Regeln, die sich bei jemandem mit beiden Karten auf +10 addieren.
     // "+5 gegen Frauen." (Der Zusatzschatz "fuer jede Frau, die hilft"

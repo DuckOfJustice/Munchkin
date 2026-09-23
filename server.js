@@ -494,7 +494,7 @@ function hellknightArmorBonus(player) {
 // damit RACE_ITEM_BONUS (z.B. GNOM) nicht ueber die Rasse zurueckholt, was
 // MONDJUNGFERN gerade an Waffenbonus gestrichen hat.
 function raceItemBonusSum(player, excludeIds) {
-  return player.races.reduce((sum, id) => {
+  return aktiveRassen(player).reduce((sum, id) => {
     const c = card(id);
     const fn = c && RACE_ITEM_BONUS[c.name.toUpperCase()];
     return sum + (fn ? fn(player, excludeIds) : 0);
@@ -1344,8 +1344,18 @@ function applyDeathConsequence(room, player) {
 const RACE_ADJECTIVE_DE = { ELF: 'Elfen', ZWERG: 'Zwerge', HALBLING: 'Halblinge', ORK: 'Orks' };
 const CLASS_ADJECTIVE_DE = { ZAUBERER: 'Zauberer', PRIESTER: 'Priester', DIEB: 'Diebe', KRIEGER: 'Krieger' };
 
+// TEMPORAERE ANMNESIE: solange der Fluch wirkt, zaehlen die ausliegenden
+// Klassen- und Rassenkarten nicht - "ueberall als klassenloser Mensch". Wer
+// die Karten als BESITZ braucht (Ablegen, Obergrenzen, Anzeige), liest
+// weiter player.classes/player.races direkt.
+function hatAmnesie(player) {
+  return !!player && (player.activeCurses || []).some((f) => f.kind === 'amnesie');
+}
+function aktiveKlassen(player) { return hatAmnesie(player) ? [] : player.classes; }
+function aktiveRassen(player) { return hatAmnesie(player) ? [] : player.races; }
+
 function hasRace(player, substr) {
-  return player.races.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
+  return aktiveRassen(player).some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
 }
 
 // Geschlecht: alle starten maennlich (player.gender), geaendert wird es nur
@@ -2344,7 +2354,7 @@ function applyPrimitiveAction(room, player, action) {
 // Konsequenz passiert, nicht beim Laden dieses Moduls).
 const consequencesFactory = require('./src/cards/consequences.js');
 const { CONSEQUENCE_OVERRIDES, DOOR_OTHER_AS_CURSE } = consequencesFactory({
-  card, hasRace, hasPowerGroup, isMonsterEnhancerCard,
+  card, hasRace, hasPowerGroup, isMonsterEnhancerCard, aktiveKlassen, aktiveRassen,
   resolveConsequenceSpec, bigItemCount, equippedItemIds, isBigItem, istGeschlecht,
   istGrosserGegenstand, getrageneSlotKarte,
   specialSlotRule,
@@ -3133,8 +3143,10 @@ function handleLootRoom(room, playerId) {
 
 function hasClass(player, substr) {
   // ZAUBERCOUCH: "... wirst du in allen Belangen ... als Zauberer angesehen."
+  // ponytail: die ZAUBERCOUCH wirkt auch unter TEMPORAERER ANMNESIE - sie ist
+  // ein Gegenstand, keine Erinnerung. Aufruestweg: hier hatAmnesie pruefen.
   if (itemGrantsTrait(player, 'class', substr, true)) return true;
-  return player.classes.some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
+  return aktiveKlassen(player).some((id) => { const c = card(id); return c && c.name && c.name.toUpperCase().includes(substr.toUpperCase()); });
 }
 
 function combatParticipants(room) {
@@ -3181,7 +3193,7 @@ const {
   TRAIT_DOOR_CARDS, MONSTER_SEES_AS_RACE, RACE_ITEM_BONUS, FLEE_AUTOMATIC_BY_RACE,
   GENDER_IMMUNE_ITEMS, ATTACHMENT_CARDS, FREE_HAND_ITEMS, DEADLY_ITEMS_BY_RACE,
   BACKSTAB_ITEMS, ITEM_GRANTS_TRAIT, MONSTER_REQUIRES_OTHER_GENDER,
-} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds });
+} = passivesFactory({ card, hasRace, hasClass, equippedItemIds, istGeschlecht, monsterSeesRace, handItemIds, aktiveKlassen, aktiveRassen });
 const SPECIAL_SLOT_KEYS = Object.keys(SPECIAL_SLOTS);
 // Fuer die Logzeilen: das (einzige) Monster, gegen das keine Boni zaehlen.
 // Fuer die Logzeilen: das Monster im laufenden Kampf, gegen das keine Boni
@@ -3518,7 +3530,7 @@ function monsterSeesRace(player, race) {
   if (hasRace(player, race)) return true;
   // FALSCHE OHREN: "Monster reagieren auch, als waere der Traeger ein Elf."
   if (itemGrantsTrait(player, 'race', race, true)) return true;
-  return player.races.some((id) => {
+  return aktiveRassen(player).some((id) => {
     const c = card(id);
     return !!c && MONSTER_SEES_AS_RACE[c.name.toUpperCase()] === race.toUpperCase();
   });
@@ -3623,7 +3635,7 @@ function monsterTraitBonusSum(room) {
 function fleeIsAutomatic(room, player) {
   if (combatHasMonster(room, FLEE_AUTOMATIC)) return true;
   if (!room.combat || !player) return false;
-  const regeln = player.races.map((id) => {
+  const regeln = aktiveRassen(player).map((id) => {
     const c = card(id);
     return c && FLEE_AUTOMATIC_BY_RACE[c.name.toUpperCase()];
   }).filter(Boolean);
@@ -4246,7 +4258,7 @@ function handLimit(player) {
 function dryadeWirkung(room, player) {
   if (!room.combat || !player) return;
   if (!room.combat.monsterIds.some((id) => (card(id) || {}).name === 'DRYADE')) return;
-  if (!player.classes.some((id) => /ZAUBERER/i.test((card(id) || {}).name || ''))) return;
+  if (!aktiveKlassen(player).some((id) => /ZAUBERER/i.test((card(id) || {}).name || ''))) return;
   const desc = applyPrimitiveAction(room, player, { type: 'discardClassCardMatchingElseDeath', substr: 'ZAUBERER' });
   log(room, `Die Dryade schwaecht ${player.name}: ${desc}.`);
 }
@@ -5574,6 +5586,11 @@ function finishCombatWin(room) {
   if (helper && clearActiveCurseByKind(helper, 'keinAerger')) {
     log(room, `${helper.name} hat geholfen, einen Kampf zu gewinnen - die Touristenfalle ist vorbei.`);
   }
+  // TEMPORAERE ANMNESIE: "... erst an sie erinnern, wenn du ein Monster
+  // getoetet hast oder dabei geholfen hast" - beide Beteiligten.
+  [actor, helper].filter(Boolean).forEach((p) => {
+    if (clearActiveCurseByKind(p, 'amnesie')) log(room, `${p.name} erinnert sich wieder an Klasse(n) und Rasse(n).`);
+  });
   // NARRENGOLD ("kein Schatz im naechsten Kampf") traegt dauer:'naechsterKampf'
   // und faellt damit gleich unten bei clearNextCombatCurses weg - DIESER Kampf
   // ist ja "der naechste". Der Sperrstatus muss deshalb VOR der Loeschung
@@ -7320,7 +7337,7 @@ module.exports = {
   MONSTER_IGNORES_BONUSES, MONSTER_FORBIDS_HELP, FLEE_ITEM_BONUS, FLEE_MONSTER_MOD,
   FLEE_IMPOSSIBLE, FLEE_AUTOMATIC, FLEE_PENALTY, FLEE_TREASURE_ITEMS,
   MONSTER_EXTRA_LEVEL, FIRE_ITEMS, GUARANTEED_FLEE_MAX_MONSTER_LEVEL,
-  combatTotals, handLimit, hasRace, hasClass,
+  combatTotals, handLimit, hasRace, hasClass, aktiveKlassen, aktiveRassen,
   CLASS_COMBAT_DISCARD, CLASS_FLEE_DISCARD, UNDEAD_MONSTERS,
   handleUseClassCombatDiscard, classCombatPowerInfo, combatSignature,
   bardenVerzauberInfo, handleBardeVerzaubern,

@@ -663,10 +663,10 @@
       // Spieler-Modal oeffnen. Steht bewusst UEBER der Ausruestungsreihe.
       const badgeRow = document.createElement('div');
       badgeRow.className = 'prow-badges';
-      p.races.forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
-      p.classes.forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+      p.races.forEach((id) => badgeRow.appendChild(traitTag(p, id, 'var(--c-race)')));
+      p.classes.forEach((id) => badgeRow.appendChild(traitTag(p, id, 'var(--c-class)')));
       (p.powerGroups || []).forEach((id) => badgeRow.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
-      if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badgeRow.appendChild(textNode('Mensch, ohne Klasse'));
+      if (hatAmnesie(p) || (!p.races.length && !p.classes.length && !(p.powerGroups || []).length)) badgeRow.appendChild(textNode('Mensch, ohne Klasse'));
       row.appendChild(badgeRow);
 
       // Kleine Vorschau-Icons der getragenen Gegenstaende direkt in der Zeile
@@ -738,10 +738,10 @@
     const badges = document.createElement('div');
     badges.className = 'row gap wrap';
     badges.style.marginBottom = '12px';
-    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
-    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+    p.races.forEach((id) => badges.appendChild(traitTag(p, id, 'var(--c-race)')));
+    p.classes.forEach((id) => badges.appendChild(traitTag(p, id, 'var(--c-class)')));
     (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
-    if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+    if (hatAmnesie(p) || (!p.races.length && !p.classes.length && !(p.powerGroups || []).length)) badges.appendChild(textNode('Mensch, ohne Klasse'));
     body.appendChild(badges);
     if ((p.activeCurses || []).length) {
       const flueche = document.createElement('div');
@@ -1649,10 +1649,10 @@
 
     const badges = $('myBadges');
     badges.innerHTML = '';
-    p.races.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-race)', id)));
-    p.classes.forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
+    p.races.forEach((id) => badges.appendChild(traitTag(p, id, 'var(--c-race)')));
+    p.classes.forEach((id) => badges.appendChild(traitTag(p, id, 'var(--c-class)')));
     (p.powerGroups || []).forEach((id) => badges.appendChild(smallTag(card(id).name, 'var(--c-class)', id)));
-    if (!p.races.length && !p.classes.length && !(p.powerGroups || []).length) badges.appendChild(textNode('Mensch, ohne Klasse'));
+    if (hatAmnesie(p) || (!p.races.length && !p.classes.length && !(p.powerGroups || []).length)) badges.appendChild(textNode('Mensch, ohne Klasse'));
     if (p.raceCapCard) badges.appendChild(smallTag(card(p.raceCapCard).name, 'var(--c-race)', p.raceCapCard));
     if (p.classCapCard) badges.appendChild(smallTag(card(p.classCapCard).name, 'var(--c-class)', p.classCapCard));
     if (p.powerGroupCapCard) badges.appendChild(smallTag(card(p.powerGroupCapCard).name, 'var(--c-class)', p.powerGroupCapCard));
@@ -2295,6 +2295,15 @@
       span.onclick = () => openCardModal(cardId);
     }
     return span;
+  }
+  // TEMPORAERE ANMNESIE: die Klassen-/Rassenkarten liegen weiter aus, zaehlen
+  // aber nicht - ausgegraut und als "vergessen" beschriftet.
+  function hatAmnesie(p) { return (p.activeCurses || []).some((f) => f.kind === 'amnesie'); }
+  function traitTag(p, id, color) {
+    if (!hatAmnesie(p)) return smallTag(card(id).name, color, id);
+    const tag = smallTag(`${card(id).name} (vergessen)`, color, id);
+    tag.style.opacity = '0.45';
+    return tag;
   }
   function textNode(text) { const s = document.createElement('span'); s.className = 'hint'; s.textContent = text; return s; }
   function escapeHtml(s) {

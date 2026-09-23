@@ -92,6 +92,13 @@ module.exports = () => {
     // Fluch." Ausgeloest in setzeZugphase (server.js) beim Eintritt in 'gabe'.
     'HUNGRIGER RUCKSACK': { kind: 'rucksack', dauer: 'dauerhaft',
       hinweis: 'Am Ende jedes deiner Züge frisst der Rucksack Handkarten (Würfel); bei einer 6 endet der Fluch.' },
+    // "Eine Beule am Kopf laesst dich deine Klasse(n) und Rasse(n) vergessen.
+    // Du wirst dich erst an sie erinnern, wenn du ein Monster getoetet hast
+    // oder dabei geholfen hast ... Bis dahin wirst du ueberall als
+    // klassenloser Mensch gezaehlt." Die Karten bleiben liegen und zaehlen
+    // nicht (aktiveKlassen/aktiveRassen in server.js); Ende in finishCombatWin.
+    'TEMPORÄRE ANMNESIE': { kind: 'amnesie', dauer: 'dauerhaft',
+      hinweis: 'Klassen und Rassen vergessen: du zählst als klassenloser Mensch, bis du ein Monster getötet oder dabei geholfen hast.' },
   };
 
   // Karten, die einen LAUFENDEN Kampf veraendern. Sie reiten auf der

@@ -114,5 +114,55 @@ const hatFluch = (p, name) => (p.activeCurses || []).some((f) => f.name === name
   assert.ok(room.doorDiscard.includes(tuer[0]), 'die gefressene Karte liegt auf dem Ablagestapel');
 }
 
+// --- TEMPORAERE ANMNESIE: "... wirst du ueberall als klassenloser Mensch
+// gezaehlt", bis du ein Monster getoetet oder dabei geholfen hast.
+{
+  const elf = findCard('ELF');
+  const krieger = findCard('KRIEGER');
+  const p = makePlayer({ races: [elf.id], classes: [krieger.id] });
+  const room = makeRoom([p]);
+  assert.ok(S.hasRace(p, 'ELF') && S.hasClass(p, 'KRIEGER'), 'vor dem Fluch: Elf und Krieger');
+  verfluche(room, p, 'TEMPORÄRE ANMNESIE');
+  assert.ok(!S.hasRace(p, 'ELF'), 'mit Fluch: keine Rasse');
+  assert.ok(!S.hasClass(p, 'KRIEGER'), 'mit Fluch: keine Klasse');
+  assert.ok(!S.monsterSeesRace(p, 'ELF'), 'auch Monster sehen keinen Elfen');
+  assert.deepStrictEqual(p.races, [elf.id], 'die Karten bleiben liegen');
+  assert.deepStrictEqual(p.classes, [krieger.id]);
+  // Eine waehrend des Fluchs ausgelegte Klasse wirkt ebenfalls noch nicht.
+  const dieb = findCard('DIEB');
+  p.classes.push(dieb.id);
+  assert.ok(!S.hasClass(p, 'DIEB'), 'neue Klasse zaehlt erst nach dem Fluch');
+  p.classes.pop();
+  // AMAZONE: ohne (erinnerte) Klasse gibt es die Stufen statt des Klassenverlusts.
+  const amazone = findCard('AMAZONE');
+  const spec = S.resolveConsequenceSpec('AMAZONE', amazone.badstuff, p, room);
+  assert.strictEqual(spec.type, 'levelDelta', 'AMAZONE sieht eine klassenlose Person');
+}
+// Ende: Sieg als kaempfende Person ...
+{
+  const krieger = findCard('KRIEGER');
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  const p = makePlayer({ classes: [krieger.id] });
+  const room = makeRoom([p]);
+  verfluche(room, p, 'TEMPORÄRE ANMNESIE');
+  S.startCombat(room, 'p1', [goblin.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  assert.ok(!hatFluch(p, 'TEMPORÄRE ANMNESIE'), 'Monster getoetet: die Erinnerung kommt zurueck');
+  assert.ok(S.hasClass(p, 'KRIEGER'), 'der Krieger zaehlt wieder');
+}
+// ... und als Helfer:in.
+{
+  const krieger = findCard('KRIEGER');
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  const a = makePlayer({ id: 'p1', name: 'A' });
+  const b = makePlayer({ id: 'p2', name: 'B', classes: [krieger.id] });
+  const room = makeRoom([a, b]);
+  verfluche(room, b, 'TEMPORÄRE ANMNESIE');
+  S.startCombat(room, 'p1', [goblin.id], { fromHand: false });
+  room.combat.helperId = 'p2';
+  S.resolveCombatWin(room);
+  assert.ok(!hatFluch(b, 'TEMPORÄRE ANMNESIE'), 'beim Toeten geholfen: der Fluch endet');
+}
+
 fertig();
 console.log('card-clerical-fluechewelle4: alle Checks gruen');

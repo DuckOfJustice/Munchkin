@@ -6,7 +6,7 @@
 // durchzureichen.
 module.exports = (ctx) => {
   const {
-    card, hasRace, hasPowerGroup, isMonsterEnhancerCard, resolveConsequenceSpec, bigItemCount,
+    card, hasRace, hasPowerGroup, isMonsterEnhancerCard, aktiveKlassen, aktiveRassen, resolveConsequenceSpec, bigItemCount,
     equippedItemIds, isBigItem, istGeschlecht, istGrosserGegenstand,
     getrageneSlotKarte, specialSlotRule, gegenstandHatSonderkraft, cursedItemIds,
   } = ctx;
@@ -78,7 +78,7 @@ module.exports = (ctx) => {
     // --- Rassen-/Klassenkarten ---
     'KREISCHENDER DEPP': () => ({ type: 'combo', actions: [{ type: 'discardRaceCards' }, { type: 'discardClassCards' }] }),
     'WERSCHILDKRÖTE': () => ({ type: 'discardOneRaceCardIfAny' }), // Halb-Blut verliert eine Rasse, reiner Mensch: nichts
-    'AMAZONE': (player) => (player.classes.length ? { type: 'discardClassCards' } : { type: 'levelDelta', amount: 3 }),
+    'AMAZONE': (player) => (aktiveKlassen(player).length ? { type: 'discardClassCards' } : { type: 'levelDelta', amount: 3 }),
     'UNGLAUBLICHER UNAUSSPRECHLICHER SCHRECKEN': () => ({ type: 'discardClassCardMatchingElseDeath', substr: 'ZAUBERER' }),
 
     // --- Rassen-bedingte Stufenzahl ---
@@ -309,17 +309,17 @@ module.exports = (ctx) => {
     'SCHUHWERK VERLIEREN': () => ({ type: 'discardSlot', slot: 'feet' }),
     'VERLIERE 1 STUFE': () => ({ type: 'levelDelta', amount: 1 }),
     'VERLIERE DEINE KLASSE': (player) => {
-      if (player.classes.length >= 2) {
+      if (aktiveKlassen(player).length >= 2) {
         return {
           type: 'choice',
-          options: player.classes.map((cid) => ({
+          options: aktiveKlassen(player).map((cid) => ({
             id: `class-${cid}`,
             label: `${card(cid) ? card(cid).name : 'Klasse'} ablegen`,
             action: { type: 'discardSpecificClassCard', cardId: cid },
           })),
         };
       }
-      if (player.classes.length === 1) return { type: 'discardClassCards' };
+      if (aktiveKlassen(player).length === 1) return { type: 'discardClassCards' };
       return { type: 'levelDelta', amount: 1 };
     },
     'VERLIERE DEINE RASSE': () => ({ type: 'discardRaceCards' }),
