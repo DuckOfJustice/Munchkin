@@ -1158,7 +1158,7 @@
     // um z.B. einen Fluch oder eine Hilfskarte zu verrechnen, die nicht
     // automatisch erkannt wird (Monster-Verstärkerkarten mit festem Bonus
     // rechnen sich weiter unten automatisch ein, siehe "Im Kampf spielen").
-    if (!c.mustFlee) {
+    if (!c.mustFlee && !c.trojanerOffer && !c.trojanerDone) {
       const modRow = document.createElement('div');
       modRow.className = 'row gap wrap';
       modRow.innerHTML = `
@@ -1915,14 +1915,14 @@
     // Monster-Verstärkerkarten ("+X für das Monster") darf jede:r am Tisch
     // jederzeit während eines laufenden Kampfes ausspielen, nicht nur die
     // kämpfende Person - der Bonus/Malus wird automatisch verrechnet.
-    if (state.combat && !state.combat.mustFlee && isMonsterEnhancer(c)) {
+    if (state.combat && !state.combat.mustFlee && !state.combat.trojanerOffer && !state.combat.trojanerDone && isMonsterEnhancer(c)) {
       const sign = c.bonus > 0 ? '+' : '';
       const btn = mkBtn(`⚔️ Im Kampf spielen (${sign}${c.bonus} Monster)`, () => socket.emit('playCombatCard', { cardId: id }));
       wrap.appendChild(btn);
     }
     // "Kampf-Tränke": Schatzkarten mit einem +N-Bonus für eine wählbare
     // Seite, jederzeit während eines laufenden Kampfes spielbar.
-    if (state.combat && !state.combat.mustFlee && !state.pendingCardAction && isCombatPotion(c)) {
+    if (state.combat && !state.combat.mustFlee && !state.combat.trojanerOffer && !state.combat.trojanerDone && !state.pendingCardAction && isCombatPotion(c)) {
       // GEMEINE GHOULE: fuer die Kaempfenden ist ein Munchkin-Bonus wirkungslos,
       // der Server weist die Karte ab. Welche Seite eine Karte genau bedient,
       // weiss nur er - deshalb hier nur ein Hinweis am Knopf statt einer
@@ -1947,13 +1947,13 @@
     }
     // Türkarten mit eigener Kampfwirkung (MAHLZEIT!) - welche das sind, sagt
     // der Server (state.doorCombatCards), damit hier keine Namensliste liegt.
-    if (state.combat && !state.combat.mustFlee && (state.doorCombatCards || []).includes(c.name)) {
+    if (state.combat && !state.combat.mustFlee && !state.combat.trojanerOffer && !state.combat.trojanerDone && (state.doorCombatCards || []).includes(c.name)) {
       const btn = mkBtn('⚔️ Im Kampf spielen', () => socket.emit('playCombatCard', { cardId: id }));
       wrap.appendChild(btn);
     }
     // Kampfreaktionskarten (Kumpel, Wanderndes Monster, Illusion, Hilf mir,
     // Ueberfalltrank) - welche das sind, sagt der Server (state.combatReactionCards).
-    if (state.combat && !state.combat.mustFlee && !state.pendingCardAction && (state.combatReactionCards || []).includes(c.name)) {
+    if (state.combat && !state.combat.mustFlee && !state.combat.trojanerOffer && !state.combat.trojanerDone && !state.pendingCardAction && (state.combatReactionCards || []).includes(c.name)) {
       // Zwei Bedingungen, die der Server kennt und der Client nur abfragt:
       // HILF MIR darf nur spielen, wer selbst im Kampf steht
       // (combatReactionOnlyInFight), und WANDERNDES MONSTER/ILLUSION brauchen

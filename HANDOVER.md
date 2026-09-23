@@ -1399,8 +1399,9 @@ nachschlagen statt diesem Text zu vertrauen.
 mit einer anderen Lesart als der Kartentext hergibt: die Schatzsperre endete
 dort, sobald die Anzahl besessener Schatzkarten unter den Stand beim
 Verfluchen fiel (`zuckerschockAktiv`/`besesseneSchaetze`, beim Lesen
-geprueft), und die um Hilfe gebetene Person konnte eine Anfrage der
-verfluchten Person nicht ablehnen. Nutzerentscheidung 2026-09-23: "bis du
+geprueft), und die verfluchte Person konnte selbst eine Anfrage nicht
+ablehnen, wenn sie (von wem auch immer) um Hilfe gebeten wurde.
+Nutzerentscheidung 2026-09-23: "bis du
 einen verlierst" bezieht sich auf einen **Kampf**, nicht auf eine
 Schatzkarte, und "Keiner muss deine Hilfe annehmen" gilt wörtlich (Trust-Prinzip,
 keine erzwungene Annahme). Geaendert:

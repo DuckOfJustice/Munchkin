@@ -4153,6 +4153,10 @@ function handleEnchantMonster(room, playerId) {
 function handleUseClassCombatDiscard(room, playerId, cardId) {
   if (!room.combat) return;
   const c = room.combat;
+  // TROJANISCHER PFERD: der Kampf ist bereits entschieden, solange das
+  // Reaktionsfenster offen ist oder gerade aufgeloest wird - keine weiteren
+  // Eingriffe in einen Kampf, der schon vorbei ist.
+  if (c.trojanerOffer || c.trojanerDone) return;
   const player = findPlayer(room, playerId);
   if (!player || !player.hand.includes(cardId)) return;
   // Nur wer wirklich im Kampf steht - Zuschauer:innen dürfen nicht abwerfen.
@@ -5052,7 +5056,6 @@ function applyCombatPotionAction(room, player, action, sourceCard) {
       const monsterName = card(action.cardId).name;
       const aktorId = c.actorId;
       c.trojanerNoTreasure = true;
-      c.trojanerMonsterId = action.cardId;
       finishCombatWin(room);
       if (!room.winner) startCombat(room, aktorId, [action.cardId], { fromHand: true });
       return `kein Schatz - neuer Kampf gegen "${monsterName}"`;
@@ -5091,6 +5094,10 @@ function handleSetCombatModifier(room, playerId, who, value) {
   if (!room.combat) return;
   const c = room.combat;
   if (c.mustFlee) return;
+  // TROJANISCHER PFERD: siehe handlePlayCombatCard - der Kampf ist bereits
+  // entschieden, solange das Reaktionsfenster offen ist oder gerade
+  // aufgeloest wird.
+  if (c.trojanerOffer || c.trojanerDone) return;
   const player = findPlayer(room, playerId);
   if (!player) return;
   // Jede:r am Tisch darf hier eingreifen (Karteneffekte, die das Monster
@@ -5170,6 +5177,11 @@ function announceCardPower(room, player, cardId) {
 
 function handlePlayCombatCard(room, playerId, cardId) {
   if (!room.combat || room.combat.mustFlee) return;
+  // TROJANISCHER PFERD: der Kampf ist bereits entschieden, solange das
+  // Reaktionsfenster offen ist oder gerade aufgeloest wird - sonst liesse
+  // sich z.B. ueber WANDERNDES MONSTER noch ein zusaetzliches Monster (und
+  // damit Stufen/Schaetze) in einen schon gewonnenen Kampf nachschieben.
+  if (room.combat.trojanerOffer || room.combat.trojanerDone) return;
   const player = findPlayer(room, playerId);
   if (!player || !player.hand.includes(cardId)) return;
   // EINSTWEILIGE VERFÜGUNG: wer gesperrt ist, darf in diesen Kampf nicht
@@ -5509,6 +5521,8 @@ function hilfeVerbotenGrund(room, actor, targetId) {
 function handleRequestHelp(room, playerId, targetId, reward) {
   if (!room.combat) return;
   const c = room.combat;
+  // TROJANISCHER PFERD: siehe handlePlayCombatCard.
+  if (c.trojanerOffer || c.trojanerDone) return;
   if (c.actorId !== playerId || c.helperId) return;
   const actor = findPlayer(room, playerId);
   const target = findPlayer(room, targetId);

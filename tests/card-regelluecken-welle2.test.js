@@ -218,6 +218,22 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   S.resolveCombatWin(room);
   assert.ok(p.activeCurses.some((f) => f.kind === 'zuckerschock'), 'ein gewonnener Kampf laesst den Fluch stehen');
 }
+// Verliert die Person GENAU gegen einen zweiten Gummi-Golem, ersetzt der neue
+// Fluch den alten (nicht: der neue loescht sich selbst wieder). Pin fuer die
+// Reihenfolge in beendeFluchtphase - die Loeschung muss VOR
+// oeffneVerlustKonsequenz laufen, sonst wuerde dieser Test bei vertauschter
+// Reihenfolge trotzdem gruen bleiben (der urspruengliche Fluch bliebe einfach
+// stehen), obwohl der Bug (frischer Fluch loescht sich selbst) real waere.
+{
+  const golem = findCard('GUMMI-GOLEM', 'monster');
+  const p = makePlayer();
+  const room = makeRoom([p]);
+  S.addActiveCurse(room, p, 'GUMMI-GOLEM', golem.id); // alter Fluch, z.B. aus einer frueheren Begegnung
+  const c = { actorId: 'p1', monsterIds: [golem.id], helperId: null, enhancers: [], fleeFailed: ['p1'], mustFlee: false };
+  room.combat = c;
+  S.beendeFluchtphase(room, c);
+  assert.ok(p.activeCurses.some((f) => f.kind === 'zuckerschock'), 'der neue Zuckerschock aus DIESEM verlorenen Kampf steht noch');
+}
 // Hilfe anbieten: Logzeile bei Kampfbeginn, Trust-Prinzip - die um Hilfe
 // gebetene Person unter Zuckerschock darf trotzdem ablehnen ("Keiner muss
 // deine Hilfe annehmen, aber du musst sie anbieten" beschreibt nur die

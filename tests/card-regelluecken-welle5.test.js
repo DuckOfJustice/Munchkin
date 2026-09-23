@@ -153,5 +153,26 @@ const fertig = () => raeume.forEach((r) => { if (r.cleanupTimer) clearTimeout(r.
   assert.strictEqual(actor.hand.length, vorherHand, 'kein Schatz durch das erneute Auswerten');
 }
 
+// --- Waehrend das Trojaner-Fenster offen ist (oder gerade aufgeloest wird),
+// darf niemand mehr in den Kampf eingreifen - sonst liesse sich z.B. ueber
+// WANDERNDES MONSTER noch ein zusaetzliches Monster (und damit Stufen/
+// Schaetze) in einen schon gewonnenen Kampf nachschieben, bevor die
+// Trojaner-Reaktion ueberhaupt entschieden ist.
+{
+  const goblin = findCard('LAHMER GOBLIN', 'monster');
+  const zweitesMonster = findCard('MR. BONES', 'monster');
+  const wandernd = findCard('WANDERNDES MONSTER');
+  const pferd = findCard('TROJANISCHER PFERD');
+  const actor = makePlayer({ id: 'p1', name: 'A', hand: [wandernd.id, zweitesMonster.id] });
+  const spieler = makePlayer({ id: 'p2', name: 'B', hand: [pferd.id] });
+  const room = makeRoom([actor, spieler]);
+  S.startCombat(room, 'p1', [goblin.id], { fromHand: false });
+  S.resolveCombatWin(room);
+  assert.ok(room.combat.trojanerOffer && room.combat.trojanerOffer.includes('p2'), 'das Fenster ist offen');
+  S.handlePlayCombatCard(room, 'p1', wandernd.id);
+  assert.ok(actor.hand.includes(wandernd.id), 'WANDERNDES MONSTER bleibt auf der Hand - kein Eingriff waehrend des Fensters');
+  assert.deepStrictEqual(room.combat.monsterIds, [goblin.id], 'kein zusaetzliches Monster im Kampf');
+}
+
 fertig();
 console.log('card-regelluecken-welle5: alle Checks gruen');
