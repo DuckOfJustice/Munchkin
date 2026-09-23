@@ -81,6 +81,11 @@ module.exports = () => {
     // Ende, nur der WUNSCHRING beendet ihn.
     'TODESANGST': { kind: 'fearUndead', dauer: 'dauerhaft',
       hinweis: 'Angst vor Untoten: du hilfst nicht gegen sie, und gegen Untote hilft dir niemand.' },
+    // "Du darfst nicht 'Auf Aerger aus sein'. Dieser Fluch bleibt bestehen,
+    // bis du einem anderen Spieler geholfen hast, einen Kampf zu gewinnen."
+    // Ende: finishCombatWin (Helfer:in eines gewonnenen Kampfes).
+    'TOURISTENFALLE': { kind: 'keinAerger', dauer: 'dauerhaft',
+      hinweis: 'Kein "Auf Ärger aus sein", bis du jemandem geholfen hast, einen Kampf zu gewinnen.' },
   };
 
   // Karten, die einen LAUFENDEN Kampf veraendern. Sie reiten auf der

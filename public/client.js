@@ -1585,7 +1585,10 @@
       const skip = document.createElement('button'); skip.className = 'primary phase-btn'; skip.textContent = 'Kein Monster spielen -> weiter';
       skip.onclick = () => socket.emit('skipToLoot');
       box.appendChild(skip);
-      box.appendChild(textNode('Du kannst stattdessen unten bei einer Monster-Karte in deiner Hand "Als Monster spielen" wählen.'));
+      const keinAergerFluch = ((me() || {}).activeCurses || []).some((f) => f.kind === 'keinAerger');
+      box.appendChild(textNode(keinAergerFluch
+        ? 'Touristenfalle: du darfst kein Monster aus der Hand spielen.'
+        : 'Du kannst stattdessen unten bei einer Monster-Karte in deiner Hand "Als Monster spielen" wählen.'));
     } else if (state.turnPhase === 'pluendern') {
       const btn = document.createElement('button'); btn.className = 'primary phase-btn'; btn.textContent = '📦 Raum plündern (verdeckt ziehen)';
       btn.onclick = () => socket.emit('lootRoom');
@@ -1826,7 +1829,8 @@
       };
       wrap.appendChild(select);
     }
-    if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger') {
+    if (c.category === 'monster' && myTurn && state.turnPhase === 'aerger'
+      && !((me() || {}).activeCurses || []).some((f) => f.kind === 'keinAerger')) {
       const btn = mkBtn('Als Monster spielen', () => socket.emit('playMonsterFromHand', { cardId: id }));
       wrap.appendChild(btn);
     }

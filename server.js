@@ -3057,6 +3057,11 @@ function handlePlayMonsterFromHand(room, playerId, cardId) {
   if (!player.hand.includes(cardId)) return;
   const c = card(cardId);
   if (!c || c.category !== 'monster') return;
+  // TOURISTENFALLE: "Du darfst nicht 'Auf Aerger aus sein'."
+  if ((player.activeCurses || []).some((f) => f.kind === 'keinAerger')) {
+    log(room, `${player.name} sitzt in der Touristenfalle und darf nicht auf Ärger aus sein.`);
+    return;
+  }
   // Auch ein aus der Hand gespieltes Monster greift nicht an, wenn sein Text
   // das ausschließt - die Karte ist dann trotzdem verbraucht.
   if (monsterRefusesTarget(cardId, player)) {
@@ -5537,6 +5542,11 @@ function finishCombatWin(room) {
   // der befreiende Sieg leer ausgeht.
   if (!c.helperId && clearActiveCurseByKind(actor, 'noTreasure')) {
     log(room, `${actor.name} hat ein Monster ohne Hilfe getötet und ist von der Störerliste runter.`);
+  }
+  // TOURISTENFALLE endet, "bis du einem anderen Spieler geholfen hast, einen
+  // Kampf zu gewinnen" - nur die Helfer:in, nicht die kaempfende Person.
+  if (helper && clearActiveCurseByKind(helper, 'keinAerger')) {
+    log(room, `${helper.name} hat geholfen, einen Kampf zu gewinnen - die Touristenfalle ist vorbei.`);
   }
   // NARRENGOLD ("kein Schatz im naechsten Kampf") traegt dauer:'naechsterKampf'
   // und faellt damit gleich unten bei clearNextCombatCurses weg - DIESER Kampf
